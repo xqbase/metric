@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_3_1.xsd" version="3.1">
+	<display-name>XQBase Metric Dashboard</display-name>
+
+	<servlet>
+		<servlet-name>DashboardApi</servlet-name>
+		<servlet-class>com.xqbase.metric.dashboard.DashboardApi</servlet-class>
+		<init-param>
+			<param-name>auth</param-name>
+			<param-value>guest:guest</param-value>
+		</init-param>
+	</servlet>
+	<servlet-mapping>
+		<servlet-name>DashboardApi</servlet-name>
+		<url-pattern>/api/*</url-pattern>
+	</servlet-mapping>
+
+	<servlet>
+		<servlet-name>FastCGIServlet</servlet-name>
+		<servlet-class>com.xqbase.util.servlet.FastCGIServlet</servlet-class>
+		<init-param>
+			<param-name>command</param-name>
+			<param-value>D:\PHP\PHP-CGI.EXE -b</param-value>
+		</init-param>
+		<init-param>
+			<param-name>addresses</param-name>
+			<param-value>localhost:9000,localhost:9001,localhost:9002</param-value>
+		</init-param>
+	</servlet>
+	<servlet-mapping>
+		<servlet-name>FastCGIServlet</servlet-name>
+		<url-pattern>*.php</url-pattern>
+	</servlet-mapping>
+</web-app>

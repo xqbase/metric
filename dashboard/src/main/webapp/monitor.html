@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    	<script src="js/jquery.min.js" language="javascript"></script>
+		<script src="js/highcharts.js" language="javascript"></script>
+	</head>
+	<body>
+		<div>
+			Data:
+			<select id="selName" onchange="refresh()">
+				<option value="cpu">CPU Load (%)</option>
+				<option value="threads">Threads</option>
+				<option selected value="memory.mb">Memory (MB)</option>
+				<option value="memory.percent">Memory (%)</option>
+			</select>
+			Interval:
+			<select id="selInterval" onchange="refresh()">
+				<option selected value="1">1 Minute</option>
+				<option value="2">2 Minutes</option>
+				<option value="5">5 Minutes</option>
+				<option value="10">10 Minutes</option>
+				<option value="20">20 Minutes</option>
+				<option value="30">30 Minutes</option>
+			</select>
+		</div>
+		<div id="container" style="width:100%;height:400px"></div>
+		<script language="javascript"><!--
+
+var MINUTE = 60000;
+
+Highcharts.setOptions({
+	global: {
+		useUTC: false
+	}
+})
+
+function drawChart(data, title, now, interval) {
+	var options = {
+		title: {
+			text: title
+		},
+		legend: {
+			align: 'right',
+			verticalAlign: 'top',
+			layout: 'vertical'
+		},
+		xAxis: {
+			type:'datetime'
+		},
+		tooltip: {
+			formatter: function() {
+				return Highcharts.dateFormat("%Y-%m-%d %H:%M:%S", this.x) + "<br/><b>" +
+						Highcharts.numberFormat(this.y, 2) + "</b>";
+			}
+		},
+		series: []
+	};
+
+	var keys = [], valueMap = {}; 
+	for (var key in data) {
+		var line = data[key];
+		var lineLen = line.length;
+		var value = 0;
+		for (var i = 0; i < lineLen; i ++) {
+			value += line[i];
+		}
+		keys.push(key);
+		valueMap[key] = value;
+	}
+	keys.sort(function(key1, key2) {
+		return valueMap[key2] - valueMap[key1];
+	});
+	var linesLen = Math.min(keys.length, 10), sorted = {};
+	for (var i = 0; i < linesLen; i ++) {
+		var key = keys[i];
+		sorted[" " + key] = data[key];
+	}
+	var start = now - 60 * interval;
+	for (var key in sorted) {
+		options.series.push({
+			name: key,
+			pointStart: start * MINUTE,
+			pointInterval: interval * MINUTE,
+			data: sorted[key]
+		});
+	}
+	$('#container').highcharts(options);
+}
+
+function requestApi() {
+	var name = selName.value;
+	var title = selName.options[selName.selectedIndex].innerHTML;
+	var interval = parseInt(selInterval.value);
+	var now = Math.floor(new Date().getTime() / MINUTE);
+	var xhr = new XMLHttpRequest();
+	xhr.onload = function() {
+		drawChart(eval("(" + xhr.responseText + ")"), title, now, interval);
+	};
+	xhr.open("GET", "api/xqbase.server." + name + "/max?_r=" +
+			Math.random() + "&_end=" + now + "&_interval=" + interval +
+			"&_length=60&_group_by=type", true);
+	xhr.send(null);
+}
+
+var timer = null;
+
+function refresh() {
+	if (timer != null) {
+		clearInterval(timer);
+	}
+	timer = setInterval(requestApi, MINUTE);
+	requestApi();
+}
+
+refresh();
+
+		--></script>
+	</body>
+</html>
