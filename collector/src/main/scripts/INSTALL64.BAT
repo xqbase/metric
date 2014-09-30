@@ -1,0 +1,2 @@
+collector64 //IS --DisplayName="Metric Collector" --Startup=auto --LogPath="%CD%\logs" --Jvm="C:\Program Files\Java\jre7\bin\client\jvm.dll" --StartMode=jvm --StopMode=jvm --StartClass=com.xqbase.metric.collector.Collector --StopClass=com.xqbase.metric.collector.Collector --StopParams=stop --Classpath="%CD%\lib\metric-collector.jar"
+collector64 //RS
