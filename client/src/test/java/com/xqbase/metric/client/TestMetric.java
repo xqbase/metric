@@ -3,7 +3,7 @@ package com.xqbase.metric.client;
 import java.net.InetSocketAddress;
 import java.util.Random;
 
-import com.xqbase.metric.aggregator.Metric;
+import com.xqbase.metric.common.Metric;
 
 public class TestMetric {
 	public static void main(String[] args) {

@@ -48,7 +48,7 @@
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
-			<artifactId>xqbase-metric-aggregator</artifactId>
+			<artifactId>xqbase-metric-common</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>

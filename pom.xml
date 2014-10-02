@@ -8,8 +8,9 @@
 	<name>XQBase Metric</name>
 
 	<modules>
-		<module>aggregator</module>
+		<module>client</module>
 		<module>collector</module>
+		<module>common</module>
 		<module>dashboard</module>
 	</modules>
 </project>

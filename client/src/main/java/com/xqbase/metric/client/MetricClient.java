@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.DeflaterOutputStream;
 
-import com.xqbase.metric.aggregator.Metric;
-import com.xqbase.metric.aggregator.MetricEntry;
+import com.xqbase.metric.common.Metric;
+import com.xqbase.metric.common.MetricEntry;
 
 public class MetricClient {
 	private static final int MINUTE = 60000;

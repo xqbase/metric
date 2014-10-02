@@ -16,7 +16,7 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import com.xqbase.metric.aggregator.Metric;
+import com.xqbase.metric.common.Metric;
 
 public class MetricFilter implements Filter {
 	private String requestTime;

@@ -6,7 +6,7 @@ import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 
 import com.sun.management.OperatingSystemMXBean;
-import com.xqbase.metric.aggregator.Metric;
+import com.xqbase.metric.common.Metric;
 
 public class ManagementMonitor implements Runnable {
 	private static double inMB(long value) {

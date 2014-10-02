@@ -1,4 +1,4 @@
-package com.xqbase.metric.aggregator;
+package com.xqbase.metric.common;
 
 public class MetricValue implements Cloneable {
 	private int count;

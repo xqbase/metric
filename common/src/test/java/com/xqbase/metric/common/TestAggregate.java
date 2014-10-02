@@ -1,12 +1,12 @@
-package com.xqbase.metric.aggregator;
+package com.xqbase.metric.common;
 
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.xqbase.metric.aggregator.Metric;
-import com.xqbase.metric.aggregator.MetricEntry;
+import com.xqbase.metric.common.Metric;
+import com.xqbase.metric.common.MetricEntry;
 
 public class TestAggregate {
 	private static final int THREADS = 16;
