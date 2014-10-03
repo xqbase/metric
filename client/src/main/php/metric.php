@@ -37,6 +37,6 @@ function metric_send() {
 		$fp = fsockopen("udp://" . $server[0], $server[1]);
 		fwrite($fp, $packet);
 		fclose($fp);
-	} 
+	}
 }
 ?>

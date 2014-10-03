@@ -48,7 +48,7 @@ public class MetricFilter implements Filter {
 		String prefix = conf.getInitParameter("prefix");
 		requestTime = prefix + ".webapp.request_time";
 		connections_ = prefix + ".webapp.connections";
-		
+
 		timer = new ScheduledThreadPoolExecutor(1);
 		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server"),
 				0, 5, TimeUnit.SECONDS);

@@ -254,7 +254,7 @@ public class Collector {
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
 		} finally {
-			// Do not do Mongo operations in main thread (may be interrupted) 
+			// Do not do Mongo operations in main thread (may be interrupted)
 			if (schedule != null) {
 				Executors.execute(schedule);
 			}
