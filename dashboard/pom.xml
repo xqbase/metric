@@ -3,9 +3,33 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-dashboard</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.1.0</version>
 	<packaging>war</packaging>
 	<name>XQBase Metric Dashboard</name>
+	<description>a lightweight metric framework for aggregating, collecting and showing metric data - dashboard part</description>
+	<url>https://github.com/xqbase/metric</url>
+
+	<licenses>
+		<license>
+			<name>The Apache License, Version 2.0</name>
+			<url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+		</license>
+	</licenses>
+
+	<developers>
+		<developer>
+			<name>xqbase.com Development Team</name>
+			<email>webmaster@xqbase.com</email>
+			<organization>xqbase.com</organization>
+			<organizationUrl>http://www.xqbase.com</organizationUrl>
+		</developer>
+	</developers>
+
+	<scm>
+		<connection>scm:git:git@github.com:xqbase/metric.git</connection>
+		<developerConnection>scm:git:git@github.com:xqbase/metric.git</developerConnection>
+		<url>https://github.com/xqbase/metric.git</url>
+	</scm>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -17,7 +41,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>0.1.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.mongodb</groupId>
