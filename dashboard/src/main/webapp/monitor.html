@@ -94,6 +94,7 @@ function requestApi() {
 	var interval = parseInt(selInterval.value);
 	var now = Math.floor(new Date().getTime() / MINUTE);
 	var xhr = new XMLHttpRequest();
+	xhr.withCredentials = true;
 	xhr.onload = function() {
 		drawChart(eval("(" + xhr.responseText + ")"), title, now, interval);
 	};
