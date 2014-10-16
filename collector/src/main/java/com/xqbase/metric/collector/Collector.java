@@ -11,6 +11,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
@@ -24,9 +28,9 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
-import com.xqbase.util.Executors;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+import com.xqbase.util.Runnables;
 import com.xqbase.util.ShutdownHook;
 import com.xqbase.util.Time;
 
@@ -82,6 +86,8 @@ public class Collector {
 			return;
 		}
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+		ExecutorService executor = Executors.newCachedThreadPool();
+		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
 		Log.i("Metric Collector Started");
 
 		Properties p = Conf.load("Collector");
@@ -134,10 +140,11 @@ public class Collector {
 					}
 				}
 			};
-			Executors.schedule(schedule, Time.MINUTE - start % Time.MINUTE, Time.MINUTE);
+			timer.scheduleAtFixedRate(Runnables.wrap(schedule),
+					Time.MINUTE - start % Time.MINUTE, Time.MINUTE, TimeUnit.MILLISECONDS);
 			// Schedule removal of stale metrics by master collector
 			if (serverId == 0) {
-				Executors.schedule(new Runnable() {
+				timer.scheduleAtFixedRate(Runnables.wrap(new Runnable() {
 					@Override
 					public void run() {
 						Integer notBefore = Integer.valueOf(now.get() - expire);
@@ -151,7 +158,8 @@ public class Collector {
 							collection.remove(_("_minute", _("$gt", notAfter)));
 						}
 					}
-				}, Time.HOUR - start % Time.HOUR + Time.MINUTE / 2, Time.HOUR);
+				}), Time.HOUR - start % Time.HOUR + Time.MINUTE / 2,
+						Time.HOUR, TimeUnit.MILLISECONDS);
 			}
 
 			hook.register(socket);
@@ -241,12 +249,12 @@ public class Collector {
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {
-					Executors.execute(new Runnable() {
+					executor.execute(Runnables.wrap(new Runnable() {
 						@Override
 						public void run() {
 							insert(db, rowsMap);
 						}
-					});
+					}));
 				}
 			}
 		} catch (IOException e) {
@@ -256,9 +264,10 @@ public class Collector {
 		} finally {
 			// Do not do Mongo operations in main thread (may be interrupted)
 			if (schedule != null) {
-				Executors.execute(schedule);
+				executor.execute(Runnables.wrap(schedule));
 			}
-			Executors.shutdown();
+			Runnables.shutdown(executor);
+			Runnables.shutdown(timer);
 			if (mongo != null) {
 				mongo.close();
 			}
