@@ -95,7 +95,7 @@ public class Collector {
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		final int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		final int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
-		boolean enableRemoteAddr = Conf.getBoolean(p, "remote_addr", true);
+		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
 		long start = System.currentTimeMillis();
 		final AtomicInteger now = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("Mongo");

@@ -6,10 +6,6 @@
 	<servlet>
 		<servlet-name>DashboardApi</servlet-name>
 		<servlet-class>com.xqbase.metric.dashboard.DashboardApi</servlet-class>
-		<init-param>
-			<param-name>auth</param-name>
-			<param-value>guest:guest</param-value>
-		</init-param>
 	</servlet>
 	<servlet-mapping>
 		<servlet-name>DashboardApi</servlet-name>
