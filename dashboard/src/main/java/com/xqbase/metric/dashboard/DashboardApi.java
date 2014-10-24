@@ -211,6 +211,7 @@ public class DashboardApi extends HttpServlet {
 			if (origin != null) {
 				resp.setHeader("Access-Control-Allow-Origin", origin);
 			}
+			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
 			out.print(new JSONObject(data));
 		} else {
