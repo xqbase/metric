@@ -44,7 +44,7 @@ public class MetricClient {
 		socket.send(packet);
 	}
 
-	static void send(InetSocketAddress[] addrs, int minute) {
+	private static void send(InetSocketAddress[] addrs, int minute) {
 		ArrayList<MetricEntry> metrics = Metric.removeAll();
 		if (metrics.isEmpty()) {
 			return;
@@ -87,20 +87,17 @@ public class MetricClient {
 	private static ScheduledThreadPoolExecutor timer = null;
 	private static Runnable command;
 
-	public static synchronized void startup(final InetSocketAddress... addrs) {
+	public static synchronized void startup(InetSocketAddress... addrs) {
 		if (timer != null) {
 			return;
 		}
 		long start = System.currentTimeMillis();
-		final AtomicInteger now = new AtomicInteger((int) (start / MINUTE));
-		command = new Runnable() {
-			@Override
-			public void run() {
-				try {
-					send(addrs, now.getAndIncrement());
-				} catch (Error | RuntimeException e) {
-					e.printStackTrace();
-				}
+		AtomicInteger now = new AtomicInteger((int) (start / MINUTE));
+		command = () -> {
+			try {
+				send(addrs, now.getAndIncrement());
+			} catch (Error | RuntimeException e) {
+				e.printStackTrace();
 			}
 		};
 		timer = new ScheduledThreadPoolExecutor(1);

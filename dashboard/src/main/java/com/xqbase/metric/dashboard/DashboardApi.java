@@ -52,28 +52,28 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
-	private static BasicDBObject _(String key, Object value) {
+	private static BasicDBObject __(String key, Object value) {
 		return new BasicDBObject(key, value);
 	}
 
-	private static BasicDBObject _(String key, Object value, String key2, Object value2) {
-		BasicDBObject obj = _(key, value);
+	private static BasicDBObject __(String key, Object value, String key2, Object value2) {
+		BasicDBObject obj = __(key, value);
 		obj.put(key2, value2);
 		return obj;
 	}
 
-	private static BasicDBObject _(String operator, Object value1, Object value2) {
-		return _(operator, Arrays.asList(value1, value2));
+	private static BasicDBObject __(String operator, Object value1, Object value2) {
+		return __(operator, Arrays.asList(value1, value2));
 	}
 
 	private static HashMap<String, BasicDBObject> groupMap = new HashMap<>();
 
 	static {
-		groupMap.put("count", _("$sum", "$_count"));
-		groupMap.put("sum", _("$sum", "$_sum"));
-		groupMap.put("max", _("$max", "$_max"));
-		groupMap.put("min", _("$min", "$_min"));
-		groupMap.put("avg", _("$sum", "$_sum"));
+		groupMap.put("count", __("$sum", "$_count"));
+		groupMap.put("sum", __("$sum", "$_sum"));
+		groupMap.put("max", __("$max", "$_max"));
+		groupMap.put("min", __("$min", "$_min"));
+		groupMap.put("avg", __("$sum", "$_sum"));
 	}
 
 	private static void badRequest(HttpServletResponse resp) {
@@ -121,14 +121,14 @@ public class DashboardApi extends HttpServlet {
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length;
 		// Aggregation Pipeline: Match
-		query.put("_minute", _("$gte", Integer.valueOf(begin),
+		query.put("_minute", __("$gte", Integer.valueOf(begin),
 				"$lt", Integer.valueOf(end)));
 		// Aggregation Pipeline: Group
-		BasicDBObject groupId = _("_index", _("$divide",
-			_("$subtract",
-				_("$subtract", "$_minute", Integer.valueOf(begin)),
-				_("$mod",
-					_("$subtract", "$_minute", Integer.valueOf(begin)),
+		BasicDBObject groupId = __("_index", __("$divide",
+			__("$subtract",
+				__("$subtract", "$_minute", Integer.valueOf(begin)),
+				__("$mod",
+					__("$subtract", "$_minute", Integer.valueOf(begin)),
 					Integer.valueOf(interval)
 				)
 			),
@@ -138,7 +138,7 @@ public class DashboardApi extends HttpServlet {
 		if (groupBy != null) {
 			groupId.put("_group", "$" + groupBy);
 		}
-		BasicDBObject group = _("_id", groupId, "_value", groupValue);
+		BasicDBObject group = __("_id", groupId, "_value", groupValue);
 		boolean avg = false;
 		if (method.equals("avg")) {
 			avg = true;
@@ -146,7 +146,7 @@ public class DashboardApi extends HttpServlet {
 		}
 		// Aggregation by MongoDB
 		List<DBObject> stages = Arrays.<DBObject>
-				asList(_("$match", query), _("$group", group));
+				asList(__("$match", query), __("$group", group));
 		Iterable<DBObject> results_;
 		try {
 			results_ = collection.aggregate(stages).results();

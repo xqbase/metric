@@ -52,12 +52,8 @@ public class MetricFilter implements Filter {
 		timer = new ScheduledThreadPoolExecutor(1);
 		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server"),
 				0, 5, TimeUnit.SECONDS);
-		timer.scheduleAtFixedRate(new Runnable() {
-			@Override
-			public void run() {
-				Metric.put(connections_, connections.get());
-			}
-		}, 1, 1, TimeUnit.SECONDS);
+		timer.scheduleAtFixedRate(() -> Metric.put(connections_, connections.get()),
+				1, 1, TimeUnit.SECONDS);
 	}
 
 	@Override

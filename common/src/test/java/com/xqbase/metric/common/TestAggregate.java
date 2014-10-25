@@ -14,17 +14,14 @@ public class TestAggregate {
 	public static void main(String[] args) {
 		ExecutorService executor = Executors.newCachedThreadPool();
 		long t = System.currentTimeMillis();
-		final AtomicInteger latch = new AtomicInteger(THREADS);
-		final Random random = new Random();
+		AtomicInteger latch = new AtomicInteger(THREADS);
+		Random random = new Random();
 		for (int i = 0; i < THREADS; i ++) {
-			executor.execute(new Runnable() {
-				@Override
-				public void run() {
-					for (int j = 0; j < 1048576; j ++) {
-						Metric.put("" + random.nextInt(1024), 1);
-					}
-					latch.decrementAndGet();
+			executor.execute(() -> {
+				for (int j = 0; j < 1048576; j ++) {
+					Metric.put("" + random.nextInt(1024), 1);
 				}
+				latch.decrementAndGet();
 			});
 		}
 		int count = 0;

@@ -45,7 +45,7 @@ public class Collector {
 		}
 	}
 
-	static BasicDBObject _(Map<String, String> tagMap,
+	private static BasicDBObject __(Map<String, String> tagMap,
 			int now, int count, double sum, double max, double min) {
 		BasicDBObject row = new BasicDBObject(tagMap);
 		row.put("_minute", Integer.valueOf(now));
@@ -56,11 +56,11 @@ public class Collector {
 		return row;
 	}
 
-	static BasicDBObject _(String key, Object value) {
+	private static BasicDBObject __(String key, Object value) {
 		return new BasicDBObject(key, value);
 	}
 
-	static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
+	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
 			String name, DBObject row) {
 		ArrayList<DBObject> rows = rowsMap.get(name);
 		if (rows == null) {
@@ -70,14 +70,14 @@ public class Collector {
 		rows.add(row);
 	}
 
-	static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
+	private static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
 		for (Map.Entry<String, ArrayList<DBObject>> entry :
 				rowsMap.entrySet()) {
 			db.getCollection(entry.getKey()).insert(entry.getValue());
 		}
 	}
 
-	static BasicDBObject indexKey = _("_minute", Integer.valueOf(1));
+	private static BasicDBObject indexKey = __("_minute", Integer.valueOf(1));
 
 	private static ShutdownHook hook = new ShutdownHook();
 
@@ -93,11 +93,11 @@ public class Collector {
 		Properties p = Conf.load("Collector");
 		String host = p.getProperty("host");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
-		final int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
-		final int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
+		int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
+		int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
 		long start = System.currentTimeMillis();
-		final AtomicInteger now = new AtomicInteger((int) (start / Time.MINUTE));
+		AtomicInteger now = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("Mongo");
 		MongoClient mongo = null;
 		Runnable schedule = null;
@@ -105,38 +105,35 @@ public class Collector {
 				InetSocketAddress(host == null ? "0.0.0.0" : host, port))) {
 			mongo = new MongoClient(p.getProperty("host"),
 					Numbers.parseInt(p.getProperty("port"), 27017));
-			final DB db = mongo.getDB(p.getProperty("db"));
+			DB db = mongo.getDB(p.getProperty("db"));
 			// Schedule Statistics and Index
-			schedule = new Runnable() {
-				@Override
-				public void run() {
-					int now_ = now.getAndIncrement();
-					// Insert aggregation-during-collection metrics
-					final HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
-					for (MetricEntry entry : Metric.removeAll()) {
-						BasicDBObject row = _(entry.getTagMap(), now_, entry.getCount(),
-								entry.getSum(), entry.getMax(), entry.getMin());
-						put(rowsMap, entry.getName(), row);
-					}
-					if (!rowsMap.isEmpty()) {
-						insert(db, rowsMap);
-					}
-					// Ensure index and calculate metric size by master collector
-					if (serverId == 0) {
-						ArrayList<DBObject> rows = new ArrayList<>();
-						for (String name : db.getCollectionNames()) {
-							if (name.startsWith("system.")) {
-								continue;
-							}
-							DBCollection collection = db.getCollection(name);
-							collection.createIndex(indexKey);
-							int count = (int) collection.count();
-							rows.add(_(Collections.singletonMap("name", name),
-									now_, 1, count, count, count));
+			schedule = () -> {
+				int now_ = now.getAndIncrement();
+				// Insert aggregation-during-collection metrics
+				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+				for (MetricEntry entry : Metric.removeAll()) {
+					BasicDBObject row = __(entry.getTagMap(), now_, entry.getCount(),
+							entry.getSum(), entry.getMax(), entry.getMin());
+					put(rowsMap, entry.getName(), row);
+				}
+				if (!rowsMap.isEmpty()) {
+					insert(db, rowsMap);
+				}
+				// Ensure index and calculate metric size by master collector
+				if (serverId == 0) {
+					ArrayList<DBObject> rows = new ArrayList<>();
+					for (String name : db.getCollectionNames()) {
+						if (name.startsWith("system.")) {
+							continue;
 						}
-						if (!rows.isEmpty()) {
-							db.getCollection("metric.size").insert(rows);
-						}
+						DBCollection collection = db.getCollection(name);
+						collection.createIndex(indexKey);
+						int count = (int) collection.count();
+						rows.add(__(Collections.singletonMap("name", name),
+								now_, 1, count, count, count));
+					}
+					if (!rows.isEmpty()) {
+						db.getCollection("metric.size").insert(rows);
 					}
 				}
 			};
@@ -144,19 +141,16 @@ public class Collector {
 					Time.MINUTE - start % Time.MINUTE, Time.MINUTE, TimeUnit.MILLISECONDS);
 			// Schedule removal of stale metrics by master collector
 			if (serverId == 0) {
-				timer.scheduleAtFixedRate(Runnables.wrap(new Runnable() {
-					@Override
-					public void run() {
-						Integer notBefore = Integer.valueOf(now.get() - expire);
-						Integer notAfter = Integer.valueOf(now.get() + expire);
-						for (String name : db.getCollectionNames()) {
-							if (name.startsWith("system.")) {
-								continue;
-							}
-							DBCollection collection = db.getCollection(name);
-							collection.remove(_("_minute", _("$lt", notBefore)));
-							collection.remove(_("_minute", _("$gt", notAfter)));
+				timer.scheduleAtFixedRate(Runnables.wrap(() -> {
+					Integer notBefore = Integer.valueOf(now.get() - expire);
+					Integer notAfter = Integer.valueOf(now.get() + expire);
+					for (String name : db.getCollectionNames()) {
+						if (name.startsWith("system.")) {
+							continue;
 						}
+						DBCollection collection = db.getCollection(name);
+						collection.remove(__("_minute", __("$lt", notBefore)));
+						collection.remove(__("_minute", __("$gt", notAfter)));
 					}
 				}), Time.HOUR - start % Time.HOUR + Time.MINUTE / 2,
 						Time.HOUR, TimeUnit.MILLISECONDS);
@@ -166,7 +160,7 @@ public class Collector {
 			while (!Thread.interrupted()) {
 				// Receive
 				byte[] buf = new byte[65536];
-				final DatagramPacket packet = new DatagramPacket(buf, buf.length);
+				DatagramPacket packet = new DatagramPacket(buf, buf.length);
 				// Blocked, or closed by shutdown handler
 				socket.receive(packet);
 				int len = packet.getLength();
@@ -195,7 +189,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				final HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
 					int length = line.length();
@@ -242,19 +236,14 @@ public class Collector {
 						Metric.put(name, Numbers.parseDouble(paths[1]), tagMap);
 					} else {
 						// For aggregation-before-collection metric, insert immediately
-						put(rowsMap, name, _(tagMap, Numbers.parseInt(paths[1], now.get()),
+						put(rowsMap, name, __(tagMap, Numbers.parseInt(paths[1], now.get()),
 								Numbers.parseInt(paths[2]), Numbers.parseDouble(paths[3]),
 								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5])));
 					}
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {
-					executor.execute(Runnables.wrap(new Runnable() {
-						@Override
-						public void run() {
-							insert(db, rowsMap);
-						}
-					}));
+					executor.execute(Runnables.wrap(() -> insert(db, rowsMap)));
 				}
 			}
 		} catch (IOException e) {
