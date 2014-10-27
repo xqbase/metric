@@ -74,6 +74,7 @@ public class DashboardApi extends HttpServlet {
 		groupMap.put("max", __("$max", "$_max"));
 		groupMap.put("min", __("$min", "$_min"));
 		groupMap.put("avg", __("$sum", "$_sum"));
+		groupMap.put("std", __("$sum", "$_sqr"));
 	}
 
 	private static void badRequest(HttpServletResponse resp) {
@@ -139,10 +140,14 @@ public class DashboardApi extends HttpServlet {
 			groupId.put("_group", "$" + groupBy);
 		}
 		BasicDBObject group = __("_id", groupId, "_value", groupValue);
-		boolean avg = false;
+		boolean avg = false, std = false;
 		if (method.equals("avg")) {
 			avg = true;
 			group.put("_count", groupMap.get("count"));
+		} else if (method.equals("std")) {
+			avg = std = true;
+			group.put("_count", groupMap.get("count"));
+			group.put("_sum", groupMap.get("sum"));
 		}
 		// Aggregation by MongoDB
 		List<DBObject> stages = Arrays.<DBObject>
@@ -187,7 +192,22 @@ public class DashboardApi extends HttpServlet {
 				if (count == 0) {
 					continue;
 				}
-				value /= count;
+				if (!std) {
+					// avg=sum(x)/n
+					value /= count;
+					continue;
+				}
+				// std=sqrt(sum(x^2)/n-avg^2)
+				Object sum_ = result.get("_sum");
+				if (!(sum_ instanceof Double)) {
+					continue;
+				}
+				double sum = ((Double) sum_).doubleValue();
+				double a = value * count - sum * sum;
+				if (a < 0) {
+					continue;
+				}
+				value = Math.sqrt(a) / count;
 			}
 			double[] values = data.get(groupKey_);
 			if (values == null) {

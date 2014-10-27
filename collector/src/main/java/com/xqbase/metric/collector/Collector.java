@@ -46,13 +46,14 @@ public class Collector {
 	}
 
 	private static BasicDBObject __(Map<String, String> tagMap,
-			int now, int count, double sum, double max, double min) {
+			int now, int count, double sum, double max, double min, double sqr) {
 		BasicDBObject row = new BasicDBObject(tagMap);
 		row.put("_minute", Integer.valueOf(now));
 		row.put("_count", Integer.valueOf(count));
 		row.put("_sum", Double.valueOf(sum));
 		row.put("_max", Double.valueOf(max));
 		row.put("_min", Double.valueOf(min));
+		row.put("_sqr", Double.valueOf(sqr));
 		return row;
 	}
 
@@ -73,13 +74,19 @@ public class Collector {
 	private static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
 		for (Map.Entry<String, ArrayList<DBObject>> entry :
 				rowsMap.entrySet()) {
-			db.getCollection(entry.getKey()).insert(entry.getValue());
+			String name = entry.getKey();
+			ArrayList<DBObject> rows = entry.getValue();
+			db.getCollection(name).insert(rows);
+			if (verbose) {
+				Log.d("Inserted " + rows.size() + " rows into metric \"" + name + "\".");
+			}
 		}
 	}
 
-	private static BasicDBObject indexKey = __("_minute", Integer.valueOf(1));
+	private static final BasicDBObject INDEX_KEY = __("_minute", Integer.valueOf(1));
 
 	private static ShutdownHook hook = new ShutdownHook();
+	private static boolean verbose;
 
 	public static void main(String[] args) {
 		if (hook.isShutdown(args)) {
@@ -96,6 +103,7 @@ public class Collector {
 		int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
+		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
 		AtomicInteger now = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("Mongo");
@@ -113,7 +121,7 @@ public class Collector {
 				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
 				for (MetricEntry entry : Metric.removeAll()) {
 					BasicDBObject row = __(entry.getTagMap(), now_, entry.getCount(),
-							entry.getSum(), entry.getMax(), entry.getMin());
+							entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 					put(rowsMap, entry.getName(), row);
 				}
 				if (!rowsMap.isEmpty()) {
@@ -127,10 +135,10 @@ public class Collector {
 							continue;
 						}
 						DBCollection collection = db.getCollection(name);
-						collection.createIndex(indexKey);
+						collection.createIndex(INDEX_KEY);
 						int count = (int) collection.count();
 						rows.add(__(Collections.singletonMap("name", name),
-								now_, 1, count, count, count));
+								now_, 1, count, count, count, count * count));
 					}
 					if (!rows.isEmpty()) {
 						db.getCollection("metric.size").insert(rows);
@@ -236,9 +244,11 @@ public class Collector {
 						Metric.put(name, Numbers.parseDouble(paths[1]), tagMap);
 					} else {
 						// For aggregation-before-collection metric, insert immediately
+						int count = Numbers.parseInt(paths[2]);
+						double sum = Numbers.parseDouble(paths[3]);
 						put(rowsMap, name, __(tagMap, Numbers.parseInt(paths[1], now.get()),
-								Numbers.parseInt(paths[2]), Numbers.parseDouble(paths[3]),
-								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5])));
+								count, sum, Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
+								paths.length == 6 ? sum * sum / count : Numbers.parseDouble(paths[6])));
 					}
 				}
 				// Insert aggregation-before-collection metrics

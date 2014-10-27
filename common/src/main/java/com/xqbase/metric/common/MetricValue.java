@@ -2,27 +2,28 @@ package com.xqbase.metric.common;
 
 public class MetricValue implements Cloneable {
 	private int count;
-	private double sum, max, min;
+	private double sum, max, min, sqr;
 
-	private MetricValue(int count, double sum, double max, double min) {
+	private MetricValue(int count, double sum, double max, double min, double sqr) {
 		this.count = count;
 		this.sum = sum;
 		this.max = max;
 		this.min = min;
+		this.sqr = sqr;
 	}
 
 	public MetricValue(double value) {
-		this(1, value, value, value);
+		this(1, value, value, value, value * value);
 	}
 
 	public MetricValue(MetricValue old, double value) {
-		this(old.count + 1, old.sum + value,
-				Math.max(old.max, value), Math.min(old.min, value));
+		this(old.count + 1, old.sum + value, Math.max(old.max, value),
+				Math.min(old.min, value), old.sqr + value * value);
 	}
 
 	@Override
 	public MetricValue clone() {
-		return new MetricValue(count, sum, max, min);
+		return new MetricValue(count, sum, max, min, sqr);
 	}
 
 	public int getCount() {
@@ -39,5 +40,9 @@ public class MetricValue implements Cloneable {
 
 	public double getMin() {
 		return min;
+	}
+
+	public double getSqr() {
+		return sqr;
 	}
 }

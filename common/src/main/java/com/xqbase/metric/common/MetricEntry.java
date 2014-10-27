@@ -34,4 +34,8 @@ public class MetricEntry {
 	public double getMin() {
 		return value.getMin();
 	}
+
+	public double getSqr() {
+		return value.getSqr();
+	}
 }
