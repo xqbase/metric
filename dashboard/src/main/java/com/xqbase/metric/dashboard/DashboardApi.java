@@ -195,19 +195,19 @@ public class DashboardApi extends HttpServlet {
 				if (!std) {
 					// avg=sum(x)/n
 					value /= count;
-					continue;
+				} else {
+					// std=sqrt(sum(x^2)/n-avg^2)
+					Object sum_ = result.get("_sum");
+					if (!(sum_ instanceof Double)) {
+						continue;
+					}
+					double sum = ((Double) sum_).doubleValue();
+					double a = value * count - sum * sum;
+					if (a < 0) {
+						continue;
+					}
+					value = Math.sqrt(a) / count;
 				}
-				// std=sqrt(sum(x^2)/n-avg^2)
-				Object sum_ = result.get("_sum");
-				if (!(sum_ instanceof Double)) {
-					continue;
-				}
-				double sum = ((Double) sum_).doubleValue();
-				double a = value * count - sum * sum;
-				if (a < 0) {
-					continue;
-				}
-				value = Math.sqrt(a) / count;
 			}
 			double[] values = data.get(groupKey_);
 			if (values == null) {

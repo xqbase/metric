@@ -70,6 +70,16 @@
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
 			<version>0.2.0</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>javax.mail</artifactId>
+					<groupId>com.sun.mail</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>json</artifactId>
+					<groupId>org.json</groupId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>

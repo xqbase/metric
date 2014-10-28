@@ -42,7 +42,8 @@ public class ManagementMonitor implements Runnable {
 		MemoryUsage nonHeap = memory_.getNonHeapMemoryUsage();
 		Metric.put(memoryMB, MB(nonHeap.getCommitted()), "type", "non_heap_committed");
 		Metric.put(memoryMB, MB(nonHeap.getUsed()), "type", "non_heap_used");
-		Metric.put(memoryPercent, PERCENT(nonHeap.getUsed(), nonHeap.getMax()), "type", "non_heap");
+		// nonHeap.getMax() always returns -1 in Java 1.8
+		// Metric.put(memoryPercent, PERCENT(nonHeap.getUsed(), nonHeap.getMax()), "type", "non_heap");
 
 		java.lang.management.OperatingSystemMXBean os_ =
 				ManagementFactory.getOperatingSystemMXBean();
