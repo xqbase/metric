@@ -45,7 +45,7 @@ public class Collector {
 		}
 	}
 
-	private static BasicDBObject __(Map<String, String> tagMap,
+	private static BasicDBObject row(Map<String, String> tagMap,
 			int now, int count, double sum, double max, double min, double sqr) {
 		BasicDBObject row = new BasicDBObject(tagMap);
 		row.put("_minute", Integer.valueOf(now));
@@ -55,10 +55,6 @@ public class Collector {
 		row.put("_min", Double.valueOf(min));
 		row.put("_sqr", Double.valueOf(sqr));
 		return row;
-	}
-
-	private static BasicDBObject __(String key, Object value) {
-		return new BasicDBObject(key, value);
 	}
 
 	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
@@ -83,7 +79,7 @@ public class Collector {
 		}
 	}
 
-	private static final BasicDBObject INDEX_KEY = __("_minute", Integer.valueOf(1));
+	private static final BasicDBObject INDEX_KEY = new BasicDBObject("_minute", Integer.valueOf(1));
 
 	private static ShutdownHook hook = new ShutdownHook();
 	private static boolean verbose;
@@ -120,7 +116,7 @@ public class Collector {
 				// Insert aggregation-during-collection metrics
 				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
 				for (MetricEntry entry : Metric.removeAll()) {
-					BasicDBObject row = __(entry.getTagMap(), now_, entry.getCount(),
+					BasicDBObject row = row(entry.getTagMap(), now_, entry.getCount(),
 							entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 					put(rowsMap, entry.getName(), row);
 				}
@@ -137,7 +133,7 @@ public class Collector {
 						DBCollection collection = db.getCollection(name);
 						collection.createIndex(INDEX_KEY);
 						int count = (int) collection.count();
-						rows.add(__(Collections.singletonMap("name", name),
+						rows.add(row(Collections.singletonMap("name", name),
 								now_, 1, count, count, count, count * count));
 					}
 					if (!rows.isEmpty()) {
@@ -157,8 +153,10 @@ public class Collector {
 							continue;
 						}
 						DBCollection collection = db.getCollection(name);
-						collection.remove(__("_minute", __("$lt", notBefore)));
-						collection.remove(__("_minute", __("$gt", notAfter)));
+						collection.remove(new BasicDBObject("_minute",
+								new BasicDBObject("$lt", notBefore)));
+						collection.remove(new BasicDBObject("_minute",
+								new BasicDBObject("$gt", notAfter)));
 					}
 				}), Time.HOUR - start % Time.HOUR + Time.MINUTE / 2,
 						Time.HOUR, TimeUnit.MILLISECONDS);
@@ -246,7 +244,7 @@ public class Collector {
 						// For aggregation-before-collection metric, insert immediately
 						int count = Numbers.parseInt(paths[2]);
 						double sum = Numbers.parseDouble(paths[3]);
-						put(rowsMap, name, __(tagMap, Numbers.parseInt(paths[1], now.get()),
+						put(rowsMap, name, row(tagMap, Numbers.parseInt(paths[1], now.get()),
 								count, sum, Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
 								paths.length == 6 ? sum * sum / count : Numbers.parseDouble(paths[6])));
 					}

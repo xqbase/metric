@@ -5,8 +5,15 @@ import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Spliterators;
+import java.util.function.BiConsumer;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -24,6 +31,30 @@ import com.mongodb.MongoException;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+
+class GroupKey {
+	String tag;
+	int index;
+
+	GroupKey(String tag, int index) {
+		this.tag = tag;
+		this.index = index;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+	    if (!(obj instanceof GroupKey)) {
+	    	return false;  
+	    }
+	    GroupKey key = (GroupKey) obj;
+	    return tag.equals(key.tag) && index == key.index;
+	}
+
+	@Override
+	public int hashCode() {
+		return tag.hashCode() + index;
+	}
+}
 
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
@@ -52,29 +83,74 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
-	private static BasicDBObject __(String key, Object value) {
-		return new BasicDBObject(key, value);
+	private static HashMap<String, Collector<DBObject, ?, double[]>> groupMap = new HashMap<>();
+
+	private static int getInt(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).intValue() : 0;
 	}
 
-	private static BasicDBObject __(String key, Object value, String key2, Object value2) {
-		BasicDBObject obj = __(key, value);
-		obj.put(key2, value2);
-		return obj;
+	private static double getDouble(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).doubleValue() : 0;
 	}
 
-	private static BasicDBObject __(String operator, Object value1, Object value2) {
-		return __(operator, Arrays.asList(value1, value2));
+	private static String getString(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof String ? (String) value : "_";
 	}
 
-	private static HashMap<String, BasicDBObject> groupMap = new HashMap<>();
+	private static <R> BinaryOperator<R> combiner(BiConsumer<R, R> consumer) {
+		return (result, another) -> {
+			consumer.accept(result, another);
+			return result;
+		};
+	}
 
 	static {
-		groupMap.put("count", __("$sum", "$_count"));
-		groupMap.put("sum", __("$sum", "$_sum"));
-		groupMap.put("max", __("$max", "$_max"));
-		groupMap.put("min", __("$min", "$_min"));
-		groupMap.put("avg", __("$sum", "$_sum"));
-		groupMap.put("std", __("$sum", "$_sqr"));
+		groupMap.put("count", Collector.of(() -> new double[] {0},
+				(result, row) -> result[0] += getDouble(row, "_count"),
+				combiner((result, another) -> result[0] += another[0])));
+		groupMap.put("sum", Collector.of(() -> new double[] {0},
+				(result, row) -> result[0] += getDouble(row, "_sum"),
+				combiner((result, another) -> result[0] += another[0])));
+		groupMap.put("max", Collector.<DBObject, double[], double[]>
+				of(() -> new double[] {Double.NEGATIVE_INFINITY},
+				(result, row) -> result[0] = Math.max(result[0], getDouble(row, "_max")),
+				combiner((result, another) -> result[0] = Math.max(result[0], another[0])),
+				result -> result[0] == Double.NEGATIVE_INFINITY ? new double[] {0} : result));
+		groupMap.put("min", Collector.<DBObject, double[], double[]>
+				of(() -> new double[] {Double.POSITIVE_INFINITY},
+				(result, row) -> result[0] = Math.min(result[0], getDouble(row, "_min")),
+				combiner((result, another) -> result[0] = Math.min(result[0], another[0])),
+				result -> result[0] == Double.POSITIVE_INFINITY ? new double[] {0} : result));
+		groupMap.put("avg", Collector.<DBObject, double[], double[]>
+				of(() -> new double[] {0, 0},
+				(result, row) -> {
+					result[0] += getDouble(row, "_sum");
+					result[1] += getDouble(row, "_count");
+				}, combiner((result, another) -> {
+					result[0] += another[0];
+					result[1] += another[1];
+				}), result -> new double[] {result[1] == 0 ? 0 : result[0] / result[1]}));
+		groupMap.put("std", Collector.<DBObject, double[], double[]>
+				of(() -> new double[] {0, 0, 0},
+				(result, row) -> {
+					result[0] += getDouble(row, "_sqr");
+					result[1] += getDouble(row, "_sum");
+					result[2] += getDouble(row, "_count");
+				}, combiner((result, another) -> {
+					result[0] += another[0];
+					result[1] += another[1];
+					result[2] += another[2];
+				}), result -> {
+					double count = result[2];
+					if (count == 0) {
+						return new double[] {0};
+					}
+					double a = result[0] * count - result[1] * result[1];
+					return new double[] {a < 0 ? 0 : Math.sqrt(a) / count};
+				}));
 	}
 
 	private static void badRequest(HttpServletResponse resp) {
@@ -100,8 +176,8 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		String method = path.substring(slash + 1);
-		BasicDBObject groupValue = groupMap.get(method);
-		if (groupValue == null) {
+		Collector<DBObject, ?, double[]> downstream = groupMap.get(method);
+		if (downstream == null) {
 			badRequest(resp);
 			return;
 		}
@@ -118,43 +194,27 @@ public class DashboardApi extends HttpServlet {
 		// Other Query Parameters
 		int end = Numbers.parseInt(req.getParameter("_end"),
 				(int) (System.currentTimeMillis() / 60000));
-		int interval = Numbers.parseInt(req.getParameter("_interval"), 1);
+		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length;
-		// Aggregation Pipeline: Match
-		query.put("_minute", __("$gte", Integer.valueOf(begin),
-				"$lt", Integer.valueOf(end)));
-		// Aggregation Pipeline: Group
-		BasicDBObject groupId = __("_index", __("$divide",
-			__("$subtract",
-				__("$subtract", "$_minute", Integer.valueOf(begin)),
-				__("$mod",
-					__("$subtract", "$_minute", Integer.valueOf(begin)),
-					Integer.valueOf(interval)
-				)
-			),
-			Integer.valueOf(interval)
-		));
+		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
+		range.put("$lt", Integer.valueOf(end));
+		query.put("_minute", range);
 		String groupBy = req.getParameter("_group_by");
-		if (groupBy != null) {
-			groupId.put("_group", "$" + groupBy);
+		Function<DBObject, GroupKey> classifier;
+		if (groupBy == null) {
+			classifier = row -> new GroupKey("_",
+					(getInt(row, "_minute") - begin) / interval);
+		} else {
+			classifier = row -> new GroupKey(getString(row, groupBy),
+					(getInt(row, "_minute") - begin) / interval);
 		}
-		BasicDBObject group = __("_id", groupId, "_value", groupValue);
-		boolean avg = false, std = false;
-		if (method.equals("avg")) {
-			avg = true;
-			group.put("_count", groupMap.get("count"));
-		} else if (method.equals("std")) {
-			avg = std = true;
-			group.put("_count", groupMap.get("count"));
-			group.put("_sum", groupMap.get("sum"));
-		}
-		// Aggregation by MongoDB
-		List<DBObject> stages = Arrays.<DBObject>
-				asList(__("$match", query), __("$group", group));
-		Iterable<DBObject> results_;
+		// Query by MongoDB and Group by Java
+		Map<GroupKey, double[]> result;
 		try {
-			results_ = collection.aggregate(stages).results();
+			result = StreamSupport.stream(Spliterators.
+					spliteratorUnknownSize(collection.find(query).iterator(), 0), false).
+					collect(Collectors.groupingBy(classifier, downstream));
 		} catch (MongoException e) {
 			Log.e(e);
 			try {
@@ -162,60 +222,19 @@ public class DashboardApi extends HttpServlet {
 			} catch (IOException e_) {/**/}
 			return;
 		}
-		// Aggregation by Java
 		HashMap<String, double[]> data = new HashMap<>();
-		for (DBObject result : results_) {
-			Object id = result.get("_id");
-			if (!(id instanceof DBObject)) {
+		for (Map.Entry<GroupKey, double[]> entry : result.entrySet()) {
+			GroupKey key = entry.getKey();
+			if (key.index < 0 || key.index >= length) {
 				continue;
 			}
-			DBObject id_ = (DBObject) id;
-			Object indexKey = id_.get("_index");
-			Object groupKey = id_.get("_group");
-			Object value_ = result.get("_value");
-			if (!(indexKey instanceof Number) || !(value_ instanceof Number)) {
-				continue;
-			}
-			int index = ((Number) indexKey).intValue();
-			if (index < 0 || index >= length) {
-				continue;
-			}
-			String groupKey_ = groupKey instanceof String ?
-					(String) groupKey : "_";
-			double value = ((Number) value_).doubleValue();
-			if (avg) {
-				Object count_ = result.get("_count");
-				if (!(count_ instanceof Integer)) {
-					continue;
-				}
-				int count = ((Integer) count_).intValue();
-				if (count == 0) {
-					continue;
-				}
-				if (!std) {
-					// avg=sum(x)/n
-					value /= count;
-				} else {
-					// std=sqrt(sum(x^2)/n-avg^2)
-					Object sum_ = result.get("_sum");
-					if (!(sum_ instanceof Double)) {
-						continue;
-					}
-					double sum = ((Double) sum_).doubleValue();
-					double a = value * count - sum * sum;
-					if (a < 0) {
-						continue;
-					}
-					value = Math.sqrt(a) / count;
-				}
-			}
-			double[] values = data.get(groupKey_);
+			double[] values = data.get(key.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
-				data.put(groupKey_, values);
+				data.put(key.tag, values);
 			}
-			values[index] = value;
+			values[key.index] = entry.getValue()[0];
 		}
 		// Output JSON
 		PrintWriter out;
