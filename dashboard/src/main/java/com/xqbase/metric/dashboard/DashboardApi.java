@@ -7,13 +7,8 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Spliterators;
-import java.util.function.BiConsumer;
-import java.util.function.BinaryOperator;
 import java.util.function.Function;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
+import java.util.function.ToDoubleFunction;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -28,6 +23,7 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoException;
+import com.xqbase.metric.common.MetricValue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
@@ -83,7 +79,23 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
-	private static HashMap<String, Collector<DBObject, ?, double[]>> groupMap = new HashMap<>();
+	private static HashMap<String, ToDoubleFunction<MetricValue>>
+			methodMap = new HashMap<>();
+
+	static {
+		methodMap.put("count", MetricValue::getCount);
+		methodMap.put("sum", MetricValue::getSum);
+		methodMap.put("max", MetricValue::getMax);
+		methodMap.put("min", MetricValue::getMin);
+		methodMap.put("avg", MetricValue::getAvg);
+		methodMap.put("std", MetricValue::getStd);
+	}
+
+	private static void badRequest(HttpServletResponse resp) {
+		try {
+			resp.sendError(HttpServletResponse.SC_BAD_REQUEST);
+		} catch (IOException e) {/**/}
+	}
 
 	private static int getInt(DBObject row, String key) {
 		Object value = row.get(key);
@@ -98,65 +110,6 @@ public class DashboardApi extends HttpServlet {
 	private static String getString(DBObject row, String key) {
 		Object value = row.get(key);
 		return value instanceof String ? (String) value : "_";
-	}
-
-	private static <R> BinaryOperator<R> combiner(BiConsumer<R, R> consumer) {
-		return (result, another) -> {
-			consumer.accept(result, another);
-			return result;
-		};
-	}
-
-	static {
-		groupMap.put("count", Collector.of(() -> new double[] {0},
-				(result, row) -> result[0] += getDouble(row, "_count"),
-				combiner((result, another) -> result[0] += another[0])));
-		groupMap.put("sum", Collector.of(() -> new double[] {0},
-				(result, row) -> result[0] += getDouble(row, "_sum"),
-				combiner((result, another) -> result[0] += another[0])));
-		groupMap.put("max", Collector.<DBObject, double[], double[]>
-				of(() -> new double[] {Double.NEGATIVE_INFINITY},
-				(result, row) -> result[0] = Math.max(result[0], getDouble(row, "_max")),
-				combiner((result, another) -> result[0] = Math.max(result[0], another[0])),
-				result -> result[0] == Double.NEGATIVE_INFINITY ? new double[] {0} : result));
-		groupMap.put("min", Collector.<DBObject, double[], double[]>
-				of(() -> new double[] {Double.POSITIVE_INFINITY},
-				(result, row) -> result[0] = Math.min(result[0], getDouble(row, "_min")),
-				combiner((result, another) -> result[0] = Math.min(result[0], another[0])),
-				result -> result[0] == Double.POSITIVE_INFINITY ? new double[] {0} : result));
-		groupMap.put("avg", Collector.<DBObject, double[], double[]>
-				of(() -> new double[] {0, 0},
-				(result, row) -> {
-					result[0] += getDouble(row, "_sum");
-					result[1] += getDouble(row, "_count");
-				}, combiner((result, another) -> {
-					result[0] += another[0];
-					result[1] += another[1];
-				}), result -> new double[] {result[1] == 0 ? 0 : result[0] / result[1]}));
-		groupMap.put("std", Collector.<DBObject, double[], double[]>
-				of(() -> new double[] {0, 0, 0},
-				(result, row) -> {
-					result[0] += getDouble(row, "_sqr");
-					result[1] += getDouble(row, "_sum");
-					result[2] += getDouble(row, "_count");
-				}, combiner((result, another) -> {
-					result[0] += another[0];
-					result[1] += another[1];
-					result[2] += another[2];
-				}), result -> {
-					double count = result[2];
-					if (count == 0) {
-						return new double[] {0};
-					}
-					double a = result[0] * count - result[1] * result[1];
-					return new double[] {a < 0 ? 0 : Math.sqrt(a) / count};
-				}));
-	}
-
-	private static void badRequest(HttpServletResponse resp) {
-		try {
-			resp.sendError(HttpServletResponse.SC_BAD_REQUEST);
-		} catch (IOException e) {/**/}
 	}
 
 	@Override
@@ -175,9 +128,9 @@ public class DashboardApi extends HttpServlet {
 			badRequest(resp);
 			return;
 		}
-		String method = path.substring(slash + 1);
-		Collector<DBObject, ?, double[]> downstream = groupMap.get(method);
-		if (downstream == null) {
+		ToDoubleFunction<MetricValue> method =
+				methodMap.get(path.substring(slash + 1));
+		if (method == null) {
 			badRequest(resp);
 			return;
 		}
@@ -200,21 +153,28 @@ public class DashboardApi extends HttpServlet {
 		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
 		range.put("$lt", Integer.valueOf(end));
 		query.put("_minute", range);
-		String groupBy = req.getParameter("_group_by");
-		Function<DBObject, GroupKey> classifier;
-		if (groupBy == null) {
-			classifier = row -> new GroupKey("_",
-					(getInt(row, "_minute") - begin) / interval);
-		} else {
-			classifier = row -> new GroupKey(getString(row, groupBy),
-					(getInt(row, "_minute") - begin) / interval);
-		}
+		String groupBy_ = req.getParameter("_group_by");
+		Function<DBObject, String> groupBy = groupBy_ == null ?
+				row -> "_" : row -> getString(row, groupBy_);
 		// Query by MongoDB and Group by Java
-		Map<GroupKey, double[]> result;
+		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			result = StreamSupport.stream(Spliterators.
-					spliteratorUnknownSize(collection.find(query).iterator(), 0), false).
-					collect(Collectors.groupingBy(classifier, downstream));
+			for (DBObject row : collection.find(query)) {
+				int index = (getInt(row, "_minute") - begin) / interval;
+				if (index < 0 || index >= length) {
+					continue;
+				}
+				GroupKey key = new GroupKey(groupBy.apply(row), index);
+				MetricValue newValue = new MetricValue(getInt(row, "_count"),
+						getDouble(row, "_sum"), getDouble(row, "_max"),
+						getDouble(row, "_min"), getDouble(row, "_sqr"));
+				MetricValue value = result.get(key);
+				if (value == null) {
+					result.put(key, newValue);
+				} else {
+					value.add(newValue);
+				}
+			}
 		} catch (MongoException e) {
 			Log.e(e);
 			try {
@@ -222,19 +182,21 @@ public class DashboardApi extends HttpServlet {
 			} catch (IOException e_) {/**/}
 			return;
 		}
+		// Generate Data
 		HashMap<String, double[]> data = new HashMap<>();
-		for (Map.Entry<GroupKey, double[]> entry : result.entrySet()) {
+		for (Map.Entry<GroupKey, MetricValue> entry : result.entrySet()) {
 			GroupKey key = entry.getKey();
+			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {
 				continue;
-			}
+			} */
 			double[] values = data.get(key.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = entry.getValue()[0];
+			values[key.index] = method.applyAsDouble(entry.getValue());
 		}
 		// Output JSON
 		PrintWriter out;

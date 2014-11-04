@@ -4,7 +4,7 @@ public class MetricValue implements Cloneable {
 	private int count;
 	private double sum, max, min, sqr;
 
-	private MetricValue(int count, double sum, double max, double min, double sqr) {
+	public MetricValue(int count, double sum, double max, double min, double sqr) {
 		this.count = count;
 		this.sum = sum;
 		this.max = max;
@@ -26,6 +26,14 @@ public class MetricValue implements Cloneable {
 		return new MetricValue(count, sum, max, min, sqr);
 	}
 
+	public void add(MetricValue value) {
+		count += value.count;
+		sum += value.sum;
+		max = Math.max(max, value.max);
+		min = Math.min(min, value.min);
+		sqr += value.sqr;
+	}
+
 	public int getCount() {
 		return count;
 	}
@@ -44,5 +52,17 @@ public class MetricValue implements Cloneable {
 
 	public double getSqr() {
 		return sqr;
+	}
+
+	public double getAvg() {
+		return sum / count;
+	}
+
+	public double getStd() {
+		if (count == 0) {
+			return 0;
+		}
+		double base = sqr * count - sum * sum;
+		return base < 0 ? 0 : Math.sqrt(base) / count;
 	}
 }
