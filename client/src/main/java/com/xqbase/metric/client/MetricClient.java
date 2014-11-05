@@ -58,7 +58,8 @@ public class MetricClient {
 						append(metric.getCount()).append('/').
 						append(metric.getSum()).append('/').
 						append(metric.getMax()).append('/').
-						append(metric.getMin());
+						append(metric.getMin()).append('/').
+						append(metric.getSqr());
 				HashMap<String, String> tagMap = metric.getTagMap();
 				if (!tagMap.isEmpty()) {
 					int question = row.length();
