@@ -199,6 +199,7 @@ public class DashboardApi extends HttpServlet {
 			values[key.index] = method.applyAsDouble(entry.getValue());
 		}
 		// Output JSON
+		resp.setCharacterEncoding("UTF-8");
 		PrintWriter out;
 		try {
 			out = resp.getWriter();
