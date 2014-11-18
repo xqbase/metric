@@ -14,7 +14,7 @@ public class ManagementMonitor implements Runnable {
 	}
 
 	private static double PERCENT(long dividend, long divisor) {
-		return divisor == 0 ? 0 : (double) dividend * 100 / divisor; 
+		return divisor == 0 ? 0 : (double) dividend * 100 / divisor;
 	}
 
 	private String cpu, threads, memoryMB, memoryPercent;

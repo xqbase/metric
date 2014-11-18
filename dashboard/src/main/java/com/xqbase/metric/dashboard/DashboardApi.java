@@ -39,11 +39,11 @@ class GroupKey {
 
 	@Override
 	public boolean equals(Object obj) {
-	    if (!(obj instanceof GroupKey)) {
-	    	return false;  
-	    }
-	    GroupKey key = (GroupKey) obj;
-	    return tag.equals(key.tag) && index == key.index;
+		if (!(obj instanceof GroupKey)) {
+			return false;
+		}
+		GroupKey key = (GroupKey) obj;
+		return tag.equals(key.tag) && index == key.index;
 	}
 
 	@Override
