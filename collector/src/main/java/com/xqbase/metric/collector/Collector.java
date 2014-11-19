@@ -7,8 +7,10 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -99,6 +101,11 @@ public class Collector {
 		int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
+		String allowedRemote = p.getProperty("allowed_remote");
+		HashSet<String> allowedRemotes = null;
+		if (allowedRemote != null) {
+			allowedRemotes = new HashSet<>(Arrays.asList(allowedRemote.split("[,;]")));
+		}
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
 		AtomicInteger now = new AtomicInteger((int) (start / Time.MINUTE));
@@ -171,6 +178,10 @@ public class Collector {
 				socket.receive(packet);
 				int len = packet.getLength();
 				String remoteAddr = packet.getAddress().getHostAddress();
+				if (allowedRemotes != null && !allowedRemotes.contains(remoteAddr)) {
+					Log.w(remoteAddr + " not allowed");
+					continue;
+				}
 				if (enableRemoteAddr) {
 					Metric.put("metric.throughput", len,
 							"remote_addr", remoteAddr, "server_id", "" + serverId);
@@ -191,7 +202,7 @@ public class Collector {
 						}
 					}
 				} catch (IOException e) {
-					Log.w("Unable to inflate packet from " + packet.getSocketAddress());
+					Log.w("Unable to inflate packet from " + remoteAddr);
 					// Continue to parse rows
 				}
 
