@@ -97,6 +97,7 @@ public class Collector {
 
 		Properties p = Conf.load("Collector");
 		String host = p.getProperty("host");
+		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		int serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		int expire = Numbers.parseInt(p.getProperty("expire"), 43200);
@@ -113,7 +114,7 @@ public class Collector {
 		MongoClient mongo = null;
 		Runnable schedule = null;
 		try (DatagramSocket socket = new DatagramSocket(new
-				InetSocketAddress(host == null ? "0.0.0.0" : host, port))) {
+				InetSocketAddress(host, port))) {
 			mongo = new MongoClient(p.getProperty("host"),
 					Numbers.parseInt(p.getProperty("port"), 27017));
 			DB db = mongo.getDB(p.getProperty("db"));
