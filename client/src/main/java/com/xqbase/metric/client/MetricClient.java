@@ -96,7 +96,7 @@ public class MetricClient {
 		AtomicInteger now = new AtomicInteger((int) (start / MINUTE));
 		command = () -> {
 			try {
-				send(addrs, now.getAndIncrement());
+				send(addrs, now.incrementAndGet());
 			} catch (Error | RuntimeException e) {
 				e.printStackTrace();
 			}
