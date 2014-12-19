@@ -19,7 +19,6 @@ import org.json.JSONObject;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
-import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoException;
@@ -81,6 +80,7 @@ public class DashboardApi extends HttpServlet {
 
 	private static HashMap<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
 	static {
 		methodMap.put("count", MetricValue::getCount);
@@ -89,12 +89,20 @@ public class DashboardApi extends HttpServlet {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("tags", TAGS_METHOD);
 	}
 
-	private static void badRequest(HttpServletResponse resp) {
+	private static void error400(HttpServletResponse resp) {
 		try {
 			resp.sendError(HttpServletResponse.SC_BAD_REQUEST);
 		} catch (IOException e) {/**/}
+	}
+
+	private static void error500(HttpServletResponse resp, Throwable e) {
+		Log.e(e);
+		try {
+			resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+		} catch (IOException e_) {/**/}
 	}
 
 	private static int getInt(DBObject row, String key) {
@@ -112,12 +120,37 @@ public class DashboardApi extends HttpServlet {
 		return value instanceof String ? (String) value : "_";
 	}
 
+	private static void outputJson(HttpServletRequest req,
+			HttpServletResponse resp, Map<String, ?> data) {
+		resp.setCharacterEncoding("UTF-8");
+		PrintWriter out;
+		try {
+			out = resp.getWriter();
+		} catch (IOException e) {
+			Log.d(e.getMessage());
+			return;
+		}
+		String callback = req.getParameter("_callback");
+		if (callback == null) {
+			String origin = req.getHeader("Origin");
+			if (origin != null) {
+				resp.setHeader("Access-Control-Allow-Origin", origin);
+			}
+			resp.setHeader("Access-Control-Allow-Credentials", "true");
+			resp.setContentType("application/json");
+			out.print(new JSONObject(data));
+		} else {
+			resp.setContentType("text/javascript");
+			out.print(callback + "(" + new JSONObject(data) + ");");
+		}
+	}
+
 	@Override
 	protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
 		// Find Metric Collection and Aggregation Method
 		String path = req.getPathInfo();
 		if (path == null) {
-			badRequest(resp);
+			error400(resp);
 			return;
 		}
 		while (!path.isEmpty() && path.charAt(0) == '/') {
@@ -125,16 +158,37 @@ public class DashboardApi extends HttpServlet {
 		}
 		int slash = path.indexOf('/');
 		if (slash < 0) {
-			badRequest(resp);
+			error400(resp);
 			return;
 		}
 		ToDoubleFunction<MetricValue> method =
 				methodMap.get(path.substring(slash + 1));
 		if (method == null) {
-			badRequest(resp);
+			error400(resp);
 			return;
 		}
-		DBCollection collection = db.getCollection(path.substring(0, slash));
+		String metricName = path.substring(0, slash);
+		if (method == TAGS_METHOD) {
+			DBObject tagsRow;
+			try {
+				tagsRow = db.getCollection("_tags").
+							findOne(new BasicDBObject("_name", metricName));
+			} catch (MongoException e) {
+				error500(resp, e);
+				return;
+			}
+			HashMap<String, Object> data = new HashMap<>();
+			if (tagsRow != null) {
+				for (String tag : tagsRow.keySet()) {
+					if (tag.isEmpty() || tag.charAt(0) == '_') {
+						continue;
+					}
+					data.put(tag, tagsRow.get(tag));
+				}
+			}
+			outputJson(req, resp, data);
+			return;
+		}
 		// Query Condition
 		BasicDBObject query = new BasicDBObject();
 		Enumeration<String> names = req.getParameterNames();
@@ -159,7 +213,7 @@ public class DashboardApi extends HttpServlet {
 		// Query by MongoDB and Group by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			for (DBObject row : collection.find(query)) {
+			for (DBObject row : db.getCollection(metricName).find(query)) {
 				int index = (getInt(row, "_minute") - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
@@ -176,10 +230,7 @@ public class DashboardApi extends HttpServlet {
 				}
 			}
 		} catch (MongoException e) {
-			Log.e(e);
-			try {
-				resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-			} catch (IOException e_) {/**/}
+			error500(resp, e);
 			return;
 		}
 		// Generate Data
@@ -198,27 +249,6 @@ public class DashboardApi extends HttpServlet {
 			}
 			values[key.index] = method.applyAsDouble(entry.getValue());
 		}
-		// Output JSON
-		resp.setCharacterEncoding("UTF-8");
-		PrintWriter out;
-		try {
-			out = resp.getWriter();
-		} catch (IOException e) {
-			Log.d(e.getMessage());
-			return;
-		}
-		String callback = req.getParameter("_callback");
-		if (callback == null) {
-			String origin = req.getHeader("Origin");
-			if (origin != null) {
-				resp.setHeader("Access-Control-Allow-Origin", origin);
-			}
-			resp.setHeader("Access-Control-Allow-Credentials", "true");
-			resp.setContentType("application/json");
-			out.print(new JSONObject(data));
-		} else {
-			resp.setContentType("text/javascript");
-			out.print(callback + "(" + new JSONObject(data) + ");");
-		}
+		outputJson(req, resp, data);
 	}
 }
