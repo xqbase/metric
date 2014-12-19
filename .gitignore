@@ -12,6 +12,8 @@
 hs_err_pid*
 .settings
 /client/target
+/client-jdk17/target
 /collector/target
 /common/target
+/common-jdk17/target
 /dashboard/target
