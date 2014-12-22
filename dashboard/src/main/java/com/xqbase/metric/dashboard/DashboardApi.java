@@ -26,6 +26,7 @@ import com.xqbase.metric.common.MetricValue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+import com.xqbase.util.Time;
 
 class GroupKey {
 	String tag;
@@ -121,7 +122,7 @@ public class DashboardApi extends HttpServlet {
 	}
 
 	private static void outputJson(HttpServletRequest req,
-			HttpServletResponse resp, Map<String, ?> data) {
+			HttpServletResponse resp, Map<String, Object> data) {
 		resp.setCharacterEncoding("UTF-8");
 		PrintWriter out;
 		try {
@@ -172,7 +173,7 @@ public class DashboardApi extends HttpServlet {
 			DBObject tagsRow;
 			try {
 				tagsRow = db.getCollection("_tags").
-							findOne(new BasicDBObject("_name", metricName));
+						findOne(new BasicDBObject("_name", metricName));
 			} catch (MongoException e) {
 				error500(resp, e);
 				return;
@@ -199,14 +200,23 @@ public class DashboardApi extends HttpServlet {
 			}
 		}
 		// Other Query Parameters
-		int end = Numbers.parseInt(req.getParameter("_end"),
-				(int) (System.currentTimeMillis() / 60000));
+		int end;
+		String rangeColumn;
+		if (metricName.startsWith("_quarter.")) {
+			end = Numbers.parseInt(req.getParameter("_end"),
+					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
+			rangeColumn = "_quarter";
+		} else {
+			end = Numbers.parseInt(req.getParameter("_end"),
+					(int) (System.currentTimeMillis() / Time.MINUTE));
+			rangeColumn = "_minute";
+		}
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
-		int begin = end - interval * length;
+		int begin = end - interval * length + 1;
 		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
-		range.put("$lt", Integer.valueOf(end));
-		query.put("_minute", range);
+		range.put("$lte", Integer.valueOf(end));
+		query.put(rangeColumn, range);
 		String groupBy_ = req.getParameter("_group_by");
 		Function<DBObject, String> groupBy = groupBy_ == null ?
 				row -> "_" : row -> getString(row, groupBy_);
@@ -214,7 +224,7 @@ public class DashboardApi extends HttpServlet {
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			for (DBObject row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, "_minute") - begin) / interval;
+				int index = (getInt(row, rangeColumn) - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
 				}
@@ -234,14 +244,14 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Generate Data
-		HashMap<String, double[]> data = new HashMap<>();
+		HashMap<String, Object> data = new HashMap<>();
 		for (Map.Entry<GroupKey, MetricValue> entry : result.entrySet()) {
 			GroupKey key = entry.getKey();
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {
 				continue;
 			} */
-			double[] values = data.get(key.tag);
+			double[] values = (double[]) data.get(key.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
