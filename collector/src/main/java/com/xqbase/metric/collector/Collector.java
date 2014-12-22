@@ -34,7 +34,7 @@ import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Runnables;
-import com.xqbase.util.ShutdownHook;
+import com.xqbase.util.Service;
 import com.xqbase.util.Time;
 
 public class Collector {
@@ -110,7 +110,7 @@ public class Collector {
 	private static final BasicDBObject INDEX_QUARTER = __("_quarter", Integer.valueOf(1));
 	private static final BasicDBObject INDEX_NAME = __("_name", Integer.valueOf(1));
 
-	private static ShutdownHook hook = new ShutdownHook();
+	private static Service service = new Service();
 	private static AtomicInteger minuteNow = new AtomicInteger();
 	private static AtomicInteger quarterNow = new AtomicInteger();
 	private static int serverId, expire, tagsExpire;
@@ -273,7 +273,7 @@ public class Collector {
 	}
 
 	public static void main(String[] args) {
-		if (hook.isShutdown(args)) {
+		if (!service.startup(args)) {
 			return;
 		}
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
@@ -316,7 +316,7 @@ public class Collector {
 						period, TimeUnit.MILLISECONDS);
 			}
 
-			hook.register(socket);
+			service.register(socket);
 			while (!Thread.interrupted()) {
 				// Receive
 				byte[] buf = new byte[65536];
@@ -427,7 +427,9 @@ public class Collector {
 				mongo.close();
 			}
 		}
+
 		Log.i("Metric Collector Stopped");
 		Conf.closeLogger(Log.getAndSet(logger));
+		service.shutdown();
 	}
 }
