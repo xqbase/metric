@@ -26,6 +26,8 @@ import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.MongoCredential;
+import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -52,7 +54,9 @@ public class Collector {
 	private static BasicDBObject row(Map<String, String> tagMap, String type,
 			int now, int count, double sum, double max, double min, double sqr) {
 		BasicDBObject row = new BasicDBObject(tagMap);
-		row.put(type, Integer.valueOf(now));
+		if (type != null) {
+			row.put(type, Integer.valueOf(now));
+		}
 		row.put("_count", Integer.valueOf(count));
 		row.put("_sum", Double.valueOf(sum));
 		row.put("_max", Double.valueOf(max));
@@ -244,26 +248,48 @@ public class Collector {
 					}
 				}
 			}
-			HashMap<String, HashSet<String>> tagMap = new HashMap<>();
+			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 			BasicDBObject range = __("$gte",
 					Integer.valueOf(quarter - tagsExpire / QUARTER + 1));
 			range.put("$lte", Integer.valueOf(quarter)); // last 24 hours
 			for (DBObject row : db.getCollection(name).
 					find(__("_quarter", range))) {
-				for (String tagKey : row.keySet()) {
-					if (!isTag(tagKey)) {
+				MetricValue newValue = new MetricValue(getInt(row, "_count"),
+						getDouble(row, "_sum"), getDouble(row, "_max"),
+						getDouble(row, "_min"), getDouble(row, "_sqr"));
+				for (String tagName : row.keySet()) {
+					if (!isTag(tagName)) {
 						continue;
 					}
-					HashSet<String> tagValues = tagMap.get(tagKey);
+					String tagValue = getString(row, tagName);
+					HashMap<String, MetricValue> tagValues = tagMap.get(tagName);
 					if (tagValues == null) {
-						tagValues = new HashSet<>();
-						tagMap.put(tagKey, tagValues);
+						tagValues = new HashMap<>();
+						tagMap.put(tagName, tagValues);
+						tagValues.put(tagValue, newValue);
+					} else {
+						MetricValue oldValue = tagValues.get(tagValue);
+						if (oldValue == null) {
+							tagValues.put(tagValue, newValue);
+						} else {
+							oldValue.add(newValue);
+						}
 					}
-					tagValues.add(getString(row, tagKey));
 				}
 			}
+			BasicDBObject updateValue = new BasicDBObject();
+			for (Map.Entry<String, HashMap<String, MetricValue>> tagEntry : tagMap.entrySet()) {
+				ArrayList<BasicDBObject> tagValues = new ArrayList<>();
+				for (Map.Entry<String, MetricValue> valueEntry : tagEntry.getValue().entrySet()) {
+					MetricValue value = valueEntry.getValue();
+					tagValues.add(row(Collections.singletonMap("_value", valueEntry.getKey()),
+							null, 0, value.getCount(), value.getSum(),
+							value.getMax(), value.getMin(), value.getSqr()));
+				}
+				updateValue.put(tagEntry.getKey(), tagValues);
+			}
 			unsetTags.keySet().removeAll(tagMap.keySet());
-			BasicDBObject update = __("$set", new BasicDBObject(tagMap));
+			BasicDBObject update = __("$set", updateValue);
 			tags.update(tagsQuery, update, true, false);
 			if (!unsetTags.isEmpty()) {
 				update = __("$unset", unsetTags);
@@ -303,9 +329,18 @@ public class Collector {
 		Runnable minutely = null;
 		try (DatagramSocket socket = new DatagramSocket(new
 				InetSocketAddress(host, port))) {
-			mongo = new MongoClient(p.getProperty("host"),
+			ServerAddress addr = new ServerAddress(p.getProperty("host"),
 					Numbers.parseInt(p.getProperty("port"), 27017));
-			DB db = mongo.getDB(p.getProperty("db"));
+			String database = p.getProperty("db");
+			String username = p.getProperty("username");
+			String password = p.getProperty("password");
+			if (username == null || password == null) {
+				mongo = new MongoClient(addr);
+			} else {
+				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
+						createMongoCRCredential(username, database, password.toCharArray())));
+			}
+			DB db = mongo.getDB(database);
 			minutely = Runnables.wrap(() -> minutely(db));
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);

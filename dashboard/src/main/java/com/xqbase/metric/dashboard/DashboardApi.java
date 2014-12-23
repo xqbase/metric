@@ -3,6 +3,7 @@ package com.xqbase.metric.dashboard;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
@@ -21,7 +22,9 @@ import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.MongoCredential;
 import com.mongodb.MongoException;
+import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -62,9 +65,18 @@ public class DashboardApi extends HttpServlet {
 	public void init() throws ServletException {
 		Properties p = Conf.load("Mongo");
 		try {
-			mongo = new MongoClient(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port")));
-			db = mongo.getDB(p.getProperty("db"));
+			ServerAddress addr = new ServerAddress(p.getProperty("host"),
+					Numbers.parseInt(p.getProperty("port"), 27017));
+			String database = p.getProperty("db");
+			String username = p.getProperty("username");
+			String password = p.getProperty("password");
+			if (username == null || password == null) {
+				mongo = new MongoClient(addr);
+			} else {
+				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
+						createMongoCRCredential(username, database, password.toCharArray())));
+			}
+			db = mongo.getDB(database);
 		} catch (IOException e) {
 			throw new ServletException(e);
 		}
