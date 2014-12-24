@@ -266,11 +266,13 @@ public class Collector {
 					if (tagValues == null) {
 						tagValues = new HashMap<>();
 						tagMap.put(tagName, tagValues);
-						tagValues.put(tagValue, newValue);
+						// Must use "newValue.clone()" here, because many tags may share one "newValue" 
+						tagValues.put(tagValue, newValue.clone());
 					} else {
 						MetricValue oldValue = tagValues.get(tagValue);
 						if (oldValue == null) {
-							tagValues.put(tagValue, newValue);
+							// Must use "newValue.clone()" here
+							tagValues.put(tagValue, newValue.clone());
 						} else {
 							oldValue.add(newValue);
 						}
