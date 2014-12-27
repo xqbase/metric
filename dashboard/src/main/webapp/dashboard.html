@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<script src="js/jquery.min.js" language="javascript"></script>
+		<script src="js/highcharts.js" language="javascript"></script>
+		<script src="js/calendar.js" language="javascript"></script>
+		<script src="config.js" language="javascript"></script>
+		<link rel="stylesheet" type="text/css" href="css/calendar.css" />
+	</head>
+	<body>
+		<div id="container" style="width:100%;height:400px"></div>
+		<div id="divTags" style="white-space:nowrap"></div>
+		<div style="white-space:nowrap">
+			Method:
+			<select id="selMethod">
+				<option>SUM</option>
+				<option>COUNT</option>
+				<option>AVG</option>
+				<option>MAX</option>
+				<option>MIN</option>
+				<option>STD</option>
+			</select>
+			Group by: <select id="selGroup"></select>
+			Interval:
+			<select id="selInterval">
+				<option>1 Minute</option>
+				<option>5 Minutes</option>
+				<option>15 Minutes</option>
+				<option>1 Hour</option>
+				<option>6 Hours</option>
+				<option>1 Day</option>
+			</select>
+			Until: <input type="checkbox" id="chkNow" checked onclick="clickNow()">Now
+			<input type="text" id="txtDate" value="" size="10" disabled>
+			<select id="selHour" disabled>
+				<option>00</option>
+				<option>01</option>
+				<option>02</option>
+				<option>03</option>
+				<option>04</option>
+				<option>05</option>
+				<option>06</option>
+				<option>07</option>
+				<option>08</option>
+				<option>09</option>
+				<option>10</option>
+				<option>11</option>
+				<option>12</option>
+				<option>13</option>
+				<option>14</option>
+				<option>15</option>
+				<option>16</option>
+				<option>17</option>
+				<option>18</option>
+				<option>19</option>
+				<option>20</option>
+				<option>21</option>
+				<option>22</option>
+				<option>23</option>
+			</select>:<select id="selMinute" disabled>
+				<option>00</option>
+				<option>15</option>
+				<option>30</option>
+				<option>45</option>
+			</select>
+			<input type="submit" onclick="reloadParams()">
+		</div>
+		<script language="javascript"><!--
+var MINUTE = 60000;
+var QUARTER = MINUTE * 15;
+var METHOD_NAME = ["sum", "count", "avg", "max", "min", "std"];
+var METHOD_COMPARATOR = [
+	function(tag1, tag2) {
+		return tag2._sum - tag1._sum;
+	},
+	function(tag1, tag2) {
+		return tag2._count - tag1._count;
+	},
+	function(tag1, tag2) {
+		return tag2._sum / tag2._count - tag1._sum / tag1._count;
+	},
+	function(tag1, tag2) {
+		return tag2._max - tag1._max;
+	},
+	function(tag1, tag2) {
+		return tag2._min - tag1._min;
+	},
+	function(tag1, tag2) {
+		var base1 = tag1._sqr * tag1._count - tag1._sum * tag1._sum;
+		base1 = base1 < 0 ? 0 : Math.sqrt(base1) / tag1._count;
+		var base2 = tag2._sqr * tag2._count - tag2._sum * tag2._sum;
+		base2 = base2 < 0 ? 0 : Math.sqrt(base2) / tag2._count;
+		return base2 - base1;
+	},
+];
+
+var HIGHCHARTS_OPTIONS = {
+	chart: {
+		animation: false,
+		renderTo: "container",
+	},
+	credits: {
+		enabled: false,
+	},
+	legend: {
+		align: "right",
+		verticalAlign: "top",
+		layout: "vertical",
+	},
+	plotOptions: {
+		series: {
+			animation: false,
+			marker: {
+				enabled: false,
+			},
+		},
+	},
+	tooltip: {
+		formatter: function() {
+			var name = this.series.name;
+			return (seriesKeys.length == 1 ? "" : "<b>" + name + "</b><br/>") +
+					Highcharts.dateFormat("%Y-%m-%d %H:%M:%S", this.x) + "<br/><b>" +
+					Highcharts.numberFormat(this.y, 2) + "</b>";
+		}
+	},
+	xAxis: {
+		type: "datetime",
+	},
+};
+
+var paramMap, method, tagMap, metricName, untilQuarter, apiUrl;
+var timer = null, chart = null, seriesKeys = [];
+
+function loadParams(reload) {
+	var date = new Date();
+	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
+	var hash = location.hash;
+	if (hash.charAt(0) == "#") {
+		hash = hash.substring(1);
+	}
+	paramMap = {};
+	var params = hash.split("&");
+	for (var i = 0; i < params.length; i ++) {
+		var param = params[i];
+		var j = param.indexOf("=");
+		if (j < 0) {
+			continue;
+		}
+		paramMap[param.substring(0, j)] = unescape(param.substring(j + 1));
+	}
+	metricName = paramMap._name;
+	if (typeof metricName != "string") {
+		return;
+	}
+
+	method = paramMap._method;
+	method = typeof method == "string" ? method : "sum";
+	method = METHOD_NAME.indexOf(method);
+	method = method < 0 ? 0 : method;
+	selMethod.selectedIndex = method;
+
+	apiUrl = DASHBOARD_API + metricName + "/" + METHOD_NAME[method] + "?_length=" + DASHBOARD_LENGTH;
+
+	untilQuarter = date.getTime() / QUARTER;
+	var now = true;
+	var date = new Date();
+	var until = paramMap._until;
+	if (typeof until == "string") {
+		until = parseInt(until);
+		if (!isNaN(until)) {
+			untilQuarter = until;
+			now = false;
+			date.setTime(until * QUARTER);
+		}
+	}
+	chkNow.checked = now;
+	clickNow();
+	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
+	selHour.selectedIndex = date.getHours();
+	selMinute.selectedIndex = date.getMinutes() / 15;
+
+	if (reload) {
+		showTags();
+		return;
+	}
+	var xhr = new XMLHttpRequest();
+	try {
+		xhr.withCredentials = true;
+	} catch (e) {
+		// Ignore
+	}
+	xhr.onload = function() {
+		tagMap = eval("(" + xhr.responseText + ")");
+		showTags();
+	};
+	xhr.open("GET", DASHBOARD_API + metricName + "/tags?_r=" + Math.random(), true);
+	xhr.send(null);
+}
+
+function showTags() {
+	var html = "";
+	var groupBy = paramMap._group_by;
+	var groupHtml = "<option ";
+	if (typeof groupBy == "string") {
+		groupHtml += "selected ";
+	}
+	groupHtml += "value=\"_\">===NONE===</option>";
+
+	var methodComparator = METHOD_COMPARATOR[method];
+	for (var tagName in tagMap) {
+		var tags = tagMap[tagName];
+		tags.sort(methodComparator);
+		html += tagName + "=<select id=\"tag_" + tagName + "\">";
+		var selectedTag = paramMap[tagName];
+		html += "<option ";
+		if (typeof selectedTag != "string") {
+			html += "selected ";
+		}
+		html += "value=\"_\">===ALL===</option>";
+		for (var i = 0; i < tags.length; i ++) {
+			var tag = tags[i];
+			html += "<option ";
+			if (selectedTag == tag._value) {
+				apiUrl += "&" + tagName + "=" + escape(selectedTag);
+				html += "selected ";
+			}
+			html += "value=\"" + tag._value + "\">" + tag._value + "</option>";
+		}
+		html += "</select>\n";
+
+		groupHtml += "<option ";
+		if (groupBy == tagName) {
+			apiUrl += "&_group_by=" + groupBy;
+			groupHtml += "selected ";
+		}
+		groupHtml += "value=\"" + tagName + "\">" + tagName + "</option>";
+	}
+	apiUrl += "&_end=";
+
+	divTags.innerHTML = html;
+	selGroup.innerHTML = groupHtml;
+
+	chart = null;
+	if (timer != null) {
+		clearInterval(timer);
+	}
+	timer = setInterval(requestApi, MINUTE);
+	requestApi();
+}
+
+function reloadParams() {
+	var hash = "#_name=" + metricName + "&_method=" + METHOD_NAME[selMethod.selectedIndex];
+	for (var tagName in tagMap) {
+		var sel = window["tag_" + tagName];
+		var value = sel.options[sel.selectedIndex].value;
+		if (value != "_") {
+			hash += "&" + tagName + "=" + escape(value);
+		}
+	}
+	if (selGroup.selectedIndex > 0) {
+		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
+	}
+	if (!chkNow.checked) {
+		var date = new Date(txtDate.value);
+		hash += "&_until=" + (date.getTime() / QUARTER + selHour.selectedIndex * 4 + selMinute.selectedIndex);
+	}
+	location.href = hash;
+	loadParams(true);
+}
+
+function clickNow() {
+	var now = chkNow.checked;
+	txtDate.disabled = now;
+	selHour.disabled = now;
+	selMinute.disabled = now;
+}
+
+function drawChart(data, now, interval) {
+	if (chart != null) {
+		for (var i = 0; i < seriesKeys.length; i ++) {
+			chart.series[i].setData(data[seriesKeys[i]], false);
+		}
+		chart.redraw();
+		return;
+	}
+	seriesKeys = [];
+	var valueMap = {};
+	for (var key in data) {
+		var line = data[key];
+		var value = 0;
+		for (var i = 0; i < line.length; i ++) {
+			value += line[i];
+		}
+		seriesKeys.push(key);
+		valueMap[key] = value;
+	}
+	seriesKeys.sort(function(key1, key2) {
+		return valueMap[key2] - valueMap[key1];
+	});
+	chart = new Highcharts.Chart(HIGHCHARTS_OPTIONS);
+	if (seriesKeys.length == 1 && seriesKeys[0] == "_") {
+		chart.options.legend.enabled = false;
+	}
+	chart.setTitle({text: metricName}, null, false);
+	chart.yAxis[0].setTitle({text: METHOD_NAME[method].toUpperCase()}, false);
+	var start = now - (DASHBOARD_LENGTH - 1) * interval;
+	for (var i = 0; i < seriesKeys.length; i ++) {
+		var key = seriesKeys[i];
+		chart.addSeries({
+			name: key,
+			pointStart: start * MINUTE,
+			pointInterval: interval * MINUTE,
+			data: data[key],
+			zIndex: seriesKeys.length - i,
+			visible: i < DASHBOARD_SERIES,
+		}, false);
+	}
+	chart.redraw();
+}
+
+function requestApi() {
+	var now = Math.floor(new Date().getTime() / MINUTE);
+	var xhr = new XMLHttpRequest();
+	try {
+		xhr.withCredentials = true;
+	} catch (e) {
+		// Ignore
+	}
+	xhr.onload = function() {
+		drawChart(eval("(" + xhr.responseText + ")"), now, 1);
+	};
+	xhr.open("GET", apiUrl + now + "&_r=" + Math.random(), true);
+	xhr.send(null);
+}
+
+Highcharts.setOptions({
+	global: {
+		useUTC: false,
+	},
+});
+calendar.set("txtDate");
+loadParams(false);
+
+		--></script>
+	</body>
+</html>
