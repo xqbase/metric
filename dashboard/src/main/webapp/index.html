@@ -23,7 +23,7 @@ xhr.onload = function() {
 	names.sort();
 	for (var i = 0; i < names.length; i ++) {
 		var name = names[i];
-		if (!name.startsWith("_quarter.")) {
+		if (name.substring(0, 9) != "_quarter.") {
 			html += "<a href=\"dashboard.html#_name=" + name + "\" target=\"_blank\">" + name + "</a><br/>";
 		}
 	}
