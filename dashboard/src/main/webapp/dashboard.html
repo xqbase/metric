@@ -2,14 +2,14 @@
 <html>
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-		<script src="js/jquery.min.js" language="javascript"></script>
-		<script src="js/highcharts.js" language="javascript"></script>
-		<script src="js/calendar.js" language="javascript"></script>
-		<script src="config.js" language="javascript"></script>
+		<script type="text/javascript" src="js/jquery.min.js"></script>
+		<script type="text/javascript" src="js/highcharts.js"></script>
+		<script type="text/javascript" src="js/calendar.js"></script>
+		<script type="text/javascript" src="config.js"></script>
 		<link rel="stylesheet" type="text/css" href="css/calendar.css" />
 	</head>
 	<body>
-		<div id="container" style="width:100%;height:400px"></div>
+		<div id="divChart" style="width:100%"></div>
 		<div id="divTags" style="white-space:nowrap"></div>
 		<div style="white-space:nowrap">
 			Method:
@@ -66,9 +66,9 @@
 			</select>
 			<input type="submit" onclick="reloadParams()">
 		</div>
-		<script language="javascript"><!--
+		<script type="text/javascript"><!--
+
 var MINUTE = 60000;
-var QUARTER = MINUTE * 15;
 var METHOD_NAME = ["sum", "count", "avg", "max", "min", "std"];
 var METHOD_COMPARATOR = [
 	function(tag1, tag2) {
@@ -94,11 +94,12 @@ var METHOD_COMPARATOR = [
 		return base2 - base1;
 	},
 ];
+var INTERVAL = [1, 5, 15, 60, 360, 1440];
 
 var HIGHCHARTS_OPTIONS = {
 	chart: {
 		animation: false,
-		renderTo: "container",
+		renderTo: "divChart",
 	},
 	credits: {
 		enabled: false,
@@ -119,7 +120,7 @@ var HIGHCHARTS_OPTIONS = {
 	tooltip: {
 		formatter: function() {
 			var name = this.series.name;
-			return (seriesKeys.length == 1 ? "" : "<b>" + name + "</b><br/>") +
+			return (groupKeys.length == 1 ? "" : "<b>" + name + "</b><br/>") +
 					Highcharts.dateFormat("%Y-%m-%d %H:%M:%S", this.x) + "<br/><b>" +
 					Highcharts.numberFormat(this.y, 2) + "</b>";
 		}
@@ -129,12 +130,10 @@ var HIGHCHARTS_OPTIONS = {
 	},
 };
 
-var paramMap, method, tagMap, metricName, untilQuarter, apiUrl;
-var timer = null, chart = null, seriesKeys = [];
+var paramMap, name, method, interval, now, until, tagMap, apiUrl;
+var timer = null, chart = null, groupKeys = [];
 
 function loadParams(reload) {
-	var date = new Date();
-	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
 	var hash = location.hash;
 	if (hash.charAt(0) == "#") {
 		hash = hash.substring(1);
@@ -149,36 +148,46 @@ function loadParams(reload) {
 		}
 		paramMap[param.substring(0, j)] = unescape(param.substring(j + 1));
 	}
-	metricName = paramMap._name;
-	if (typeof metricName != "string") {
+
+	name = paramMap._name;
+	if (typeof name == "undefined") {
+		location.href = "index.html";
 		return;
 	}
 
 	method = paramMap._method;
-	method = typeof method == "string" ? method : "sum";
+	method = typeof method == "undefined" ? "sum" : method;
 	method = METHOD_NAME.indexOf(method);
 	method = method < 0 ? 0 : method;
 	selMethod.selectedIndex = method;
 
-	apiUrl = DASHBOARD_API + metricName + "/" + METHOD_NAME[method] + "?_length=" + DASHBOARD_LENGTH;
+	interval = paramMap._interval;
+	interval = typeof interval == "undefined" ? "1" : interval;
+	interval = parseInt(interval);
+	var index = INTERVAL.indexOf(interval);
+	interval = index < 0 ? 0 : interval;
+	selInterval.selectedIndex = index < 0 ? 0 : index;
 
-	untilQuarter = date.getTime() / QUARTER;
-	var now = true;
+	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + name + "/" + METHOD_NAME[method] +
+			"?_length=" + DASHBOARD_LENGTH + "&_interval=" + (interval < 15 ? interval : interval / 15);
+
+	now = true;
 	var date = new Date();
-	var until = paramMap._until;
-	if (typeof until == "string") {
-		until = parseInt(until);
-		if (!isNaN(until)) {
-			untilQuarter = until;
+	until = Math.floor(date.getTime() / MINUTE);
+	var until_ = paramMap._until;
+	if (typeof until_ != "undefined") {
+		until_ = parseInt(until_);
+		if (!isNaN(until_)) {
 			now = false;
-			date.setTime(until * QUARTER);
+			until = until_;
+			date.setTime(until * MINUTE);
 		}
 	}
 	chkNow.checked = now;
 	clickNow();
 	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
 	selHour.selectedIndex = date.getHours();
-	selMinute.selectedIndex = date.getMinutes() / 15;
+	selMinute.selectedIndex = Math.floor(date.getMinutes() / 15);
 
 	if (reload) {
 		showTags();
@@ -194,7 +203,7 @@ function loadParams(reload) {
 		tagMap = eval("(" + xhr.responseText + ")");
 		showTags();
 	};
-	xhr.open("GET", DASHBOARD_API + metricName + "/tags?_r=" + Math.random(), true);
+	xhr.open("GET", DASHBOARD_API + name + "/tags?_r=" + Math.random(), true);
 	xhr.send(null);
 }
 
@@ -202,7 +211,7 @@ function showTags() {
 	var html = "";
 	var groupBy = paramMap._group_by;
 	var groupHtml = "<option ";
-	if (typeof groupBy == "string") {
+	if (typeof groupBy != "undefined") {
 		groupHtml += "selected ";
 	}
 	groupHtml += "value=\"_\">===NONE===</option>";
@@ -214,7 +223,7 @@ function showTags() {
 		html += tagName + "=<select id=\"tag_" + tagName + "\">";
 		var selectedTag = paramMap[tagName];
 		html += "<option ";
-		if (typeof selectedTag != "string") {
+		if (typeof selectedTag == "undefined") {
 			html += "selected ";
 		}
 		html += "value=\"_\">===ALL===</option>";
@@ -245,12 +254,21 @@ function showTags() {
 	if (timer != null) {
 		clearInterval(timer);
 	}
-	timer = setInterval(requestApi, MINUTE);
+	timer = now ? setInterval(requestApi, interval < 15 ? MINUTE : MINUTE * 15) : null;
 	requestApi();
 }
 
 function reloadParams() {
-	var hash = "#_name=" + metricName + "&_method=" + METHOD_NAME[selMethod.selectedIndex];
+	var hash = "#_name=" + name + "&_method=" + METHOD_NAME[selMethod.selectedIndex] +
+			"&_interval=" + INTERVAL[selInterval.selectedIndex];
+	if (selGroup.selectedIndex > 0) {
+		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
+	}
+	if (!chkNow.checked) {
+		var time = Date.parse(txtDate.value + "T00:00:00");
+		hash += "&_until=" + (Math.floor((isNaN(time) ? new Date().getTime() : time) / MINUTE) +
+				selHour.selectedIndex * 60 + selMinute.selectedIndex * 15);
+	}
 	for (var tagName in tagMap) {
 		var sel = window["tag_" + tagName];
 		var value = sel.options[sel.selectedIndex].value;
@@ -258,33 +276,32 @@ function reloadParams() {
 			hash += "&" + tagName + "=" + escape(value);
 		}
 	}
-	if (selGroup.selectedIndex > 0) {
-		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
-	}
-	if (!chkNow.checked) {
-		var date = new Date(txtDate.value);
-		hash += "&_until=" + (date.getTime() / QUARTER + selHour.selectedIndex * 4 + selMinute.selectedIndex);
-	}
 	location.href = hash;
 	loadParams(true);
 }
 
 function clickNow() {
-	var now = chkNow.checked;
-	txtDate.disabled = now;
-	selHour.disabled = now;
-	selMinute.disabled = now;
+	var now_ = chkNow.checked;
+	txtDate.disabled = now_;
+	selHour.disabled = now_;
+	selMinute.disabled = now_;
 }
 
-function drawChart(data, now, interval) {
+function drawChart(data) {
+	var pointStart = until - (DASHBOARD_LENGTH - 1) * interval;
+	pointStart = interval < 15 ? pointStart * MINUTE : Math.floor(pointStart / 15) * MINUTE * 15;
+	var pointInterval = interval * MINUTE;
 	if (chart != null) {
-		for (var i = 0; i < seriesKeys.length; i ++) {
-			chart.series[i].setData(data[seriesKeys[i]], false);
+		for (var i = 0; i < groupKeys.length; i ++) {
+			chart.series[i].update({
+				pointStart: pointStart,
+				pointInterval: pointInterval,
+				data: data[groupKeys[i]],
+			}, false);
 		}
-		chart.redraw();
 		return;
 	}
-	seriesKeys = [];
+	groupKeys = [];
 	var valueMap = {};
 	for (var key in data) {
 		var line = data[key];
@@ -292,35 +309,32 @@ function drawChart(data, now, interval) {
 		for (var i = 0; i < line.length; i ++) {
 			value += line[i];
 		}
-		seriesKeys.push(key);
+		groupKeys.push(key);
 		valueMap[key] = value;
 	}
-	seriesKeys.sort(function(key1, key2) {
+	groupKeys.sort(function(key1, key2) {
 		return valueMap[key2] - valueMap[key1];
 	});
 	chart = new Highcharts.Chart(HIGHCHARTS_OPTIONS);
-	if (seriesKeys.length == 1 && seriesKeys[0] == "_") {
+	if (groupKeys.length == 1 && groupKeys[0] == "_") {
 		chart.options.legend.enabled = false;
 	}
-	chart.setTitle({text: metricName}, null, false);
+	chart.setTitle({text: name}, null, false);
 	chart.yAxis[0].setTitle({text: METHOD_NAME[method].toUpperCase()}, false);
-	var start = now - (DASHBOARD_LENGTH - 1) * interval;
-	for (var i = 0; i < seriesKeys.length; i ++) {
-		var key = seriesKeys[i];
+	for (var i = 0; i < groupKeys.length; i ++) {
+		var key = groupKeys[i];
 		chart.addSeries({
 			name: key,
-			pointStart: start * MINUTE,
-			pointInterval: interval * MINUTE,
+			pointStart: pointStart,
+			pointInterval: pointInterval,
 			data: data[key],
-			zIndex: seriesKeys.length - i,
+			zIndex: groupKeys.length - i,
 			visible: i < DASHBOARD_SERIES,
 		}, false);
 	}
-	chart.redraw();
 }
 
 function requestApi() {
-	var now = Math.floor(new Date().getTime() / MINUTE);
 	var xhr = new XMLHttpRequest();
 	try {
 		xhr.withCredentials = true;
@@ -328,12 +342,19 @@ function requestApi() {
 		// Ignore
 	}
 	xhr.onload = function() {
-		drawChart(eval("(" + xhr.responseText + ")"), now, 1);
+		drawChart(eval("(" + xhr.responseText + ")"));
+		chart.redraw();
+		if (interval < 15) {
+			until ++;
+		} else {
+			until += 15;
+		}
 	};
-	xhr.open("GET", apiUrl + now + "&_r=" + Math.random(), true);
+	xhr.open("GET", apiUrl + (interval < 15 ? until : Math.floor(until / 15)) + "&_r=" + Math.random(), true);
 	xhr.send(null);
 }
 
+divChart.style.height = DASHBOARD_HEIGHT + "px";
 Highcharts.setOptions({
 	global: {
 		useUTC: false,

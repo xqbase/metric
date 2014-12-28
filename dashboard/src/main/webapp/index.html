@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<script type="text/javascript" src="config.js"></script>
+	</head>
+	<body>
+		<div id="div"></div>
+		<script type="text/javascript"><!--
+
+var xhr = new XMLHttpRequest();
+try {
+	xhr.withCredentials = true;
+} catch (e) {
+	// Ignore
+}
+xhr.onload = function() {
+	var html = "";
+	var names = [];
+	for (var name in eval("(" + xhr.responseText + ")")) {
+		names.push(name);
+	}
+	names.sort();
+	for (var i = 0; i < names.length; i ++) {
+		var name = names[i];
+		if (!name.startsWith("_quarter.")) {
+			html += "<a href=\"dashboard.html#_name=" + name + "\" target=\"_blank\">" + name + "</a><br/>";
+		}
+	}
+	div.innerHTML = html;
+};
+xhr.open("GET", DASHBOARD_API + "metric.size/count?_group_by=name&_r=" + Math.random(), true);
+xhr.send(null);
+
+		--></script>
+	</body>
+</html>

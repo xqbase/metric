@@ -316,6 +316,7 @@ public class Collector {
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 360);
+		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 150000);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
 		String allowedRemote = p.getProperty("allowed_remote");
 		HashSet<String> allowedRemotes = null;
@@ -349,7 +350,7 @@ public class Collector {
 			if (serverId == 0) {
 				long period = Time.MINUTE * QUARTER;
 				timer.scheduleAtFixedRate(Runnables.wrap(() -> quarterly(db)),
-						period - (start - period / 2) % period,
+						period - (start - quarterDelay) % period,
 						period, TimeUnit.MILLISECONDS);
 			}
 
