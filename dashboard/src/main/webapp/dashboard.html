@@ -277,8 +277,9 @@ function reloadParams() {
 		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
 	}
 	if (!$("#btnNow").hasClass("active")) {
-		var time = Date.parse(txtDate.value + "T00:00:00");
-		hash += "&_until=" + (Math.floor((isNaN(time) ? new Date().getTime() : time) / MINUTE) +
+		var ymd = txtDate.value.split("-");
+		var time = (ymd.length == 3 ? new Date(ymd[0], ymd[1] - 1, ymd[2]) : new Date()).getTime(); 
+		hash += "&_until=" + (Math.floor(time / MINUTE) +
 				selHour.selectedIndex * 60 + selMinute.selectedIndex * 15);
 	}
 	for (var tagName in tagMap) {
