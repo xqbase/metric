@@ -2,16 +2,18 @@
 <html>
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" />
+		<link rel="stylesheet" type="text/css" href="css/calendar.css" />
 		<script type="text/javascript" src="js/jquery.min.js"></script>
 		<script type="text/javascript" src="js/highcharts.js"></script>
+		<script type="text/javascript" src="js/bootstrap.min.js"></script>
 		<script type="text/javascript" src="js/calendar.js"></script>
 		<script type="text/javascript" src="config.js"></script>
-		<link rel="stylesheet" type="text/css" href="css/calendar.css" />
 	</head>
 	<body>
-		<div id="divChart" style="width:100%"></div>
-		<div id="divTags" style="white-space:nowrap"></div>
-		<div style="white-space:nowrap">
+		<div id="divChart"></div>
+		<div class="panel-footer" id="divTags" style="white-space:nowrap"></div>
+		<div class="panel-footer" style="white-space:nowrap">
 			Method:
 			<select id="selMethod">
 				<option>SUM</option>
@@ -31,7 +33,10 @@
 				<option>6 Hours</option>
 				<option>1 Day</option>
 			</select>
-			Until: <input type="checkbox" id="chkNow" checked onclick="clickNow()">Now
+			<div class="btn-group" data-toggle="buttons">
+				<label class="btn btn-primary" id="btnNow">Now</label>
+			</div>
+			Until:
 			<input type="text" id="txtDate" value="" size="10" disabled>
 			<select id="selHour" disabled>
 				<option>00</option>
@@ -66,6 +71,7 @@
 			</select>
 			<input type="submit" onclick="reloadParams()">
 		</div>
+	</div>
 		<script type="text/javascript"><!--
 
 var MINUTE = 60000;
@@ -119,8 +125,7 @@ var HIGHCHARTS_OPTIONS = {
 	},
 	tooltip: {
 		formatter: function() {
-			var name = this.series.name;
-			return (groupKeys.length == 1 ? "" : "<b>" + name + "</b><br/>") +
+			return (groupKeys.length == 1 ? "" : "<b>" + this.series.name + "</b><br/>") +
 					Highcharts.dateFormat("%Y-%m-%d %H:%M:%S", this.x) + "<br/><b>" +
 					Highcharts.numberFormat(this.y, 2) + "</b>";
 		}
@@ -130,7 +135,7 @@ var HIGHCHARTS_OPTIONS = {
 	},
 };
 
-var paramMap, name, method, interval, now, until, tagMap, apiUrl;
+var paramMap, metricName, method, interval, now, until, tagMap, apiUrl;
 var timer = null, chart = null, groupKeys = [];
 
 function loadParams(reload) {
@@ -149,8 +154,8 @@ function loadParams(reload) {
 		paramMap[unescape(param.substring(0, j))] = unescape(param.substring(j + 1));
 	}
 
-	name = paramMap._name;
-	if (typeof name == "undefined") {
+	metricName = paramMap._name;
+	if (typeof metricName == "undefined") {
 		location.href = "index.html";
 		return;
 	}
@@ -168,7 +173,7 @@ function loadParams(reload) {
 	interval = index < 0 ? 0 : interval;
 	selInterval.selectedIndex = index < 0 ? 0 : index;
 
-	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + escape(name) + "/" + METHOD_NAME[method] +
+	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + escape(metricName) + "/" + METHOD_NAME[method] +
 			"?_length=" + DASHBOARD_LENGTH + "&_interval=" + (interval < 15 ? interval : interval / 15);
 
 	now = true;
@@ -183,8 +188,15 @@ function loadParams(reload) {
 			date.setTime(until * MINUTE);
 		}
 	}
-	chkNow.checked = now;
-	clickNow();
+	if (now) {
+		$("#btnNow").addClass("active");
+	} else {
+		$("#btnNow").removeClass("active");
+	}
+	txtDate.disabled = now;
+	selHour.disabled = now;
+	selMinute.disabled = now;
+	
 	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
 	selHour.selectedIndex = date.getHours();
 	selMinute.selectedIndex = Math.floor(date.getMinutes() / 15);
@@ -203,7 +215,7 @@ function loadParams(reload) {
 		tagMap = eval("(" + xhr.responseText + ")");
 		showTags();
 	};
-	xhr.open("GET", DASHBOARD_API + escape(name) + "/tags?_r=" + Math.random(), true);
+	xhr.open("GET", DASHBOARD_API + escape(metricName) + "/tags?_r=" + Math.random(), true);
 	xhr.send(null);
 }
 
@@ -259,12 +271,12 @@ function showTags() {
 }
 
 function reloadParams() {
-	var hash = "#_name=" + name + "&_method=" + METHOD_NAME[selMethod.selectedIndex] +
+	var hash = "#_name=" + escape(metricName) + "&_method=" + METHOD_NAME[selMethod.selectedIndex] +
 			"&_interval=" + INTERVAL[selInterval.selectedIndex];
 	if (selGroup.selectedIndex > 0) {
 		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
 	}
-	if (!chkNow.checked) {
+	if (!$("#btnNow").hasClass("active")) {
 		var time = Date.parse(txtDate.value + "T00:00:00");
 		hash += "&_until=" + (Math.floor((isNaN(time) ? new Date().getTime() : time) / MINUTE) +
 				selHour.selectedIndex * 60 + selMinute.selectedIndex * 15);
@@ -278,13 +290,6 @@ function reloadParams() {
 	}
 	location.href = hash;
 	loadParams(true);
-}
-
-function clickNow() {
-	var now_ = chkNow.checked;
-	txtDate.disabled = now_;
-	selHour.disabled = now_;
-	selMinute.disabled = now_;
 }
 
 function drawChart(data) {
@@ -319,7 +324,7 @@ function drawChart(data) {
 	if (groupKeys.length == 1 && groupKeys[0] == "_") {
 		chart.options.legend.enabled = false;
 	}
-	chart.setTitle({text: name}, null, false);
+	chart.setTitle({text: metricName}, null, false);
 	chart.yAxis[0].setTitle({text: METHOD_NAME[method].toUpperCase()}, false);
 	for (var i = 0; i < groupKeys.length; i ++) {
 		var key = groupKeys[i];
@@ -359,6 +364,12 @@ Highcharts.setOptions({
 	global: {
 		useUTC: false,
 	},
+});
+$("#btnNow").click(function () {
+	var now_ = !$(this).hasClass("active");
+	txtDate.disabled = now_;
+	selHour.disabled = now_;
+	selMinute.disabled = now_;
 });
 calendar.set("txtDate");
 loadParams(false);
