@@ -98,7 +98,8 @@ public class Collector {
 
 	private static double getDouble(DBObject row, String key) {
 		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).doubleValue() : 0;
+		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
+		return Double.isFinite(d) ? d : 0;
 	}
 
 	private static String getString(DBObject row, String key) {
@@ -440,9 +441,11 @@ public class Collector {
 						// For aggregation-before-collection metric, insert immediately
 						int count = Numbers.parseInt(paths[2]);
 						double sum = Numbers.parseDouble(paths[3]);
-						put(rowsMap, name, row(tagMap, "_minute", Numbers.parseInt(paths[1], minuteNow.get()),
-								count, sum, Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
-								paths.length == 6 ? sum * sum / count : Numbers.parseDouble(paths[6])));
+						put(rowsMap, name, row(tagMap, "_minute",
+								Numbers.parseInt(paths[1], minuteNow.get()), count, sum,
+								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
+								paths.length == 6 ? (count == 0 ? 0 : sum * sum / count) :
+								Numbers.parseDouble(paths[6])));
 					}
 				}
 				// Insert aggregation-before-collection metrics

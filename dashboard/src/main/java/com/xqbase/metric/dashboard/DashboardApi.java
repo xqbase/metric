@@ -125,7 +125,8 @@ public class DashboardApi extends HttpServlet {
 
 	private static double getDouble(DBObject row, String key) {
 		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).doubleValue() : 0;
+		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
+		return Double.isFinite(d) ? d : 0;
 	}
 
 	private static String getString(DBObject row, String key) {
