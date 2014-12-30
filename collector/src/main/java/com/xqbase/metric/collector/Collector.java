@@ -81,9 +81,6 @@ public class Collector {
 			String name = entry.getKey();
 			ArrayList<DBObject> rows = entry.getValue();
 			db.getCollection(name).insert(rows);
-			if (verbose) {
-				Log.d("Inserted " + rows.size() + " rows into metric \"" + name + "\".");
-			}
 		}
 	}
 
@@ -182,16 +179,17 @@ public class Collector {
 				continue;
 			}
 			DBCollection collection = db.getCollection(name);
+			DBCollection quarterCollection = db.getCollection("_quarter." + name);
 			// Remove stale
 			collection.remove(removeBefore);
 			collection.remove(removeAfter);
 			// Aggregate to quarter
-			ArrayList<DBObject> rows = new ArrayList<>();
 			int start = quarter - expire;
 			BasicDBObject tagsQuery = __("_name", name);
 			DBObject tagsRow = tags.findOne(tagsQuery);
 			start = tagsRow == null ? 0 : getInt(tagsRow, "_quarter");
 			for (int i = (start == 0 ? quarter - expire : start) + 1; i <= quarter; i ++) {
+				ArrayList<DBObject> rows = new ArrayList<>();
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
 				BasicDBObject range = __("$gte", Integer.valueOf((i - 1) * QUARTER + 1));
 				range.put("$lte", Integer.valueOf(i * QUARTER));
@@ -212,6 +210,9 @@ public class Collector {
 						value.add(newValue);
 					}
 				}
+				if (result.isEmpty()) {
+					continue;
+				}
 				for (Map.Entry<HashMap<String, String>, MetricValue> entry :
 						result.entrySet()) {
 					MetricValue value = entry.getValue();
@@ -219,12 +220,10 @@ public class Collector {
 							value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 				}
+				quarterCollection.insert(rows);
 			}
 			BasicDBObject update = __("$set", __("_quarter", Integer.valueOf(quarter)));
 			tags.update(tagsQuery, update, true, false);
-			if (!rows.isEmpty()) {
-				db.getCollection("_quarter." + name).insert(rows);
-			}
 		}
 		// Scan quarterly collections
 		for (String name : db.getCollectionNames()) {
@@ -393,6 +392,7 @@ public class Collector {
 				}
 
 				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+				HashMap<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
 					int length = line.length();
@@ -447,6 +447,14 @@ public class Collector {
 								paths.length == 6 ? (count == 0 ? 0 : sum * sum / count) :
 								Numbers.parseDouble(paths[6])));
 					}
+					if (verbose) {
+						Integer count = countMap.get(name);
+						countMap.put(name, Integer.valueOf(count == null ?
+								1 : count.intValue() + 1));
+					}
+				}
+				if (!countMap.isEmpty()) {
+					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {
