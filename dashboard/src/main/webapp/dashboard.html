@@ -3,378 +3,75 @@
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 		<link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" />
-		<link rel="stylesheet" type="text/css" href="css/calendar.css" />
+		<link rel="stylesheet" type="text/css" href="css/datepicker.css" />
 		<script type="text/javascript" src="js/jquery.min.js"></script>
 		<script type="text/javascript" src="js/highcharts.js"></script>
 		<script type="text/javascript" src="js/bootstrap.min.js"></script>
-		<script type="text/javascript" src="js/calendar.js"></script>
-		<script type="text/javascript" src="config.js"></script>
+		<script type="text/javascript" src="js/bootstrap-datepicker.js"></script>
 	</head>
 	<body>
 		<div id="divChart"></div>
-		<div class="panel-footer" id="divTags" style="white-space:nowrap"></div>
-		<div class="panel-footer" style="white-space:nowrap">
-			Method:
-			<select id="selMethod">
-				<option>SUM</option>
-				<option>COUNT</option>
-				<option>AVG</option>
-				<option>MAX</option>
-				<option>MIN</option>
-				<option>STD</option>
-			</select>
-			Group by: <select id="selGroup"></select>
-			Interval:
-			<select id="selInterval">
-				<option>1 Minute</option>
-				<option>5 Minutes</option>
-				<option>15 Minutes</option>
-				<option>1 Hour</option>
-				<option>6 Hours</option>
-				<option>1 Day</option>
-			</select>
+		<div class="panel-footer form-inline" style="white-space:nowrap" id="divTags"></div>
+		<div class="panel-footer form-inline" style="white-space:nowrap">
+			<div class="btn-group">
+				<button type="button" class="btn btn-default disabled">Method</button>
+				<div class="btn-group dropup">
+					<button type="button" class="btn btn-info dropdown-toggle" data-toggle="dropdown">
+						<span id="spnMethod"></span>
+						<span class="caret"></span>
+					</button>
+					<ul class="dropdown-menu" role="menu" id="ulMethod"></ul>
+				</div>
+			</div>
+			<div class="btn-group">
+				<button type="button" class="btn btn-default disabled">Group by</button>
+				<div class="btn-group dropup">
+					<button type="button" class="btn btn-info dropdown-toggle" data-toggle="dropdown">
+						<span id="spnGroup"></span>
+						<span class="caret"></span>
+					</button>
+					<ul class="dropdown-menu" role="menu" id="ulGroup"></ul>
+				</div>
+			</div>
+			<div class="btn-group">
+				<button type="button" class="btn btn-default disabled">Interval</button>
+				<div class="btn-group dropup">
+					<button type="button" class="btn btn-info dropdown-toggle" data-toggle="dropdown">
+						<span id="spnInterval"></span>
+						<span class="caret"></span>
+					</button>
+					<ul class="dropdown-menu" role="menu" id="ulInterval"></ul>
+				</div>
+			</div>
 			<div class="btn-group" data-toggle="buttons">
 				<label class="btn btn-primary" id="btnNow">Now</label>
 			</div>
-			Until:
-			<input type="text" id="txtDate" value="" size="10" disabled>
-			<select id="selHour" disabled>
-				<option>00</option>
-				<option>01</option>
-				<option>02</option>
-				<option>03</option>
-				<option>04</option>
-				<option>05</option>
-				<option>06</option>
-				<option>07</option>
-				<option>08</option>
-				<option>09</option>
-				<option>10</option>
-				<option>11</option>
-				<option>12</option>
-				<option>13</option>
-				<option>14</option>
-				<option>15</option>
-				<option>16</option>
-				<option>17</option>
-				<option>18</option>
-				<option>19</option>
-				<option>20</option>
-				<option>21</option>
-				<option>22</option>
-				<option>23</option>
-			</select>:<select id="selMinute" disabled>
-				<option>00</option>
-				<option>15</option>
-				<option>30</option>
-				<option>45</option>
-			</select>
-			<input type="submit" onclick="reloadParams()">
+			<div class="input-group">
+				<div class="input-group-addon">Until</div>
+				<input type="text" id="txtDate" class="form-control">
+			</div>
+			<div class="btn-group">
+				<div class="btn-group dropup">
+					<button type="button" class="btn btn-info dropdown-toggle" data-toggle="dropdown" id="btnHour">
+						<span id="spnHour"></span>
+						<span class="caret"></span>
+					</button>
+					<ul class="dropdown-menu" role="menu" id="ulHour"></ul>
+				</div>
+				<button type="button" class="btn btn-default disabled">:</button>
+				<div class="btn-group dropup">
+					<button type="button" class="btn btn-info dropdown-toggle" data-toggle="dropdown" id="btnMinute">
+						<span id="spnMinute"></span>
+						<span class="caret"></span>
+					</button>
+					<ul class="dropdown-menu" role="menu" id="ulMinute"></ul>
+				</div>
+			</div>
+			<div class="btn-group">
+				<label class="btn btn-primary" id="btnSubmit">Submit</label>
+			</div>
 		</div>
-	</div>
-		<script type="text/javascript"><!--
-
-var MINUTE = 60000;
-var METHOD_NAME = ["sum", "count", "avg", "max", "min", "std"];
-var METHOD_COMPARATOR = [
-	function(tag1, tag2) {
-		return tag2._sum - tag1._sum;
-	},
-	function(tag1, tag2) {
-		return tag2._count - tag1._count;
-	},
-	function(tag1, tag2) {
-		return tag2._sum / tag2._count - tag1._sum / tag1._count;
-	},
-	function(tag1, tag2) {
-		return tag2._max - tag1._max;
-	},
-	function(tag1, tag2) {
-		return tag2._min - tag1._min;
-	},
-	function(tag1, tag2) {
-		var base1 = tag1._sqr * tag1._count - tag1._sum * tag1._sum;
-		base1 = base1 < 0 ? 0 : Math.sqrt(base1) / tag1._count;
-		var base2 = tag2._sqr * tag2._count - tag2._sum * tag2._sum;
-		base2 = base2 < 0 ? 0 : Math.sqrt(base2) / tag2._count;
-		return base2 - base1;
-	},
-];
-var INTERVAL = [1, 5, 15, 60, 360, 1440];
-
-var HIGHCHARTS_OPTIONS = {
-	chart: {
-		animation: false,
-		renderTo: "divChart",
-	},
-	credits: {
-		enabled: false,
-	},
-	legend: {
-		align: "right",
-		verticalAlign: "top",
-		layout: "vertical",
-	},
-	plotOptions: {
-		series: {
-			animation: false,
-			marker: {
-				enabled: false,
-			},
-		},
-	},
-	tooltip: {
-		formatter: function() {
-			return (groupKeys.length == 1 ? "" : "<b>" + this.series.name + "</b><br/>") +
-					Highcharts.dateFormat("%Y-%m-%d %H:%M:%S", this.x) + "<br/><b>" +
-					Highcharts.numberFormat(this.y, 2) + "</b>";
-		}
-	},
-	xAxis: {
-		type: "datetime",
-	},
-};
-
-var paramMap, metricName, method, interval, now, until, tagMap, apiUrl;
-var timer = null, chart = null, groupKeys = [];
-
-function loadParams(reload) {
-	var hash = location.hash;
-	if (hash.charAt(0) == "#") {
-		hash = hash.substring(1);
-	}
-	paramMap = {};
-	var params = hash.split("&");
-	for (var i = 0; i < params.length; i ++) {
-		var param = params[i];
-		var j = param.indexOf("=");
-		if (j < 0) {
-			continue;
-		}
-		paramMap[unescape(param.substring(0, j))] = unescape(param.substring(j + 1));
-	}
-
-	metricName = paramMap._name;
-	if (typeof metricName == "undefined") {
-		location.href = "index.html";
-		return;
-	}
-
-	method = paramMap._method;
-	method = typeof method == "undefined" ? "sum" : method;
-	method = METHOD_NAME.indexOf(method);
-	method = method < 0 ? 0 : method;
-	selMethod.selectedIndex = method;
-
-	interval = paramMap._interval;
-	interval = typeof interval == "undefined" ? "1" : interval;
-	interval = parseInt(interval);
-	var index = INTERVAL.indexOf(interval);
-	interval = index < 0 ? 0 : interval;
-	selInterval.selectedIndex = index < 0 ? 0 : index;
-
-	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + escape(metricName) + "/" + METHOD_NAME[method] +
-			"?_length=" + DASHBOARD_LENGTH + "&_interval=" + (interval < 15 ? interval : interval / 15);
-
-	now = true;
-	var date = new Date();
-	until = Math.floor(date.getTime() / MINUTE);
-	var until_ = paramMap._until;
-	if (typeof until_ != "undefined") {
-		until_ = parseInt(until_);
-		if (!isNaN(until_)) {
-			now = false;
-			until = until_;
-			date.setTime(until * MINUTE);
-		}
-	}
-	if (now) {
-		$("#btnNow").addClass("active");
-	} else {
-		$("#btnNow").removeClass("active");
-	}
-	txtDate.disabled = now;
-	selHour.disabled = now;
-	selMinute.disabled = now;
-	
-	txtDate.value = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
-	selHour.selectedIndex = date.getHours();
-	selMinute.selectedIndex = Math.floor(date.getMinutes() / 15);
-
-	if (reload) {
-		showTags();
-		return;
-	}
-	var xhr = new XMLHttpRequest();
-	try {
-		xhr.withCredentials = true;
-	} catch (e) {
-		// Ignore
-	}
-	xhr.onload = function() {
-		tagMap = eval("(" + xhr.responseText + ")");
-		showTags();
-	};
-	xhr.open("GET", DASHBOARD_API + escape(metricName) + "/tags?_r=" + Math.random(), true);
-	xhr.send(null);
-}
-
-function showTags() {
-	var html = "";
-	var groupBy = paramMap._group_by;
-	var groupHtml = "<option ";
-	if (typeof groupBy != "undefined") {
-		groupHtml += "selected ";
-	}
-	groupHtml += "value=\"_\">===NONE===</option>";
-
-	var methodComparator = METHOD_COMPARATOR[method];
-	for (var tagName in tagMap) {
-		var tags = tagMap[tagName];
-		tags.sort(methodComparator);
-		html += tagName + "=<select id=\"tag_" + tagName + "\">";
-		var selectedTag = paramMap[tagName];
-		html += "<option ";
-		if (typeof selectedTag == "undefined") {
-			html += "selected ";
-		}
-		html += "value=\"_\">===ALL===</option>";
-		for (var i = 0; i < tags.length; i ++) {
-			var tag = tags[i];
-			html += "<option ";
-			if (selectedTag == tag._value) {
-				apiUrl += "&" + escape(tagName) + "=" + escape(selectedTag);
-				html += "selected ";
-			}
-			html += "value=\"" + tag._value + "\">" + tag._value + "</option>";
-		}
-		html += "</select>\n";
-
-		groupHtml += "<option ";
-		if (groupBy == tagName) {
-			apiUrl += "&_group_by=" + groupBy;
-			groupHtml += "selected ";
-		}
-		groupHtml += "value=\"" + tagName + "\">" + tagName + "</option>";
-	}
-	apiUrl += "&_end=";
-
-	divTags.innerHTML = html;
-	selGroup.innerHTML = groupHtml;
-
-	chart = null;
-	if (timer != null) {
-		clearInterval(timer);
-	}
-	timer = now ? setInterval(requestApi, interval < 15 ? MINUTE : MINUTE * 15) : null;
-	requestApi();
-}
-
-function reloadParams() {
-	var hash = "#_name=" + escape(metricName) + "&_method=" + METHOD_NAME[selMethod.selectedIndex] +
-			"&_interval=" + INTERVAL[selInterval.selectedIndex];
-	if (selGroup.selectedIndex > 0) {
-		hash += "&_group_by=" + selGroup.options[selGroup.selectedIndex].value;
-	}
-	if (!$("#btnNow").hasClass("active")) {
-		var ymd = txtDate.value.split("-");
-		var time = (ymd.length == 3 ? new Date(ymd[0], ymd[1] - 1, ymd[2]) : new Date()).getTime(); 
-		hash += "&_until=" + (Math.floor(time / MINUTE) +
-				selHour.selectedIndex * 60 + selMinute.selectedIndex * 15);
-	}
-	for (var tagName in tagMap) {
-		var sel = window["tag_" + tagName];
-		var value = sel.options[sel.selectedIndex].value;
-		if (value != "_") {
-			hash += "&" + escape(tagName) + "=" + escape(value);
-		}
-	}
-	location.href = hash;
-	loadParams(true);
-}
-
-function drawChart(data) {
-	var pointStart = until - (DASHBOARD_LENGTH - 1) * interval;
-	pointStart = interval < 15 ? pointStart * MINUTE : Math.floor(pointStart / 15) * MINUTE * 15;
-	var pointInterval = interval * MINUTE;
-	if (chart != null) {
-		for (var i = 0; i < groupKeys.length; i ++) {
-			chart.series[i].update({
-				pointStart: pointStart,
-				pointInterval: pointInterval,
-				data: data[groupKeys[i]],
-			}, false);
-		}
-		return;
-	}
-	groupKeys = [];
-	var valueMap = {};
-	for (var key in data) {
-		var line = data[key];
-		var value = 0;
-		for (var i = 0; i < line.length; i ++) {
-			value += line[i];
-		}
-		groupKeys.push(key);
-		valueMap[key] = value;
-	}
-	groupKeys.sort(function(key1, key2) {
-		return valueMap[key2] - valueMap[key1];
-	});
-	chart = new Highcharts.Chart(HIGHCHARTS_OPTIONS);
-	if (groupKeys.length == 1 && groupKeys[0] == "_") {
-		chart.options.legend.enabled = false;
-	}
-	chart.setTitle({text: metricName}, null, false);
-	chart.yAxis[0].setTitle({text: METHOD_NAME[method].toUpperCase()}, false);
-	for (var i = 0; i < groupKeys.length; i ++) {
-		var key = groupKeys[i];
-		chart.addSeries({
-			name: key,
-			pointStart: pointStart,
-			pointInterval: pointInterval,
-			data: data[key],
-			zIndex: groupKeys.length - i,
-			visible: i < DASHBOARD_SERIES,
-		}, false);
-	}
-}
-
-function requestApi() {
-	var xhr = new XMLHttpRequest();
-	try {
-		xhr.withCredentials = true;
-	} catch (e) {
-		// Ignore
-	}
-	xhr.onload = function() {
-		drawChart(eval("(" + xhr.responseText + ")"));
-		chart.redraw();
-		if (interval < 15) {
-			until ++;
-		} else {
-			until += 15;
-		}
-	};
-	xhr.open("GET", apiUrl + (interval < 15 ? until : Math.floor(until / 15)) + "&_r=" + Math.random(), true);
-	xhr.send(null);
-}
-
-divChart.style.height = DASHBOARD_HEIGHT + "px";
-Highcharts.setOptions({
-	global: {
-		useUTC: false,
-	},
-});
-$("#btnNow").click(function () {
-	var now_ = !$(this).hasClass("active");
-	txtDate.disabled = now_;
-	selHour.disabled = now_;
-	selMinute.disabled = now_;
-});
-calendar.set("txtDate");
-loadParams(false);
-
-		--></script>
+		<script type="text/javascript" src="config.js"></script>
+		<script type="text/javascript" src="dashboard.js"></script>
 	</body>
 </html>
