@@ -60,9 +60,9 @@ var HIGHCHARTS_OPTIONS = {
 	},
 };
 
-var paramMap, metricName, method, interval, now, until, tagMap, apiUrl, html;
+var paramMap, metricName, method, interval, now, until, apiUrl;
 var timer = null, chart = null, groupKeys = [];
-var selectedMethod, selectedGroup, selectedInterval, selectedNow, selectedHour, selectedMinute;
+var selectedMethod, selectedGroup, selectedInterval, selectedNow, selectedHour, selectedMinute, selectedTags;
 
 function loadParams(reload) {
 	var hash = location.hash;
@@ -91,7 +91,7 @@ function loadParams(reload) {
 	method = METHOD_NAME.indexOf(method);
 	method = method < 0 ? 0 : method;
 	selectedMethod = method;
-	$("#spnMethod").html(METHOD_NAME[method].toUpperCase());
+	$("#spnMethod").text(METHOD_NAME[method].toUpperCase());
 
 	interval = paramMap._interval;
 	interval = typeof interval == "undefined" ? "1" : interval;
@@ -99,7 +99,7 @@ function loadParams(reload) {
 	var index = Math.max(0, INTERVAL.indexOf(interval));
 	interval = INTERVAL[index];
 	selectedInterval = index < 0 ? 0 : index;
-	$("#spnInterval").html(INTERVAL_TEXT[index]);
+	$("#spnInterval").text(INTERVAL_TEXT[index]);
 
 	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + escape(metricName) + "/" + METHOD_NAME[method] +
 			"?_length=" + DASHBOARD_LENGTH + "&_interval=" + (interval < 15 ? interval : interval / 15);
@@ -127,12 +127,12 @@ function loadParams(reload) {
 
 	$("#txtDate").val(date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate());
 	selectedHour = date.getHours();
-	$("#spnHour").html(("" + (100 + selectedHour)).substring(1));
+	$("#spnHour").text(("" + (100 + selectedHour)).substring(1));
 	selectedMinute = Math.floor(date.getMinutes() / 15);
-	$("#spnMinute").html(("" + (100 + selectedMinute * 15)).substring(1));
+	$("#spnMinute").text(("" + (100 + selectedMinute * 15)).substring(1));
 
 	if (reload) {
-		showTags();
+		loadParams2();
 		return;
 	}
 	var xhr = new XMLHttpRequest();
@@ -142,51 +142,78 @@ function loadParams(reload) {
 		// Ignore
 	}
 	xhr.onload = function() {
-		tagMap = eval("(" + xhr.responseText + ")");
-		showTags();
+		showTags(eval("(" + xhr.responseText + ")"));
+		loadParams2();
 	};
 	xhr.open("GET", DASHBOARD_API + escape(metricName) + "/tags?_r=" + Math.random(), true);
 	xhr.send(null);
 }
 
-function showTags() {
-	var html = "";
-	var groupBy = paramMap._group_by;
-	var groupHtml = "<li onclick=\"clickGroup('_')\"><a>===NONE===</a></li>";
-	$("#spnGroup").html("===NONE===");
-
+function showTags(tagMap) {
+	selectedTags = {};
+	var groupHtml = "<li value=\"_\"><a>===NONE===</a></li>";
+	var tagsHtml = "";
 	var methodComparator = METHOD_COMPARATOR[method];
 	for (var tagName in tagMap) {
+		selectedTags[tagName] = "_";
+		groupHtml = "<li value=\"" + tagName + "\"><a>" + tagName + "</a></li>" + groupHtml;
 		var tags = tagMap[tagName];
 		tags.sort(methodComparator);
-		html += tagName + "=<select id=\"tag_" + tagName + "\">";
-		var selectedTag = paramMap[tagName];
-		html += "<option ";
-		if (typeof selectedTag == "undefined") {
-			html += "selected ";
-		}
-		html += "value=\"_\">===ALL===</option>";
+		tagsHtml +=
+				"<div class=\"btn-group\">" +
+					"<button type=\"button\" class=\"btn btn-danger disabled\">" + tagName + "</button>" +
+					"<div class=\"btn-group dropup\">" +
+						"<button type=\"button\" class=\"btn btn-info dropdown-toggle\" data-toggle=\"dropdown\">" +
+							"<span id=\"spnTag_" + tagName + "\"></span>" +
+							"<span class=\"caret\"></span>" +
+						"</button>" +
+						"<ul class=\"dropdown-menu\" role=\"menu\" id=\"ulTag_" + tagName + "\">";
+		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
-			var tag = tags[i];
-			html += "<option ";
-			if (selectedTag == tag._value) {
-				apiUrl += "&" + escape(tagName) + "=" + escape(selectedTag);
-				html += "selected ";
-			}
-			html += "value=\"" + tag._value + "\">" + tag._value + "</option>";
+			tagValue = tags[i]._value;
+			valuesHtml = "<li value=\"" + tagValue + "\"><a>" + tagValue + "</a></li>" + valuesHtml;
 		}
-		html += "</select>\n";
+		tagsHtml += valuesHtml +
+						"</ul>" +
+					"</div>" +
+				"</div> ";
+	}
 
-		groupHtml = "<li onclick=\"clickGroup('" + tagName + "')\"><a>" + tagName + "</a></li>" + groupHtml;
-		if (groupBy == tagName) {
-			apiUrl += "&_group_by=" + groupBy;
-			$("#spnGroup").html(groupBy);
+	$("#ulGroup").html(groupHtml);
+	$("#ulGroup li").click(function() {
+		selectedGroup = $(this).attr("value");
+		$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : selectedGroup);
+	});
+
+	$("#divTags").html(tagsHtml);
+	for (var tagName in tagMap) {
+		$("#ulTag_" + tagName + " li").click((function(tagName_) {
+			return function() {
+				var tagValue = $(this).attr("value");
+				$("#spnTag_" + tagName_).text(tagValue == "_" ? "===ALL===" : tagValue);
+				selectedTags[tagName_] = tagValue;
+			};
+		})(tagName));
+	}
+}
+
+function loadParams2() {
+	var groupBy = paramMap._group_by;
+	selectedGroup = (typeof groupBy == "undefined" ? "_" : groupBy);
+	$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : selectedGroup);
+	if (selectedGroup != "_") {
+		apiUrl += "&_group_by=" + groupBy;
+	}
+	for (var tagName in selectedTags) {
+		var tagValue = paramMap[tagName];
+		tagValue = (typeof tagValue == "undefined" ? "_" : tagValue);
+		selectedTags[tagName] = tagValue;
+		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : tagValue);
+		if (tagValue != "_") {
+			apiUrl += "&" + escape(tagName) + "=" + escape(tagValue);
 		}
 	}
 	apiUrl += "&_end=";
-
-	divTags.innerHTML = html;
-	$("#ulGroup").html(groupHtml);
 
 	chart = null;
 	if (timer != null) {
@@ -194,6 +221,26 @@ function showTags() {
 	}
 	timer = now ? setInterval(requestApi, interval < 15 ? MINUTE : MINUTE * 15) : null;
 	requestApi();
+}
+
+function requestApi() {
+	var xhr = new XMLHttpRequest();
+	try {
+		xhr.withCredentials = true;
+	} catch (e) {
+		// Ignore
+	}
+	xhr.onload = function() {
+		drawChart(eval("(" + xhr.responseText + ")"));
+		chart.redraw();
+		if (interval < 15) {
+			until ++;
+		} else {
+			until += 15;
+		}
+	};
+	xhr.open("GET", apiUrl + (interval < 15 ? until : Math.floor(until / 15)) + "&_r=" + Math.random(), true);
+	xhr.send(null);
 }
 
 function drawChart(data) {
@@ -243,41 +290,6 @@ function drawChart(data) {
 	}
 }
 
-function requestApi() {
-	var xhr = new XMLHttpRequest();
-	try {
-		xhr.withCredentials = true;
-	} catch (e) {
-		// Ignore
-	}
-	xhr.onload = function() {
-		drawChart(eval("(" + xhr.responseText + ")"));
-		chart.redraw();
-		if (interval < 15) {
-			until ++;
-		} else {
-			until += 15;
-		}
-	};
-	xhr.open("GET", apiUrl + (interval < 15 ? until : Math.floor(until / 15)) + "&_r=" + Math.random(), true);
-	xhr.send(null);
-}
-
-function clickMethod(i) {
-	selectedMethod = i;
-	$("#spnMethod").html(METHOD_NAME[i].toUpperCase());
-}
-
-function clickGroup(groupBy) {
-	selectedGroup = groupBy;
-	$("#spnGroup").html(groupBy == "_" ? "===NONE===" : groupBy);
-}
-
-function clickInterval(i) {
-	selectedInterval = i;
-	$("#spnInterval").html(INTERVAL_TEXT[i]);
-}
-
 function clickNow() {
 	$("#txtDate").prop("disabled", selectedNow);
 	if (selectedNow) {
@@ -287,16 +299,6 @@ function clickNow() {
 		$("#btnHour").removeClass("disabled");
 		$("#btnMinute").removeClass("disabled");
 	}
-}
-
-function clickHour(i) {
-	selectedHour = i;
-	$("#spnHour").html(("" + (100 + i)).substring(1));
-}
-
-function clickMinute(i) {
-	selectedMinute = i;
-	$("#spnMinute").html(("" + (100 + i * 15)).substring(1));
 }
 
 $("#divChart").css({
@@ -309,17 +311,25 @@ Highcharts.setOptions({
 	},
 });
 
-html = "";
+var methodHtml = "";
 for (var i = 0; i < METHOD_NAME.length; i ++) {
-	html = "<li onclick=\"clickMethod(" + i + ")\"><a>" + METHOD_NAME[i].toUpperCase() + "</a></li>" + html;
+	methodHtml = "<li value=\"" + i + "\"><a>" + METHOD_NAME[i].toUpperCase() + "</a></li>" + methodHtml;
 }
-$("#ulMethod").html(html);
+$("#ulMethod").html(methodHtml);
+$("#ulMethod li").click(function() {
+	selectedMethod = parseInt($(this).attr("value"));
+	$("#spnMethod").text(METHOD_NAME[selectedMethod].toUpperCase());
+});
 
-html = "";
+var intervalHtml = "";
 for (var i = 0; i < INTERVAL_TEXT.length; i ++) {
-	html = "<li onclick=\"clickInterval(" + i + ")\"><a>" + INTERVAL_TEXT[i] + "</a></li>" + html;
+	intervalHtml = "<li value=\"" + i + "\"><a>" + INTERVAL_TEXT[i] + "</a></li>" + intervalHtml;
 }
-$("#ulInterval").html(html);
+$("#ulInterval").html(intervalHtml);
+$("#ulInterval li").click(function() {
+	selectedInterval = parseInt($(this).attr("value"));
+	$("#spnInterval").text(INTERVAL_TEXT[selectedInterval]);
+});
 
 $("#txtDate").datepicker({
 	autoclose: true,
@@ -327,17 +337,25 @@ $("#txtDate").datepicker({
 	orientation: "bottom",
 });
 
-html = "";
+var hourHtml = "";
 for (var i = 0; i < 24; i ++) {
-	html = "<li onclick=\"clickHour(" + i + ")\"><a>" + ("" + (100 + i)).substring(1) + "</a></li>" + html;
+	hourHtml = "<li value=\"" + i + "\"><a>" + ("" + (100 + i)).substring(1) + "</a></li>" + hourHtml;
 }
-$("#ulHour").html(html);
+$("#ulHour").html(hourHtml);
+$("#ulHour li").click(function() {
+	selectedHour = parseInt($(this).attr("value"));
+	$("#spnHour").text(("" + (100 + selectedHour)).substring(1));
+});
 
-html = "";
+var minuteHtml = "";
 for (var i = 0; i < 4; i ++) {
-	html = "<li onclick=\"clickMinute(" + i + ")\"><a>" + ("" + (100 + i * 15)).substring(1) + "</a></li>" + html;
+	minuteHtml = "<li value=\"" + i + "\"><a>" + ("" + (100 + i * 15)).substring(1) + "</a></li>" + minuteHtml;
 }
-$("#ulMinute").html(html);
+$("#ulMinute").html(minuteHtml);
+$("#ulMinute li").click(function() {
+	selectedMinute = parseInt($(this).attr("value"));
+	$("#spnMinute").text(("" + (100 + selectedMinute * 15)).substring(1));
+});
 
 $("#btnNow").click(function() {
 	selectedNow = !selectedNow;
@@ -347,20 +365,19 @@ $("#btnNow").click(function() {
 $("#btnSubmit").click(function() {
 	var hash = "#_name=" + escape(metricName) + "&_method=" + METHOD_NAME[selectedMethod] +
 			"&_interval=" + INTERVAL[selectedInterval];
-	if (selectedGroup != "_") {
-		hash += "&_group_by=" + selectedGroup;
-	}
 	if (!selectedNow) {
 		var ymd = $("#txtDate").val().split("-");
 		var time = (ymd.length == 3 ? new Date(ymd[0], ymd[1] - 1, ymd[2]) : new Date()).getTime(); 
 		hash += "&_until=" + (Math.floor(time / MINUTE) +
 				selectedHour * 60 + selectedMinute * 15);
 	}
-	for (var tagName in tagMap) {
-		var sel = window["tag_" + tagName];
-		var value = sel.options[sel.selectedIndex].value;
-		if (value != "_") {
-			hash += "&" + escape(tagName) + "=" + escape(value);
+	if (selectedGroup != "_") {
+		hash += "&_group_by=" + selectedGroup;
+	}
+	for (var tagName in selectedTags) {
+		var tagValue = selectedTags[tagName];
+		if (typeof tagValue != "undefined" && tagValue != "_") {
+			hash += "&" + escape(tagName) + "=" + escape(tagValue);
 		}
 	}
 	location.href = hash;
