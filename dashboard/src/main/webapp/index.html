@@ -4,40 +4,24 @@
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 		<script type="text/javascript" src="js/jquery.min.js"></script>
 		<script type="text/javascript" src="js/bootstrap.min.js"></script>
-		<script type="text/javascript" src="config.js"></script>
 		<link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" />
+		<style>
+td {
+	padding-right: 1em;
+	padding-bottom: 1px;
+}
+		</style>
 	</head>
 	<body>
 		<div class="panel panel-default">
 			<div class="panel-heading">We have these metrics ...</div>
-			<div class="panel-body" id="div"></div>
+			<div class="panel-body">
+				<table>
+					<tbody id="tbody"></tbody>
+				</table>
+			</div>
 		</div>
-		<script type="text/javascript"><!--
-
-var xhr = new XMLHttpRequest();
-try {
-	xhr.withCredentials = true;
-} catch (e) {
-	// Ignore
-}
-xhr.onload = function() {
-	var html = "";
-	var names = [];
-	for (var name in eval("(" + xhr.responseText + ")")) {
-		names.push(name);
-	}
-	names.sort();
-	for (var i = 0; i < names.length; i ++) {
-		var name = names[i];
-		if (name.substring(0, 9) != "_quarter.") {
-			html += "<a href=\"dashboard.html#_name=" + name + "\" target=\"_blank\">" + name + "</a><br/>";
-		}
-	}
-	div.innerHTML = html;
-};
-xhr.open("GET", DASHBOARD_API + "metric.size/count?_group_by=name&_length=2&_r=" + Math.random(), true);
-xhr.send(null);
-
-		--></script>
+		<script type="text/javascript" src="config.js"></script>
+		<script type="text/javascript" src="index.js"></script>
 	</body>
 </html>
