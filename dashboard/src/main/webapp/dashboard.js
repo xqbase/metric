@@ -30,7 +30,8 @@ var INTERVAL_TEXT = ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour", "6 Hours",
 var HIGHCHARTS_OPTIONS = {
 	chart: {
 		animation: false,
-		renderTo: "divChart",
+		renderTo: DASHBOARD_TAGS_TOP ? "divChartBottom" : "divChartTop",
+		type: DASHBOARD_CHART_TYPE,
 	},
 	credits: {
 		enabled: false,
@@ -44,7 +45,7 @@ var HIGHCHARTS_OPTIONS = {
 		series: {
 			animation: false,
 			marker: {
-				enabled: false,
+				enabled: DASHBOARD_MARKER,
 			},
 		},
 	},
@@ -59,6 +60,13 @@ var HIGHCHARTS_OPTIONS = {
 		type: "datetime",
 	},
 };
+
+function APPEND_HTML(html, line) {
+	return DASHBOARD_TAGS_TOP ? html + line : line + html;
+}
+
+var DROPDOWN_DIV = ["Method", "Group", "Interval", "Hour", "Minute"];
+var DROPDOWN_CLASS = DASHBOARD_TAGS_TOP ? "dropdown" : "dropup";
 
 var paramMap, metricName, method, interval, now, until, apiUrl;
 var timer = null, chart = null, groupKeys = [];
@@ -156,13 +164,13 @@ function showTags(tagMap) {
 	var methodComparator = METHOD_COMPARATOR[method];
 	for (var tagName in tagMap) {
 		selectedTags[tagName] = "_";
-		groupHtml = "<li value=\"" + tagName + "\"><a>" + tagName + "</a></li>" + groupHtml;
+		groupHtml = APPEND_HTML(groupHtml, "<li value=\"" + tagName + "\"><a>" + tagName + "</a></li>");
 		var tags = tagMap[tagName];
 		tags.sort(methodComparator);
 		tagsHtml +=
 				"<div class=\"btn-group\">" +
 					"<button type=\"button\" class=\"btn btn-danger disabled\">" + tagName + "</button>" +
-					"<div class=\"btn-group dropup\">" +
+					"<div class=\"btn-group " + DROPDOWN_CLASS + "\">" +
 						"<button type=\"button\" class=\"btn btn-info dropdown-toggle\" data-toggle=\"dropdown\">" +
 							"<span id=\"spnTag_" + tagName + "\"></span>" +
 							"<span class=\"caret\"></span>" +
@@ -171,7 +179,7 @@ function showTags(tagMap) {
 		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
 			tagValue = tags[i]._value;
-			valuesHtml = "<li value=\"" + tagValue + "\"><a>" + tagValue + "</a></li>" + valuesHtml;
+			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + tagValue + "\"><a>" + tagValue + "</a></li>");
 		}
 		tagsHtml += valuesHtml +
 						"</ul>" +
@@ -301,9 +309,15 @@ function clickNow() {
 	}
 }
 
-$("#divChart").css({
+for (var i = 0; i < DROPDOWN_DIV.length; i ++) {
+	$("#div" + DROPDOWN_DIV[i]).addClass(DROPDOWN_CLASS);
+}
+
+$(DASHBOARD_TAGS_TOP ? "#divChartBottom" : "#divChartTop").css({
 	height: DASHBOARD_HEIGHT + "px",
 });
+
+$(DASHBOARD_TAGS_TOP ? "#divChartTop" : "#divChartBottom").hide();
 
 Highcharts.setOptions({
 	global: {
@@ -313,7 +327,7 @@ Highcharts.setOptions({
 
 var methodHtml = "";
 for (var i = 0; i < METHOD_NAME.length; i ++) {
-	methodHtml = "<li value=\"" + i + "\"><a>" + METHOD_NAME[i].toUpperCase() + "</a></li>" + methodHtml;
+	methodHtml = APPEND_HTML(methodHtml, "<li value=\"" + i + "\"><a>" + METHOD_NAME[i].toUpperCase() + "</a></li>");
 }
 $("#ulMethod").html(methodHtml);
 $("#ulMethod li").click(function() {
@@ -323,7 +337,7 @@ $("#ulMethod li").click(function() {
 
 var intervalHtml = "";
 for (var i = 0; i < INTERVAL_TEXT.length; i ++) {
-	intervalHtml = "<li value=\"" + i + "\"><a>" + INTERVAL_TEXT[i] + "</a></li>" + intervalHtml;
+	intervalHtml = APPEND_HTML(intervalHtml, "<li value=\"" + i + "\"><a>" + INTERVAL_TEXT[i] + "</a></li>");
 }
 $("#ulInterval").html(intervalHtml);
 $("#ulInterval li").click(function() {
@@ -334,12 +348,12 @@ $("#ulInterval li").click(function() {
 $("#txtDate").datepicker({
 	autoclose: true,
 	format: "yyyy-mm-dd",
-	orientation: "bottom",
+	orientation: DASHBOARD_TAGS_TOP ? "top" : "bottom",
 });
 
 var hourHtml = "";
 for (var i = 0; i < 24; i ++) {
-	hourHtml = "<li value=\"" + i + "\"><a>" + ("" + (100 + i)).substring(1) + "</a></li>" + hourHtml;
+	hourHtml = APPEND_HTML(hourHtml, "<li value=\"" + i + "\"><a>" + ("" + (100 + i)).substring(1) + "</a></li>");
 }
 $("#ulHour").html(hourHtml);
 $("#ulHour li").click(function() {
@@ -349,7 +363,7 @@ $("#ulHour li").click(function() {
 
 var minuteHtml = "";
 for (var i = 0; i < 4; i ++) {
-	minuteHtml = "<li value=\"" + i + "\"><a>" + ("" + (100 + i * 15)).substring(1) + "</a></li>" + minuteHtml;
+	minuteHtml = APPEND_HTML(minuteHtml, "<li value=\"" + i + "\"><a>" + ("" + (100 + i * 15)).substring(1) + "</a></li>");
 }
 $("#ulMinute").html(minuteHtml);
 $("#ulMinute li").click(function() {
