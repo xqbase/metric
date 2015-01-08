@@ -290,12 +290,12 @@ public class Collector {
 				}
 				updateValue.put(tagEntry.getKey(), tagValues);
 			}
+			if (!updateValue.isEmpty()) {
+				tags.update(tagsQuery, __("$set", updateValue), true, false);
+			}
 			unsetTags.keySet().removeAll(tagMap.keySet());
-			BasicDBObject update = __("$set", updateValue);
-			tags.update(tagsQuery, update, true, false);
 			if (!unsetTags.isEmpty()) {
-				update = __("$unset", unsetTags);
-				tags.update(tagsQuery, update, true, false);
+				tags.update(tagsQuery, __("$unset", unsetTags), true, false);
 			}
 		}
 	}
