@@ -175,7 +175,7 @@ function showTags(tagMap) {
 							"<span id=\"spnTag_" + tagName + "\"></span>" +
 							"<span class=\"caret\"></span>" +
 						"</button>" +
-						"<ul class=\"dropdown-menu\" role=\"menu\" id=\"ulTag_" + tagName + "\">";
+						"<ul class=\"dropdown-menu\" role=\"menu\" value=\"" + tagName + "\">";
 		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
 			tagValue = tags[i]._value;
@@ -194,15 +194,12 @@ function showTags(tagMap) {
 	});
 
 	$("#divTags").html(tagsHtml);
-	for (var tagName in tagMap) {
-		$("#ulTag_" + tagName + " li").click((function(tagName_) {
-			return function() {
-				var tagValue = $(this).attr("value");
-				$("#spnTag_" + tagName_).text(tagValue == "_" ? "===ALL===" : tagValue);
-				selectedTags[tagName_] = tagValue;
-			};
-		})(tagName));
-	}
+	$("#divTags li").click(function() {
+		var tagName = $(this).parent().attr("value");
+		var tagValue = $(this).attr("value");
+		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : tagValue);
+		selectedTags[tagName] = tagValue;
+	});
 }
 
 function loadParams2() {
