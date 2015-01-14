@@ -272,6 +272,7 @@ public class Collector {
 					for (Map.Entry<HashMap<String, String>, MetricValue> entry :
 							result.entrySet()) {
 						MetricValue value = entry.getValue();
+						// {"_quarter": i}, but not {"_quarter": quarter} !
 						rows.add(row(entry.getKey(), "_quarter", i,
 								value.getCount(), value.getSum(),
 								value.getMax(), value.getMin(), value.getSqr()));
@@ -282,7 +283,8 @@ public class Collector {
 				if (!tagMap.isEmpty()) {
 					BasicDBObject row = getTagRow(tagMap);
 					row.put("_name", name);
-					row.put("_quarter", Integer.valueOf(quarter));
+					// {"_quarter": i}, but not {"_quarter": quarter} !
+					row.put("_quarter", Integer.valueOf(i));
 					tagsQuarter.insert(row);
 				}
 			}
