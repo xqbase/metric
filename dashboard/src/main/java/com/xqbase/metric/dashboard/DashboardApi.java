@@ -185,7 +185,7 @@ public class DashboardApi extends HttpServlet {
 		if (method == TAGS_METHOD) {
 			DBObject tagsRow;
 			try {
-				tagsRow = db.getCollection("_tags").
+				tagsRow = db.getCollection("_meta.tags_all").
 						findOne(new BasicDBObject("_name", metricName));
 			} catch (MongoException e) {
 				error500(resp, e);

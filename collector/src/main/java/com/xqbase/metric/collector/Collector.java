@@ -313,11 +313,11 @@ public class Collector {
 						if (!(o instanceof DBObject)) {
 							continue;
 						}
-						DBObject row_ = (DBObject) o;
-						putTagValue(tagMap, tagKey, getString(row, "_value"),
-								new MetricValue(getInt(row_, "_count"),
-								getDouble(row_, "_sum"), getDouble(row_, "_max"),
-								getDouble(row_, "_min"), getDouble(row_, "_sqr")));
+						DBObject oo = (DBObject) o;
+						putTagValue(tagMap, tagKey, getString(oo, "_value"),
+								new MetricValue(getInt(oo, "_count"),
+								getDouble(oo, "_sum"), getDouble(oo, "_max"),
+								getDouble(oo, "_min"), getDouble(oo, "_sqr")));
 					}
 				}
 			}
