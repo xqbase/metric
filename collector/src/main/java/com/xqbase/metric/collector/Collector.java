@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -41,7 +42,6 @@ import com.xqbase.util.Time;
 
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
-	private static final int QUARTER = 15;
 
 	private static String decode(String s) {
 		try {
@@ -104,6 +104,11 @@ public class Collector {
 		return value instanceof String ? (String) value : "_";
 	}
 
+	private static List<?> getList(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof List ? (List<?>) value : Collections.emptyList();
+	}
+
 	private static BasicDBObject __(String key, Object value) {
 		return new BasicDBObject(key, value);
 	}
@@ -113,13 +118,10 @@ public class Collector {
 	private static final BasicDBObject INDEX_NAME = __("_name", Integer.valueOf(1));
 
 	private static Service service = new Service();
-	private static AtomicInteger minuteNow = new AtomicInteger();
-	private static AtomicInteger quarterNow = new AtomicInteger();
-	private static int serverId, expire, tagsExpire;
+	private static int serverId, expire;
 	private static boolean verbose;
 
-	private static void minutely(DB db) {
-		int minute = minuteNow.incrementAndGet();
+	private static void minutely(DB db, int minute) {
 		// Insert aggregation-during-collection metrics
 		HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
@@ -136,15 +138,20 @@ public class Collector {
 		}
 		ArrayList<DBObject> rows = new ArrayList<>();
 		for (String name : db.getCollectionNames()) {
-			if (name.startsWith("system.") || name.equals("_tags")) {
+			if (name.startsWith("system.") || name.startsWith("_meta.")) {
 				continue;
 			}
 			DBCollection collection = db.getCollection(name);
 			int count = (int) collection.count();
 			if (count == 0) {
+				// Remove disappeared metric collections
 				collection.drop();
 				if (name.startsWith("_quarter.")) {
-					db.getCollection("_tags").remove(__("name", name.substring(9)));
+					// Remove disappeared quarterly metric from meta collections
+					BasicDBObject query = __("name", name.substring(9));
+					db.getCollection("_meta.aggregated").remove(query);
+					db.getCollection("_meta.tags_quarter").remove(query);
+					db.getCollection("_meta.tags_all").remove(query);
 				}
 			} else {
 				if (!name.startsWith("_quarter.")) {
@@ -159,22 +166,62 @@ public class Collector {
 		}
 	}
 
-	private static void quarterly(DB db) {
-		int quarter = quarterNow.incrementAndGet();
+	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
+			String tagKey, String tagValue, MetricValue metricValue) {
+		HashMap<String, MetricValue> tagValues = tagMap.get(tagKey);
+		if (tagValues == null) {
+			tagValues = new HashMap<>();
+			tagMap.put(tagKey, tagValues);
+			// Must use "newValue.clone()" here, because many tags may share one "newValue" 
+			tagValues.put(tagValue, metricValue.clone());
+		} else {
+			MetricValue oldValue = tagValues.get(tagValue);
+			if (oldValue == null) {
+				// Must use "newValue.clone()" here
+				tagValues.put(tagValue, metricValue.clone());
+			} else {
+				oldValue.add(metricValue);
+			}
+		}
+	}
+
+	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+		BasicDBObject row = new BasicDBObject();
+		for (Map.Entry<String, HashMap<String, MetricValue>> tagEntry : tagMap.entrySet()) {
+			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
+			for (Map.Entry<String, MetricValue> valueEntry : tagEntry.getValue().entrySet()) {
+				MetricValue value = valueEntry.getValue();
+				tagValues.add(row(Collections.singletonMap("_value", valueEntry.getKey()),
+						null, 0, value.getCount(), value.getSum(),
+						value.getMax(), value.getMin(), value.getSqr()));
+			}
+			row.put(tagEntry.getKey(), tagValues);
+		}
+		return row;
+	}
+
+	private static void quarterly(DB db, int quarter) {
 		BasicDBObject removeBefore = __("_minute", __("$lte",
-				Integer.valueOf(quarter * QUARTER - expire)));
+				Integer.valueOf(quarter * 15 - expire)));
 		BasicDBObject removeAfter = __("_minute", __("$gte",
-				Integer.valueOf(quarter * QUARTER + expire)));
+				Integer.valueOf(quarter * 15 + expire)));
 		BasicDBObject removeBeforeQuarter = __("_quarter", __("$lte",
 				Integer.valueOf(quarter - expire)));
 		BasicDBObject removeAfterQuarter = __("_quarter", __("$gte",
 				Integer.valueOf(quarter + expire)));
-		// Ensure index on tags
-		DBCollection tags = db.getCollection("_tags");
-		tags.createIndex(INDEX_NAME);
+		// Ensure index on meta collections
+		DBCollection aggregated = db.getCollection("_meta.aggregated");
+		aggregated.createIndex(INDEX_NAME);
+		DBCollection tagsQuarter = db.getCollection("_meta.tags_quarter");
+		tagsQuarter.createIndex(INDEX_NAME);
+		tagsQuarter.createIndex(INDEX_QUARTER);
+		tagsQuarter.remove(removeBeforeQuarter);
+		tagsQuarter.remove(removeAfterQuarter);
+		DBCollection tagsAll = db.getCollection("_meta.tags_all");
+		tagsAll.createIndex(INDEX_NAME);
 		// Scan minutely collections
 		for (String name : db.getCollectionNames()) {
-			if (name.startsWith("system.") || name.equals("_tags") ||
+			if (name.startsWith("system.") || name.startsWith("_meta.") ||
 					name.startsWith("_quarter.")) {
 				continue;
 			}
@@ -185,45 +232,62 @@ public class Collector {
 			collection.remove(removeAfter);
 			// Aggregate to quarter
 			int start = quarter - expire;
-			BasicDBObject tagsQuery = __("_name", name);
-			DBObject tagsRow = tags.findOne(tagsQuery);
-			start = tagsRow == null ? 0 : getInt(tagsRow, "_quarter");
+			BasicDBObject query = __("_name", name);
+			DBObject aggregatedRow = aggregated.findOne(query);
+			start = aggregatedRow == null ? 0 : getInt(aggregatedRow, "_quarter");
 			for (int i = (start == 0 ? quarter - expire : start) + 1; i <= quarter; i ++) {
 				ArrayList<DBObject> rows = new ArrayList<>();
+				// Aggregate to "_quarter.*"
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
-				BasicDBObject range = __("$gte", Integer.valueOf((i - 1) * QUARTER + 1));
-				range.put("$lte", Integer.valueOf(i * QUARTER));
+				// Aggregate to "_meta.tags_quarter"
+				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
+				BasicDBObject range = __("$gte", Integer.valueOf(i * 15 - 14));
+				range.put("$lte", Integer.valueOf(i * 15));
 				for (DBObject row : collection.find(__("_minute", range))) {
-					HashMap<String, String> tag = new HashMap<>();
-					for (String tagKey : row.keySet()) {
-						if (isTag(tagKey)) {
-							tag.put(tagKey, getString(row, tagKey));
-						}
-					}
 					MetricValue newValue = new MetricValue(getInt(row, "_count"),
 							getDouble(row, "_sum"), getDouble(row, "_max"),
 							getDouble(row, "_min"), getDouble(row, "_sqr"));
+					HashMap<String, String> tag = new HashMap<>();
+					for (String tagKey : row.keySet()) {
+						if (!isTag(tagKey)) {
+							continue;
+						}
+						String tagValue = getString(row, tagKey);
+						// Aggregate to "_quarter.*"
+						tag.put(tagKey, tagValue);
+						// Aggregate to "_meta.tags_quarter"
+						putTagValue(tagMap, tagKey, tagValue, newValue);
+					}
+					// Aggregate to "_quarter.*"
 					MetricValue value = result.get(tag);
 					if (value == null) {
-						result.put(tag, newValue);
+						// Must (or Should) use "newValue.clone()" here
+						result.put(tag, newValue.clone());
 					} else {
 						value.add(newValue);
 					}
 				}
-				if (result.isEmpty()) {
-					continue;
+				// Aggregate to "_quarter.*"
+				if (!result.isEmpty()) {
+					for (Map.Entry<HashMap<String, String>, MetricValue> entry :
+							result.entrySet()) {
+						MetricValue value = entry.getValue();
+						rows.add(row(entry.getKey(), "_quarter", i,
+								value.getCount(), value.getSum(),
+								value.getMax(), value.getMin(), value.getSqr()));
+					}
+					quarterCollection.insert(rows);
 				}
-				for (Map.Entry<HashMap<String, String>, MetricValue> entry :
-						result.entrySet()) {
-					MetricValue value = entry.getValue();
-					rows.add(row(entry.getKey(), "_quarter", i,
-							value.getCount(), value.getSum(),
-							value.getMax(), value.getMin(), value.getSqr()));
+				// Aggregate to "_meta.tags_quarter"
+				if (!tagMap.isEmpty()) {
+					BasicDBObject row = getTagRow(tagMap);
+					row.put("_name", name);
+					row.put("_quarter", Integer.valueOf(quarter));
+					tagsQuarter.insert(row);
 				}
-				quarterCollection.insert(rows);
 			}
 			BasicDBObject update = __("$set", __("_quarter", Integer.valueOf(quarter)));
-			tags.update(tagsQuery, update, true, false);
+			aggregated.update(query, update, true, false);
 		}
 		// Scan quarterly collections
 		for (String name : db.getCollectionNames()) {
@@ -236,67 +300,30 @@ public class Collector {
 			// Remove stale
 			collection.remove(removeBeforeQuarter);
 			collection.remove(removeAfterQuarter);
-			// Arrange tags
+			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			String minuteName = name.substring(9);
-			BasicDBObject unsetTags = new BasicDBObject();
-			BasicDBObject tagsQuery = __("_name", minuteName);
-			DBObject tagsRow = tags.findOne(tagsQuery);
-			if (tagsRow != null) {
-				for (String tagKey : tagsRow.keySet()) {
-					if (isTag(tagKey)) {
-						unsetTags.put(tagKey, Integer.valueOf(1));
-					}
-				}
-			}
+			BasicDBObject query = __("_name", minuteName);
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
-			BasicDBObject range = __("$gte",
-					Integer.valueOf(quarter - tagsExpire / QUARTER + 1));
-			range.put("$lte", Integer.valueOf(quarter)); // last 24 hours
-			for (DBObject row : db.getCollection(name).
-					find(__("_quarter", range))) {
-				MetricValue newValue = new MetricValue(getInt(row, "_count"),
-						getDouble(row, "_sum"), getDouble(row, "_max"),
-						getDouble(row, "_min"), getDouble(row, "_sqr"));
-				for (String tagName : row.keySet()) {
-					if (!isTag(tagName)) {
+			for (DBObject row : tagsQuarter.find(query)) {
+				for (String tagKey : row.keySet()) {
+					if (!isTag(tagKey)) {
 						continue;
 					}
-					String tagValue = getString(row, tagName);
-					HashMap<String, MetricValue> tagValues = tagMap.get(tagName);
-					if (tagValues == null) {
-						tagValues = new HashMap<>();
-						tagMap.put(tagName, tagValues);
-						// Must use "newValue.clone()" here, because many tags may share one "newValue" 
-						tagValues.put(tagValue, newValue.clone());
-					} else {
-						MetricValue oldValue = tagValues.get(tagValue);
-						if (oldValue == null) {
-							// Must use "newValue.clone()" here
-							tagValues.put(tagValue, newValue.clone());
-						} else {
-							oldValue.add(newValue);
+					for (Object o : getList(row, tagKey)) {
+						if (!(o instanceof DBObject)) {
+							continue;
 						}
+						DBObject row_ = (DBObject) o;
+						putTagValue(tagMap, tagKey, getString(row, "_value"),
+								new MetricValue(getInt(row_, "_count"),
+								getDouble(row_, "_sum"), getDouble(row_, "_max"),
+								getDouble(row_, "_min"), getDouble(row_, "_sqr")));
 					}
 				}
 			}
-			BasicDBObject updateValue = new BasicDBObject();
-			for (Map.Entry<String, HashMap<String, MetricValue>> tagEntry : tagMap.entrySet()) {
-				ArrayList<BasicDBObject> tagValues = new ArrayList<>();
-				for (Map.Entry<String, MetricValue> valueEntry : tagEntry.getValue().entrySet()) {
-					MetricValue value = valueEntry.getValue();
-					tagValues.add(row(Collections.singletonMap("_value", valueEntry.getKey()),
-							null, 0, value.getCount(), value.getSum(),
-							value.getMax(), value.getMin(), value.getSqr()));
-				}
-				updateValue.put(tagEntry.getKey(), tagValues);
-			}
-			if (!updateValue.isEmpty()) {
-				tags.update(tagsQuery, __("$set", updateValue), true, false);
-			}
-			unsetTags.keySet().removeAll(tagMap.keySet());
-			if (!unsetTags.isEmpty()) {
-				tags.update(tagsQuery, __("$unset", unsetTags), true, false);
-			}
+			BasicDBObject row = getTagRow(tagMap);
+			row.put("_name", minuteName);
+			tagsAll.update(query, row, true, false);
 		}
 	}
 
@@ -315,8 +342,7 @@ public class Collector {
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
-		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 360);
-		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 150000);
+		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 2);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
 		String allowedRemote = p.getProperty("allowed_remote");
 		HashSet<String> allowedRemotes = null;
@@ -325,8 +351,7 @@ public class Collector {
 		}
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
-		minuteNow.set((int) (start / Time.MINUTE));
-		quarterNow.set((int) (start / Time.MINUTE / QUARTER));
+		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("Mongo");
 		MongoClient mongo = null;
 		Runnable minutely = null;
@@ -344,15 +369,15 @@ public class Collector {
 						createMongoCRCredential(username, database, password.toCharArray())));
 			}
 			DB db = mongo.getDB(database);
-			minutely = Runnables.wrap(() -> minutely(db));
+			minutely = Runnables.wrap(() -> {
+				int minute = currentMinute.incrementAndGet();
+				minutely(db, minute);
+				if (serverId == 0 && minute % 15 == quarterDelay) {
+					quarterly(db, minute / 15);
+				}
+			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
-			if (serverId == 0) {
-				long period = Time.MINUTE * QUARTER;
-				timer.scheduleAtFixedRate(Runnables.wrap(() -> quarterly(db)),
-						period - (start - quarterDelay) % period,
-						period, TimeUnit.MILLISECONDS);
-			}
 
 			service.register(socket);
 			while (!Thread.interrupted()) {
@@ -442,7 +467,7 @@ public class Collector {
 						int count = Numbers.parseInt(paths[2]);
 						double sum = Numbers.parseDouble(paths[3]);
 						put(rowsMap, name, row(tagMap, "_minute",
-								Numbers.parseInt(paths[1], minuteNow.get()), count, sum,
+								Numbers.parseInt(paths[1], currentMinute.get()), count, sum,
 								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
 								paths.length == 6 ? (count == 0 ? 0 : sum * sum / count) :
 								Numbers.parseDouble(paths[6])));

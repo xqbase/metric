@@ -125,10 +125,10 @@ function loadParams(reload) {
 		}
 	}
 	if (now) {
-		$("#btnNow").addClass("active");
+		$("#btnReal").button("toggle");
 		selectedNow = true;
 	} else {
-		$("#btnNow").removeClass("active");
+		$("#btnHist").button("toggle");
 		selectedNow = false;
 	}
 	clickNow();
@@ -368,8 +368,12 @@ $("#ulMinute li").click(function() {
 	$("#spnMinute").text(("" + (100 + selectedMinute * 15)).substring(1));
 });
 
-$("#btnNow").click(function() {
-	selectedNow = !selectedNow;
+$("#btnReal").click(function() {
+	selectedNow = true;
+	clickNow();
+});
+$("#btnHist").click(function() {
+	selectedNow = false;
 	clickNow();
 });
 
