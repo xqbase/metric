@@ -16,7 +16,7 @@ public class Startup {
 		tomcat.getService().addConnector(connector);
 		tomcat.setConnector(connector);
 		try {
-			tomcat.addWebapp("", Conf.locate("../src/main/webapp"));
+			tomcat.addWebapp("", Conf.getAbsolutePath("../src/main/webapp"));
 			tomcat.start();
 			Thread.currentThread().join();
 		} catch (InterruptedException e) {
