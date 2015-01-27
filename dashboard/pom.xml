@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-dashboard</artifactId>
-	<version>0.2.2</version>
+	<version>0.2.4</version>
 	<packaging>war</packaging>
 	<name>XQBase Metric Dashboard</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - dashboard part</description>
@@ -47,7 +47,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-metric-common</artifactId>
-			<version>0.2.2</version>
+			<version>0.2.4</version>
 		</dependency>
 		<dependency>
 			<groupId>org.mongodb</groupId>

@@ -15,7 +15,11 @@ public class MetricKey {
 		this.name = name;
 		tagMap = new HashMap<>();
 		for (int i = 0; i < tagPairs.length - 1; i += 2) {
-			tagMap.put(tagPairs[i], tagPairs[i + 1]);
+			String key = tagPairs[i];
+			String value = tagPairs[i + 1];
+			if (key != null && value != null) {
+				tagMap.put(key, value);
+			}
 		}
 	}
 

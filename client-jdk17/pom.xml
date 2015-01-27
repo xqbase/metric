@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-client-jdk17</artifactId>
-	<version>0.2.3</version>
+	<version>0.2.4</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Client</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - client part</description>
@@ -42,7 +42,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-metric-common-jdk17</artifactId>
-			<version>0.2.3</version>
+			<version>0.2.4</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>

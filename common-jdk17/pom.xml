@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-common-jdk17</artifactId>
-	<version>0.2.3</version>
+	<version>0.2.4</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Common</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - common part</description>
