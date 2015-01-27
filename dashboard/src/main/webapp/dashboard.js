@@ -214,8 +214,13 @@ function loadParams2() {
 		tagValue = (typeof tagValue == "undefined" ? "_" : tagValue);
 		selectedTags[tagName] = tagValue;
 		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : tagValue);
-		if (tagValue != "_") {
-			apiUrl += "&" + escape(tagName) + "=" + escape(tagValue);
+	}
+	for (var tagName in paramMap) {
+		if (tagName.charAt(0) != "_") {
+			var tagValue = paramMap[tagName];
+			if (tagValue != "_") {
+				apiUrl += "&" + escape(tagName) + "=" + escape(tagValue);
+			}
 		}
 	}
 	apiUrl += "&_end=";
