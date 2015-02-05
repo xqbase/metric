@@ -333,7 +333,6 @@ public class Collector {
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
 		ExecutorService executor = Executors.newCachedThreadPool();
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
-		Log.i("Metric Collector Started");
 
 		Properties p = Conf.load("Collector");
 		String host = p.getProperty("host");
@@ -378,8 +377,9 @@ public class Collector {
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
-
 			service.register(socket);
+
+			Log.i("Metric Collector Started on UDP port " + host + ":" + port);
 			while (!Thread.interrupted()) {
 				// Receive
 				byte[] buf = new byte[65536];
