@@ -335,9 +335,9 @@ public class Collector {
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
 
 		Properties p = Conf.load("Collector");
+		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
-		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
@@ -379,7 +379,7 @@ public class Collector {
 					Time.MINUTE, TimeUnit.MILLISECONDS);
 			service.register(socket);
 
-			Log.i("Metric Collector Started on UDP port " + host + ":" + port);
+			Log.i("Metric Collector Started on UDP " + host + ":" + port);
 			while (!Thread.interrupted()) {
 				// Receive
 				byte[] buf = new byte[65536];
