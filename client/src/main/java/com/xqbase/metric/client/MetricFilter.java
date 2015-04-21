@@ -19,11 +19,9 @@ import javax.servlet.http.HttpServletResponse;
 import com.xqbase.metric.common.Metric;
 
 public class MetricFilter implements Filter {
+	private AtomicInteger connections = new AtomicInteger(0);
 	private String requestTime;
-	private static ScheduledThreadPoolExecutor timer;
-
-	String connections_;
-	AtomicInteger connections = new AtomicInteger(0);
+	private ScheduledThreadPoolExecutor timer;
 
 	@Override
 	public void init(FilterConfig conf) {
@@ -46,8 +44,8 @@ public class MetricFilter implements Filter {
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
 
 		String prefix = conf.getInitParameter("prefix");
+		String connections_ = prefix + ".webapp.connections";
 		requestTime = prefix + ".webapp.request_time";
-		connections_ = prefix + ".webapp.connections";
 
 		timer = new ScheduledThreadPoolExecutor(1);
 		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server"),
