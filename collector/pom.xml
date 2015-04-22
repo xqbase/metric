@@ -43,7 +43,6 @@
 			<plugin>
 				<artifactId>maven-assembly-plugin</artifactId>
 				<configuration>
-					<finalName>metric-collector</finalName>
 					<appendAssemblyId>false</appendAssemblyId>
 					<descriptorRefs>
 						<descriptorRef>jar-with-dependencies</descriptorRef>
@@ -64,6 +63,7 @@
 				</executions>
 			</plugin>
 		</plugins>
+		<finalName>metric-collector</finalName>
 	</build>
 
 	<dependencies>
