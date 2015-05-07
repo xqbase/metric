@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
@@ -135,7 +136,7 @@ public class DashboardApi extends HttpServlet {
 	}
 
 	private static void outputJson(HttpServletRequest req,
-			HttpServletResponse resp, Map<String, Object> data) {
+			HttpServletResponse resp, Object data) {
 		resp.setCharacterEncoding("UTF-8");
 		PrintWriter out;
 		try {
@@ -152,10 +153,10 @@ public class DashboardApi extends HttpServlet {
 			}
 			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
-			out.print(new JSONObject(data));
+			out.print(JSONObject.wrap(data));
 		} else {
 			resp.setContentType("text/javascript");
-			out.print(callback + "(" + new JSONObject(data) + ");");
+			out.print(callback + "(" + JSONObject.wrap(data) + ");");
 		}
 	}
 
@@ -191,16 +192,18 @@ public class DashboardApi extends HttpServlet {
 				error500(resp, e);
 				return;
 			}
-			HashMap<String, Object> data = new HashMap<>();
-			if (tagsRow != null) {
-				for (String tag : tagsRow.keySet()) {
-					if (tag.isEmpty() || tag.charAt(0) == '_') {
-						continue;
-					}
-					data.put(tag, tagsRow.get(tag));
+			if (tagsRow == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
+			Iterator<String> it = tagsRow.keySet().iterator();
+			while (it.hasNext()) {
+				String tag = it.next();
+				if (tag.isEmpty() || tag.charAt(0) == '_') {
+					it.remove();
 				}
 			}
-			outputJson(req, resp, data);
+			outputJson(req, resp, tagsRow);
 			return;
 		}
 		// Query Condition
@@ -257,14 +260,14 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Generate Data
-		HashMap<String, Object> data = new HashMap<>();
+		HashMap<String, double[]> data = new HashMap<>();
 		for (Map.Entry<GroupKey, MetricValue> entry : result.entrySet()) {
 			GroupKey key = entry.getKey();
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {
 				continue;
 			} */
-			double[] values = (double[]) data.get(key.tag);
+			double[] values = data.get(key.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
