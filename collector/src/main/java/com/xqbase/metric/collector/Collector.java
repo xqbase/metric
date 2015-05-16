@@ -76,7 +76,7 @@ public class Collector {
 	}
 
 	private static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
-		rowsMap.forEach((k, v) -> db.getCollection(k).insert(v));
+		rowsMap.forEach((name, rows) -> db.getCollection(name).insert(rows));
 	}
 
 	private static boolean isTag(String key) {
@@ -183,14 +183,14 @@ public class Collector {
 
 	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
 		BasicDBObject row = new BasicDBObject();
-		tagMap.forEach((k, v) -> {
+		tagMap.forEach((tagName, valueMap) -> {
 			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
-			v.forEach((tagValue, metricValue) -> {
+			valueMap.forEach((tagValue, value) -> {
 				tagValues.add(row(Collections.singletonMap("_value", tagValue),
-						null, 0, metricValue.getCount(), metricValue.getSum(),
-						metricValue.getMax(), metricValue.getMin(), metricValue.getSqr()));
+						null, 0, value.getCount(), value.getSum(),
+						value.getMax(), value.getMin(), value.getSqr()));
 			});
-			row.put(k, tagValues);
+			row.put(tagName, tagValues);
 		});
 		return row;
 	}
@@ -266,7 +266,8 @@ public class Collector {
 							value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
-					tags.forEach((k, v) -> putTagValue(tagMap, k, v, value));
+					tags.forEach((tagKey, tagValue) ->
+							putTagValue(tagMap, tagKey, tagValue, value));
 				});
 				quarterCollection.insert(rows);
 				// Aggregate to "_meta.tags_quarter"

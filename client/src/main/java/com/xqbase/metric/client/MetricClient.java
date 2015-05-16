@@ -62,9 +62,9 @@ public class MetricClient {
 				HashMap<String, String> tagMap = metric.getTagMap();
 				if (!tagMap.isEmpty()) {
 					int question = row.length();
-					tagMap.forEach((k, v) -> {
-						row.append('&').append(encode(k)).
-								append('=').append(encode(v));
+					tagMap.forEach((key, value) -> {
+						row.append('&').append(encode(key)).
+								append('=').append(encode(value));
 					});
 					row.setCharAt(question, '?');
 				}

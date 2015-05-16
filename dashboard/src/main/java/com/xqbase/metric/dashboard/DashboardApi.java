@@ -260,18 +260,18 @@ public class DashboardApi extends HttpServlet {
 		}
 		// Generate Data
 		HashMap<String, double[]> data = new HashMap<>();
-		result.forEach((k, v) -> {
+		result.forEach((key, value) -> {
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {
 				continue;
 			} */
-			double[] values = data.get(k.tag);
+			double[] values = data.get(key.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
-				data.put(k.tag, values);
+				data.put(key.tag, values);
 			}
-			values[k.index] = method.applyAsDouble(v);
+			values[key.index] = method.applyAsDouble(value);
 		});
 		outputJson(req, resp, data);
 	}
