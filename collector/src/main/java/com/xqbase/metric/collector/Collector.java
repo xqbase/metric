@@ -108,9 +108,10 @@ public class Collector {
 		return new BasicDBObject(key, value);
 	}
 
-	private static final BasicDBObject INDEX_MINUTE = __("_minute", Integer.valueOf(1));
-	private static final BasicDBObject INDEX_QUARTER = __("_quarter", Integer.valueOf(1));
-	private static final BasicDBObject INDEX_NAME = __("_name", Integer.valueOf(1));
+	private static final BasicDBObject
+			INDEX_MINUTE = __("_minute", Integer.valueOf(1)),
+			INDEX_QUARTER = __("_quarter", Integer.valueOf(1)),
+			INDEX_NAME = __("_name", Integer.valueOf(1));
 
 	private static Service service = new Service();
 	private static int serverId, expire, tagsExpire;
