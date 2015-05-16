@@ -76,12 +76,7 @@ public class Collector {
 	}
 
 	private static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
-		for (Map.Entry<String, ArrayList<DBObject>> entry :
-				rowsMap.entrySet()) {
-			String name = entry.getKey();
-			ArrayList<DBObject> rows = entry.getValue();
-			db.getCollection(name).insert(rows);
-		}
+		rowsMap.forEach((k, v) -> db.getCollection(k).insert(v));
 	}
 
 	private static boolean isTag(String key) {
@@ -187,16 +182,15 @@ public class Collector {
 
 	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
 		BasicDBObject row = new BasicDBObject();
-		for (Map.Entry<String, HashMap<String, MetricValue>> tagEntry : tagMap.entrySet()) {
+		tagMap.forEach((k, v) -> {
 			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
-			for (Map.Entry<String, MetricValue> valueEntry : tagEntry.getValue().entrySet()) {
-				MetricValue value = valueEntry.getValue();
-				tagValues.add(row(Collections.singletonMap("_value", valueEntry.getKey()),
-						null, 0, value.getCount(), value.getSum(),
-						value.getMax(), value.getMin(), value.getSqr()));
-			}
-			row.put(tagEntry.getKey(), tagValues);
-		}
+			v.forEach((tagValue, metricValue) -> {
+				tagValues.add(row(Collections.singletonMap("_value", tagValue),
+						null, 0, metricValue.getCount(), metricValue.getSum(),
+						metricValue.getMax(), metricValue.getMin(), metricValue.getSqr()));
+			});
+			row.put(k, tagValues);
+		});
 		return row;
 	}
 
@@ -264,19 +258,15 @@ public class Collector {
 					continue;
 				}
 				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
-				for (Map.Entry<HashMap<String, String>, MetricValue> metric :
-						result.entrySet()) {
-					HashMap<String, String> tags = metric.getKey();
-					MetricValue value = metric.getValue();
+				int i_ = i;
+				result.forEach((tags, value) -> {
 					// {"_quarter": i}, but not {"_quarter": quarter} !
-					rows.add(row(tags, "_quarter", i,
+					rows.add(row(tags, "_quarter", i_,
 							value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
-					for (Map.Entry<String, String> tag : tags.entrySet()) {
-						putTagValue(tagMap, tag.getKey(), tag.getValue(), value);
-					}
-				}
+					tags.forEach((k, v) -> putTagValue(tagMap, k, v, value));
+				});
 				quarterCollection.insert(rows);
 				// Aggregate to "_meta.tags_quarter"
 				BasicDBObject row = getTagRow(tagMap);

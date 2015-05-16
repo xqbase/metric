@@ -8,7 +8,6 @@ import java.net.InetSocketAddress;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -63,10 +62,10 @@ public class MetricClient {
 				HashMap<String, String> tagMap = metric.getTagMap();
 				if (!tagMap.isEmpty()) {
 					int question = row.length();
-					for (Map.Entry<String, String> tag : tagMap.entrySet()) {
-						row.append('&').append(encode(tag.getKey())).
-								append('=').append(encode(tag.getValue()));
-					}
+					tagMap.forEach((k, v) -> {
+						row.append('&').append(encode(k)).
+								append('=').append(encode(v));
+					});
 					row.setCharAt(question, '?');
 				}
 				if (packet.length() + row.length() >= MAX_PACKET_SIZE) {

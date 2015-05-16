@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -261,20 +260,19 @@ public class DashboardApi extends HttpServlet {
 		}
 		// Generate Data
 		HashMap<String, double[]> data = new HashMap<>();
-		for (Map.Entry<GroupKey, MetricValue> entry : result.entrySet()) {
-			GroupKey key = entry.getKey();
+		result.forEach((k, v) -> {
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {
 				continue;
 			} */
-			double[] values = data.get(key.tag);
+			double[] values = data.get(k.tag);
 			if (values == null) {
 				values = new double[length];
 				Arrays.fill(values, 0);
-				data.put(key.tag, values);
+				data.put(k.tag, values);
 			}
-			values[key.index] = method.applyAsDouble(entry.getValue());
-		}
+			values[k.index] = method.applyAsDouble(v);
+		});
 		outputJson(req, resp, data);
 	}
 }
