@@ -275,4 +275,9 @@ public class DashboardApi extends HttpServlet {
 		});
 		outputJson(req, resp, data);
 	}
+
+	@Override
+	protected void doPost(HttpServletRequest req, HttpServletResponse resp) {
+		doGet(req, resp);
+	}
 }

@@ -24,7 +24,7 @@ xhr.onload = function() {
 		for (var j = 0; j < METHOD_NAME.length; j ++) {
 			var methodName = METHOD_NAME[j];
 			html += "<a class=\"label label-info\" title=\"" + metricName + "/" + methodName +
-					"\" href=\"dashboard.html#_name=" + escape(metricName) + "&_method=" +
+					"\" href=\"dashboard.html#_name=" + encodeURIComponent(metricName) + "&_method=" +
 					methodName + "\" target=\"_blank\">" + methodName.toUpperCase() + "</a> ";
 		}
 		html += "</td></tr>";

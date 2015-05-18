@@ -85,7 +85,7 @@ function loadParams(reload) {
 		if (j < 0) {
 			continue;
 		}
-		paramMap[unescape(param.substring(0, j))] = unescape(param.substring(j + 1));
+		paramMap[decodeURIComponent(param.substring(0, j))] = decodeURIComponent(param.substring(j + 1));
 	}
 
 	metricName = paramMap._name;
@@ -109,7 +109,7 @@ function loadParams(reload) {
 	selectedInterval = index < 0 ? 0 : index;
 	$("#spnInterval").text(INTERVAL_TEXT[index]);
 
-	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + escape(metricName) + "/" + METHOD_NAME[method] +
+	apiUrl = DASHBOARD_API + (interval < 15 ? "" : "_quarter.") + encodeURIComponent(metricName) + "/" + METHOD_NAME[method] +
 			"?_length=" + DASHBOARD_LENGTH + "&_interval=" + (interval < 15 ? interval : interval / 15);
 
 	now = true;
@@ -153,7 +153,7 @@ function loadParams(reload) {
 		showTags(eval("(" + xhr.responseText + ")"));
 		loadParams2();
 	};
-	xhr.open("GET", DASHBOARD_API + escape(metricName) + "/tags?_r=" + Math.random(), true);
+	xhr.open("GET", DASHBOARD_API + encodeURIComponent(metricName) + "/tags?_r=" + Math.random(), true);
 	xhr.send(null);
 }
 
@@ -219,7 +219,7 @@ function loadParams2() {
 		if (tagName.charAt(0) != "_") {
 			var tagValue = paramMap[tagName];
 			if (tagValue != "_") {
-				apiUrl += "&" + escape(tagName) + "=" + escape(tagValue);
+				apiUrl += "&" + encodeURIComponent(tagName) + "=" + encodeURIComponent(tagValue);
 			}
 		}
 	}
@@ -383,7 +383,7 @@ $("#btnHist").click(function() {
 });
 
 $("#btnSubmit").click(function() {
-	var hash = "#_name=" + escape(metricName) + "&_method=" + METHOD_NAME[selectedMethod] +
+	var hash = "#_name=" + encodeURIComponent(metricName) + "&_method=" + METHOD_NAME[selectedMethod] +
 			"&_interval=" + INTERVAL[selectedInterval];
 	if (!selectedNow) {
 		var ymd = $("#txtDate").val().split("-");
@@ -397,7 +397,7 @@ $("#btnSubmit").click(function() {
 	for (var tagName in selectedTags) {
 		var tagValue = selectedTags[tagName];
 		if (typeof tagValue != "undefined" && tagValue != "_") {
-			hash += "&" + escape(tagName) + "=" + escape(tagValue);
+			hash += "&" + encodeURIComponent(tagName) + "=" + encodeURIComponent(tagValue);
 		}
 	}
 	location.href = hash;
