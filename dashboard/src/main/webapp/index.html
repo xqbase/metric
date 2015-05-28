@@ -2,26 +2,143 @@
 <html>
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-		<script type="text/javascript" src="js/jquery.min.js"></script>
-		<script type="text/javascript" src="js/bootstrap.min.js"></script>
-		<link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" />
-		<style>
-td {
-	padding-right: 1em;
-	padding-bottom: 1px;
-}
-		</style>
 	</head>
 	<body>
-		<div class="panel panel-default">
-			<div class="panel-heading">We have these metrics ...</div>
-			<div class="panel-body">
-				<table>
-					<tbody id="tbody"></tbody>
-				</table>
+		<style><!--
+
+body {
+	color:		#444444;
+	font-family: Arial;
+	font-size:	14px;
+	line-height: 20px;
+	margin:		0;
+}
+
+html, body {
+	display:	table;
+	width:		100%;
+	height:		100%;
+	overflow:	hidden;
+}
+
+ul, ol {
+	padding:	0;
+}
+
+li {
+	line-height: 20px;
+}
+
+.navbar {
+	margin-bottom: 0;
+	overflow:	visible;
+}
+
+.navbar .logo {
+	background-color: #368ee0;
+	color:		#ffffff;
+	display:	block;
+	float:		left;
+	font-size:	20px;
+	font-weight: 200;
+	margin-left: -20px;
+	padding:	16px 20px;
+}
+
+.navbar-inner {
+	background-color: #4a4a4a;
+	min-height:	52px;
+	padding-left: 20px;
+	padding-right: 20px;
+}
+
+.navbar .nav {
+	display:	block;
+	float:		left;
+	left:		0;
+	margin:		0 20px 0 0;
+	position:	relative;
+}
+
+.navbar .nav > li {
+	float:		left;
+}
+
+.navbar .nav > li > a {
+	color:		#eeeeee;
+	float:		none;
+	padding:	16px 15px;
+	text-decoration: none;
+}
+
+.navbar .nav > .active > a, .navbar .nav > .active > a:hover, .navbar .nav > .active > a:focus {
+	background-color: #333333;
+}
+
+.nav {
+	list-style:	outside none none;
+}
+
+.nav > li > a {
+	display:	block;
+}
+
+#myTab {
+	width:		100%;
+}
+
+#myTabContent {
+	display:	table-row;
+	height:		100%;
+}
+
+#myTabContent iframe {
+	width:		100%;
+	height:		100%;
+}
+
+		--></style>
+		<div id="myTab" class="navbar">
+			<div class="navbar-inner">
+					<a class="logo">Dashboard</a>
+				<ul class="nav">
+					<li><a id="aAll" href="#">All Metrics</a></li>
+					<li class="active"><a id="aSize" href="#">Size</a></li>
+					<li><a id="aRows" href="#">Rows</a></li>
+					<li><a id="aThroughput" href="#">Throughput</a></li>
+				</ul>
 			</div>
 		</div>
-		<script type="text/javascript" src="config.js"></script>
-		<script type="text/javascript" src="index.js"></script>
+		<div id="myTabContent" class="tab-content">
+			<iframe></iframe>
+		</div>
+		<script type="text/javascript" src="js/jquery.min.js"></script>
+		<script type="text/javascript" src="js/bootstrap.min.js"></script>
+		<script type="text/javascript"><!--
+
+var LINK_MAP = {
+	aAll: "all.html",
+	aSize: "dashboard.html?_r=s#_name=metric.size&_method=max&_interval=15&_group_by=name",
+	aRows: "dashboard.html?_r=r#_name=metric.rows&_method=sum&_interval=15&_group_by=name",
+	aThroughput: "dashboard.html?_r=t#_name=metric.throughput&_method=sum&_interval=15&_group_by=remote_addr",
+};
+
+function goto(id) {
+	var src = LINK_MAP[id];
+	if (src.substring(src.length - 8) == "&_until=") {
+		var today = new Date();
+		src += new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 60000 + 1440;
+	}
+	$("#myTabContent iframe").attr("src", src);
+}
+
+$("#myTab a").click(function() {
+	$(this).tab("show");
+	goto($(this).attr("id"));
+});
+
+goto("aSize");
+
+		--></script>
 	</body>
 </html>

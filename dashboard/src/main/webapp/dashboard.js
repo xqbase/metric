@@ -27,10 +27,11 @@ var METHOD_COMPARATOR = [
 var INTERVAL = [1, 5, 15, 60, 360, 1440];
 var INTERVAL_TEXT = ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour", "6 Hours", "1 Day"];
 
+var DIV_CHART = DASHBOARD_TAGS_TOP ? "#divChartBottom" : "#divChartTop";
 var HIGHCHARTS_OPTIONS = {
 	chart: {
 		animation: false,
-		renderTo: DASHBOARD_TAGS_TOP ? "divChartBottom" : "divChartTop",
+		renderTo: DIV_CHART.substring(1),
 		type: DASHBOARD_CHART_TYPE,
 	},
 	credits: {
@@ -143,6 +144,7 @@ function loadParams(reload) {
 		loadParams2();
 		return;
 	}
+	$(DIV_CHART).html("<br>Loading Meta Data ...");
 	var xhr = new XMLHttpRequest();
 	try {
 		xhr.withCredentials = true;
@@ -230,6 +232,7 @@ function loadParams2() {
 		clearInterval(timer);
 	}
 	timer = now ? setInterval(requestApi, interval < 15 ? MINUTE : MINUTE * 15) : null;
+	$(DIV_CHART).html("<br>Loading Metric Data ...");
 	requestApi();
 }
 
@@ -315,7 +318,7 @@ for (var i = 0; i < DROPDOWN_DIV.length; i ++) {
 	$("#div" + DROPDOWN_DIV[i]).addClass(DROPDOWN_CLASS);
 }
 
-$(DASHBOARD_TAGS_TOP ? "#divChartBottom" : "#divChartTop").css({
+$(DIV_CHART).css({
 	height: DASHBOARD_HEIGHT + "px",
 });
 

@@ -1,5 +1,6 @@
 var METHOD_NAME = ["sum", "count", "avg", "max", "min", "std"];
 
+$("#tbody").html("Loading Meta Data ...");
 var xhr = new XMLHttpRequest();
 try {
 	xhr.withCredentials = true;
