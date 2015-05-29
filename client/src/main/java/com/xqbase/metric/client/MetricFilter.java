@@ -28,10 +28,9 @@ public class MetricFilter implements Filter {
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
 		String addresses = conf.getInitParameter("addresses");
 		if (addresses != null) {
-			String[] s = addresses.split("[,;]");
-			for (int i = 0; i < s.length; i ++) {
-				String[] ss = s[i].split("[:/]");
-				if (ss.length >= 2) {
+			for (String s : addresses.split("[,;]")) {
+				String[] ss = s.split("[:/]");
+				if (ss.length > 1) {
 					try {
 						addrs.add(new InetSocketAddress(ss[0],
 								Integer.parseInt(ss[1])));
