@@ -7,7 +7,7 @@ var DASHBOARD_MARKER = false;
 var DASHBOARD_API = "api/";
 
 var INDEX_NAV = [
-	// [Title, Metric Name, Method, Group By, Query, Interval, Tomorrow, Active]
+	// [Title, Metric Name, Method, Group By, Query, Interval, Until Midnight, Active],
 	["Size", "metric.size", "max", "name", "", 15, false, true],
 	["Rows", "metric.rows", "sum", "name", "", 15],
 	["Throughput", "metric.throughput", "sum", "remote_addr", "", 15],

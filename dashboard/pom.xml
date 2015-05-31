@@ -38,11 +38,15 @@
 		<maven.compiler.target>1.8</maven.compiler.target>
 	</properties>
 
+	<build>
+		<finalName>dashboard</finalName>
+	</build>
+
 	<dependencies>
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
-			<version>0.2.5</version>
+			<version>0.2.6</version>
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
@@ -63,13 +67,13 @@
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>
 			<artifactId>tomcat-catalina</artifactId>
-			<version>8.0.12</version>
+			<version>8.0.21</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>
 			<artifactId>tomcat-coyote</artifactId>
-			<version>8.0.12</version>
+			<version>8.0.21</version>
 			<scope>provided</scope>
 		</dependency>
 	</dependencies>
