@@ -7,7 +7,8 @@ var DASHBOARD_MARKER = false;
 var DASHBOARD_API = "api/";
 
 var INDEX_NAV = [
-	["Size", "dashboard.html?_r=s#_name=metric.size&_method=max&_interval=15&_group_by=name", true],
-	["Rows", "dashboard.html?_r=r#_name=metric.rows&_method=sum&_interval=15&_group_by=name"],
-	["Throughput", "dashboard.html?_r=t#_name=metric.throughput&_method=sum&_interval=15&_group_by=remote_addr"],
+	// [Title, Metric Name, Method, Group By, Query, Interval, Tomorrow, Active]
+	["Size", "metric.size", "max", "name", "", 15, false, true],
+	["Rows", "metric.rows", "sum", "name", "", 15],
+	["Throughput", "metric.throughput", "sum", "remote_addr", "", 15],
 ];
