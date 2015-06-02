@@ -6,7 +6,7 @@ for (i = 0; i < INDEX_NAV.length; i ++) {
 	if (entry.length <= 1) {
 		continue;
 	}
-	src = "dashboard.html?_title=" + encodeURIComponent(entry[0]) + "#_name=" + entry[1] +
+	src = "dashboard.html?_r=" + i + "#_name=" + entry[1] +
 			"&_method=" + (entry.length <= 2 ? "sum" : entry[2]) +
 			(entry.length <= 3 || entry[3] == "" ? "" : "&_group_by=" + entry[3]) +
 			(entry.length <= 4 || entry[4] == "" ? "" : "&" + entry[4]) +
