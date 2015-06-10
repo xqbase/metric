@@ -4,18 +4,24 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
+import java.util.stream.Collectors;
+import java.util.stream.DoubleStream;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.bson.BSONObject;
 import org.json.JSONObject;
 
 import com.mongodb.BasicDBObject;
@@ -58,13 +64,14 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
+	private int maxTagValues = 0;
 	private MongoClient mongo = null;
 	private DB db = null;
 
 	@Override
 	public void init() throws ServletException {
-		Properties p = Conf.load("Mongo");
 		try {
+			Properties p = Conf.load("Mongo");
 			ServerAddress addr = new ServerAddress(p.getProperty("host"),
 					Numbers.parseInt(p.getProperty("port"), 27017));
 			String database = p.getProperty("db");
@@ -77,6 +84,9 @@ public class DashboardApi extends HttpServlet {
 						createMongoCRCredential(username, database, password.toCharArray())));
 			}
 			db = mongo.getDB(database);
+
+			maxTagValues = Numbers.parseInt(Conf.
+					load("Dashboard").getProperty("max_tag_values"));
 		} catch (IOException e) {
 			throw new ServletException(e);
 		}
@@ -200,7 +210,22 @@ public class DashboardApi extends HttpServlet {
 				String tag = it.next();
 				if (tag.isEmpty() || tag.charAt(0) == '_') {
 					it.remove();
+					continue;
 				}
+				if (maxTagValues <= 0) {
+					continue;
+				}
+				List<?> values = (List<?>) tagsRow.get(tag);
+				if (values.size() <= maxTagValues) {
+					continue;
+				}
+				tagsRow.put(tag, values.stream().sorted(Comparator.comparingLong(o -> {
+					if (!(o instanceof BSONObject)) {
+						return 0;
+					}
+					Object count = ((BSONObject) o).get("_count");
+					return -(count instanceof Number ? ((Number) count).longValue() : 0);
+				})).limit(maxTagValues).collect(Collectors.toList()));
 			}
 			outputJson(req, resp, tagsRow);
 			return;
@@ -273,7 +298,16 @@ public class DashboardApi extends HttpServlet {
 			}
 			values[key.index] = method.applyAsDouble(value);
 		});
-		outputJson(req, resp, data);
+		Map<String, double[]> data_;
+		if (maxTagValues > 0 && data.size() > maxTagValues) {
+			data_ = data.entrySet().stream().sorted(Comparator.
+					comparingDouble(entry -> -DoubleStream.of(entry.getValue()).sum())).
+					limit(maxTagValues).collect(Collectors.
+					toMap(Map.Entry::getKey, Map.Entry::getValue));
+		} else {
+			data_ = data;
+		}
+		outputJson(req, resp, data_);
 	}
 
 	@Override
