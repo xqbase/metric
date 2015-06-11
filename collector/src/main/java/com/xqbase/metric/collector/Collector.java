@@ -119,7 +119,7 @@ public class Collector {
 		BasicDBObject row;
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			row = new BasicDBObject();
-			CollectionsEx.forEach(CollectionsEx.max(tagMap.entrySet(),
+			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
 					Comparator.comparing(Map.Entry::getKey), maxTags), row::put);
 		} else {
 			row = new BasicDBObject(tagMap);
@@ -222,7 +222,7 @@ public class Collector {
 			row.put(tagName, tagValues);
 		};
 		if (maxTags > 0 && tagMap.size() > maxTags) {
-			CollectionsEx.forEach(CollectionsEx.max(tagMap.entrySet(),
+			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
 					Comparator.comparing(Map.Entry::getKey), maxTags), mainAction);
 		} else {
 			tagMap.forEach(mainAction);
