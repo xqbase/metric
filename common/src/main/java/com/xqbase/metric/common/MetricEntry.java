@@ -19,7 +19,7 @@ public class MetricEntry {
 		return key.getTagMap();
 	}
 
-	public int getCount() {
+	public long getCount() {
 		return value.getCount();
 	}
 

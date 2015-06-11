@@ -15,6 +15,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -34,6 +35,7 @@ import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
+import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -48,7 +50,7 @@ public class Collector {
 	private static String decode(String s, int limit) {
 		try {
 			String result = URLDecoder.decode(s, "UTF-8");
-			return result.length() > limit ? result.substring(0, limit) : result;
+			return limit > 0 && result.length() > limit ? result.substring(0, limit) : result;
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -77,6 +79,11 @@ public class Collector {
 		return value instanceof Number ? ((Number) value).intValue() : 0;
 	}
 
+	private static long getLong(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).longValue() : 0;
+	}
+
 	private static double getDouble(DBObject row, String key) {
 		Object value = row.get(key);
 		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
@@ -103,24 +110,24 @@ public class Collector {
 			INDEX_NAME = __("_name", Integer.valueOf(1));
 
 	private static Service service = new Service();
-	private static int serverId, expire, tagsExpire;
-	private static int maxTags, maxTagValues, maxMetricLen, maxTagNameLen, maxTagValueLen;
+	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
 	private static BasicDBObject row(Map<String, String> tagMap, String type,
-			int now, int count, double sum, double max, double min, double sqr) {
+			int now, long count, double sum, double max, double min, double sqr) {
 		BasicDBObject row;
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			row = new BasicDBObject();
-			tagMap.entrySet().stream().sorted(Comparator.comparing(Map.Entry::getKey)).
-					limit(maxTags).forEach(entry -> row.put(entry.getKey(), entry.getValue()));
+			CollectionsEx.forEach(CollectionsEx.max(tagMap.entrySet(),
+					Comparator.comparing(Map.Entry::getKey), maxTags), row::put);
 		} else {
 			row = new BasicDBObject(tagMap);
 		}
 		if (type != null) {
 			row.put(type, Integer.valueOf(now));
 		}
-		row.put("_count", Integer.valueOf(count));
+		row.put("_count", Long.valueOf(count));
 		row.put("_sum", Double.valueOf(sum));
 		row.put("_max", Double.valueOf(max));
 		row.put("_min", Double.valueOf(min));
@@ -149,7 +156,7 @@ public class Collector {
 				continue;
 			}
 			DBCollection collection = db.getCollection(name);
-			int count = (int) collection.count();
+			long count = collection.count();
 			if (count == 0) {
 				// Remove disappeared metric collections
 				collection.drop();
@@ -194,7 +201,7 @@ public class Collector {
 
 	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
 		BasicDBObject row = new BasicDBObject();
-		tagMap.forEach((tagName, valueMap) -> {
+		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
 			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
 				tagValues.add(row(Collections.singletonMap("_value", tagValue),
@@ -202,14 +209,24 @@ public class Collector {
 						value.getMax(), value.getMin(), value.getSqr()));
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
-				valueMap.entrySet().stream().sorted(Comparator.
-						comparingLong(metricValue -> -metricValue.getValue().getCount())).
-						forEach(entry -> action.accept(entry.getKey(), entry.getValue()));
+				HashMap<String, MetricValue> newValueMap = new HashMap<>();
+				Set<Map.Entry<String, MetricValue>> entries = valueMap.entrySet();
+				CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingLong(metricValue ->
+						metricValue.getValue().getCount()), maxTagValues / 2), newValueMap::put);
+				CollectionsEx.forEach(CollectionsEx.max(entries, Comparator. comparingDouble(metricValue ->
+						metricValue.getValue().getSum()), maxTagValues / 2), newValueMap::put);
+				newValueMap.forEach(action);
 			} else {
 				valueMap.forEach(action);
 			}
 			row.put(tagName, tagValues);
-		});
+		};
+		if (maxTags > 0 && tagMap.size() > maxTags) {
+			CollectionsEx.forEach(CollectionsEx.max(tagMap.entrySet(),
+					Comparator.comparing(Map.Entry::getKey), maxTags), mainAction);
+		} else {
+			tagMap.forEach(mainAction);
+		}
 		return row;
 	}
 
@@ -263,7 +280,7 @@ public class Collector {
 						}
 					}
 					// Aggregate to "_quarter.*"
-					MetricValue newValue = new MetricValue(getInt(row, "_count"),
+					MetricValue newValue = new MetricValue(getLong(row, "_count"),
 							getDouble(row, "_sum"), getDouble(row, "_max"),
 							getDouble(row, "_min"), getDouble(row, "_sqr"));
 					MetricValue value = result.get(tags);
@@ -275,6 +292,14 @@ public class Collector {
 				}
 				if (result.isEmpty()) {
 					continue;
+				}
+				if (maxTagCombinations > 0 && result.size() > maxTagCombinations) {
+					Set<Map.Entry<HashMap<String, String>, MetricValue>> entries = result.entrySet();
+					result = new HashMap<>();
+					CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingLong(entry ->
+							entry.getValue().getCount()), maxTagCombinations / 2), result::put);
+					CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingDouble(entry ->
+							entry.getValue().getSum()), maxTagCombinations / 2), result::put);
 				}
 				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
@@ -324,7 +349,7 @@ public class Collector {
 						}
 						DBObject oo = (DBObject) o;
 						putTagValue(tagMap, tagKey, getString(oo, "_value"),
-								new MetricValue(getInt(oo, "_count"),
+								new MetricValue(getLong(oo, "_count"),
 								getDouble(oo, "_sum"), getDouble(oo, "_max"),
 								getDouble(oo, "_min"), getDouble(oo, "_sqr")));
 					}
@@ -355,6 +380,8 @@ public class Collector {
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
+		maxTagCombinations = Numbers.parseInt(p.getProperty("max_tag_combinations"));
+		maxMetricLen = Numbers.parseInt(p.getProperty("max_metric_len"));
 		maxTagNameLen = Numbers.parseInt(p.getProperty("max_tag_name_len"));
 		maxTagValueLen = Numbers.parseInt(p.getProperty("max_tag_value_len"));
 		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 2);
@@ -477,7 +504,7 @@ public class Collector {
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
-						int count = Numbers.parseInt(paths[2]);
+						long count = Numbers.parseLong(paths[2]);
 						double sum = Numbers.parseDouble(paths[3]);
 						put(rowsMap, name, row(tagMap, "_minute",
 								Numbers.parseInt(paths[1], currentMinute.get()), count, sum,

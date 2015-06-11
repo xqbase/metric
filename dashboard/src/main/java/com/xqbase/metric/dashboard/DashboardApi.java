@@ -9,11 +9,10 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
-import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
 
 import javax.servlet.ServletException;
@@ -32,6 +31,7 @@ import com.mongodb.MongoCredential;
 import com.mongodb.MongoException;
 import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.MetricValue;
+import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
@@ -219,13 +219,18 @@ public class DashboardApi extends HttpServlet {
 				if (values.size() <= maxTagValues) {
 					continue;
 				}
-				tagsRow.put(tag, values.stream().sorted(Comparator.comparingLong(o -> {
-					if (!(o instanceof BSONObject)) {
-						return 0;
-					}
+				PriorityQueue<?> countQueue = CollectionsEx.max(values,
+						Comparator.comparingLong(o -> {
 					Object count = ((BSONObject) o).get("_count");
-					return -(count instanceof Number ? ((Number) count).longValue() : 0);
-				})).limit(maxTagValues).collect(Collectors.toList()));
+					return (count instanceof Number ? ((Number) count).longValue() : 0);
+				}), maxTagValues / 2);
+				PriorityQueue<?> sumQueue = CollectionsEx.max(values,
+						Comparator.comparingDouble(o -> {
+					Object sum = ((BSONObject) o).get("_sum");
+					return (sum instanceof Number ? ((Number) sum).doubleValue() : 0);
+				}), maxTagValues / 2);
+				tagsRow.put(tag, CollectionsEx.merge(o -> ((BSONObject) o).get("_value"),
+						countQueue, sumQueue));
 			}
 			outputJson(req, resp, tagsRow);
 			return;
@@ -298,16 +303,13 @@ public class DashboardApi extends HttpServlet {
 			}
 			values[key.index] = method.applyAsDouble(value);
 		});
-		Map<String, double[]> data_;
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
-			data_ = data.entrySet().stream().sorted(Comparator.
-					comparingDouble(entry -> -DoubleStream.of(entry.getValue()).sum())).
-					limit(maxTagValues).collect(Collectors.
-					toMap(Map.Entry::getKey, Map.Entry::getValue));
+			outputJson(req, resp, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
+					Comparator.comparingDouble(entry -> DoubleStream.of((double[]) entry.getValue()).sum()),
+					maxTagValues)));
 		} else {
-			data_ = data;
+			outputJson(req, resp, data);
 		}
-		outputJson(req, resp, data_);
 	}
 
 	@Override

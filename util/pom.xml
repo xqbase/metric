@@ -3,11 +3,11 @@
 		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
-	<artifactId>xqbase-metric-common-jdk17</artifactId>
+	<artifactId>xqbase-metric-util</artifactId>
 	<version>0.2.5</version>
 	<packaging>jar</packaging>
-	<name>XQBase Metric Common</name>
-	<description>a lightweight metric framework for aggregating, collecting and showing metric data - common part</description>
+	<name>XQBase Metric Util</name>
+	<description>a lightweight metric framework for aggregating, collecting and showing metric data - util part</description>
 	<url>https://github.com/xqbase/metric</url>
 
 	<licenses>
@@ -34,7 +34,7 @@
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<maven.compiler.source>1.7</maven.compiler.source>
-		<maven.compiler.target>1.7</maven.compiler.target>
+		<maven.compiler.source>1.8</maven.compiler.source>
+		<maven.compiler.target>1.8</maven.compiler.target>
 	</properties>
 </project>

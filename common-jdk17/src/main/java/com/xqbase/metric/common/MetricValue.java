@@ -1,10 +1,10 @@
 package com.xqbase.metric.common;
 
 public class MetricValue implements Cloneable {
-	private int count;
+	private long count;
 	private double sum, max, min, sqr;
 
-	public MetricValue(int count, double sum, double max, double min, double sqr) {
+	public MetricValue(long count, double sum, double max, double min, double sqr) {
 		this.count = count;
 		this.sum = sum;
 		this.max = max;
@@ -34,7 +34,7 @@ public class MetricValue implements Cloneable {
 		sqr += value.sqr;
 	}
 
-	public int getCount() {
+	public long getCount() {
 		return count;
 	}
 

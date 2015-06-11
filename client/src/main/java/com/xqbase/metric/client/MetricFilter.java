@@ -23,10 +23,17 @@ public class MetricFilter implements Filter {
 	private String requestTime;
 	private ScheduledThreadPoolExecutor timer;
 
+	protected String getAddresses() {
+		return null;
+	}
+
 	@Override
 	public void init(FilterConfig conf) {
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
-		String addresses = conf.getInitParameter("addresses");
+		String addresses = getAddresses();
+		if (addresses == null) {
+			addresses = conf.getInitParameter("addresses");
+		}
 		if (addresses != null) {
 			for (String s : addresses.split("[,;]")) {
 				String[] ss = s.split("[:/]");
