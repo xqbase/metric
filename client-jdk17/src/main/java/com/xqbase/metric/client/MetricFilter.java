@@ -19,21 +19,30 @@ import javax.servlet.http.HttpServletResponse;
 import com.xqbase.metric.common.Metric;
 
 public class MetricFilter implements Filter {
+	private FilterConfig conf;
 	private String requestTime;
-	private static ScheduledThreadPoolExecutor timer;
+	private ScheduledThreadPoolExecutor timer;
 
-	String connections_;
 	AtomicInteger connections = new AtomicInteger(0);
 
+	protected String getAddresses() {
+		return conf.getInitParameter("addresses");
+	}
+
+	protected String getPrefix() {
+		return conf.getInitParameter("prefix");
+	}
+
 	@Override
-	public void init(FilterConfig conf) {
+	public void init(FilterConfig conf_) {
+		conf = conf_;
+
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
-		String addresses = conf.getInitParameter("addresses");
+		String addresses = getAddresses();
 		if (addresses != null) {
-			String[] s = addresses.split("[,;]");
-			for (int i = 0; i < s.length; i ++) {
-				String[] ss = s[i].split("[:/]");
-				if (ss.length >= 2) {
+			for (String s : addresses.split("[,;]")) {
+				String[] ss = s.split("[:/]");
+				if (ss.length > 1) {
 					try {
 						addrs.add(new InetSocketAddress(ss[0],
 								Integer.parseInt(ss[1])));
@@ -45,9 +54,9 @@ public class MetricFilter implements Filter {
 		}
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
 
-		String prefix = conf.getInitParameter("prefix");
+		String prefix = getPrefix();
+		final String connections_ = prefix + ".webapp.connections";
 		requestTime = prefix + ".webapp.request_time";
-		connections_ = prefix + ".webapp.connections";
 
 		timer = new ScheduledThreadPoolExecutor(1);
 		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server"),

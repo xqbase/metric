@@ -19,21 +19,25 @@ import javax.servlet.http.HttpServletResponse;
 import com.xqbase.metric.common.Metric;
 
 public class MetricFilter implements Filter {
-	private AtomicInteger connections = new AtomicInteger(0);
+	private FilterConfig conf;
 	private String requestTime;
 	private ScheduledThreadPoolExecutor timer;
+	private AtomicInteger connections = new AtomicInteger(0);
 
 	protected String getAddresses() {
-		return null;
+		return conf.getInitParameter("addresses");
+	}
+
+	protected String getPrefix() {
+		return conf.getInitParameter("prefix");
 	}
 
 	@Override
-	public void init(FilterConfig conf) {
+	public void init(FilterConfig conf_) {
+		conf = conf_;
+
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
 		String addresses = getAddresses();
-		if (addresses == null) {
-			addresses = conf.getInitParameter("addresses");
-		}
 		if (addresses != null) {
 			for (String s : addresses.split("[,;]")) {
 				String[] ss = s.split("[:/]");
@@ -49,7 +53,7 @@ public class MetricFilter implements Filter {
 		}
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
 
-		String prefix = conf.getInitParameter("prefix");
+		String prefix = getPrefix();
 		String connections_ = prefix + ".webapp.connections";
 		requestTime = prefix + ".webapp.request_time";
 

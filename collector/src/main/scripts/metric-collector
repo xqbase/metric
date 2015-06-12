@@ -5,7 +5,7 @@
 PID_FILE=/var/run/metric-collector.pid
 case "$1" in
 	start)
-		/usr/share/java/bin/java -Xms16m -Xmx32m -jar /usr/local/xqbase-metric/lib/metric-collector.jar &
+		/usr/java/default/bin/java -Xms16m -Xmx32m -jar /usr/local/xqbase-metric/lib/metric-collector.jar &
 		echo $! > $PID_FILE
 		;;
 	stop)
