@@ -1,8 +1,12 @@
 import javax.servlet.ServletException;
 
+import org.apache.catalina.Context;
 import org.apache.catalina.LifecycleException;
+import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.connector.Connector;
 import org.apache.catalina.startup.Tomcat;
+import org.apache.catalina.webresources.DirResourceSet;
+import org.apache.catalina.webresources.StandardRoot;
 
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -16,7 +20,11 @@ public class Startup {
 		tomcat.getService().addConnector(connector);
 		tomcat.setConnector(connector);
 		try {
-			tomcat.addWebapp("", Conf.getAbsolutePath("../src/main/webapp"));
+			Context ctx = tomcat.addWebapp("", Conf.getAbsolutePath("../src/main/webapp"));
+			WebResourceRoot resources = new StandardRoot(ctx);
+			resources.addPreResources(new DirResourceSet(resources,
+					"/WEB-INF/classes", Conf.getAbsolutePath("../target/classes"), "/"));
+			ctx.setResources(resources);
 			tomcat.start();
 			Thread.currentThread().join();
 		} catch (InterruptedException e) {
