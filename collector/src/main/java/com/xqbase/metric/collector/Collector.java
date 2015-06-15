@@ -293,7 +293,9 @@ public class Collector {
 				if (result.isEmpty()) {
 					continue;
 				}
-				if (maxTagCombinations > 0 && result.size() > maxTagCombinations) {
+				int combinations = result.size();
+				Metric.put("metric.tags.combinations", combinations, "name", name);
+				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
 					Set<Map.Entry<HashMap<String, String>, MetricValue>> entries = result.entrySet();
 					result = new HashMap<>();
 					CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingLong(entry ->
@@ -314,6 +316,9 @@ public class Collector {
 				});
 				quarterCollection.insert(rows);
 				// Aggregate to "_meta.tags_quarter"
+				tagMap.forEach((tagKey, tagValue) -> {
+					Metric.put("metric.tags.values", tagValue.size(), "name", name, "key", tagKey);
+				});
 				BasicDBObject row = getTagRow(tagMap);
 				row.put("_name", name);
 				// {"_quarter": i}, but not {"_quarter": quarter} !
