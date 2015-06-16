@@ -150,7 +150,6 @@ public class Collector {
 		if (serverId != 0) {
 			return;
 		}
-		ArrayList<DBObject> rows = new ArrayList<>();
 		for (String name : db.getCollectionNames()) {
 			if (name.startsWith("system.") || name.startsWith("_meta.")) {
 				continue;
@@ -171,12 +170,9 @@ public class Collector {
 				if (!name.startsWith("_quarter.")) {
 					collection.createIndex(INDEX_MINUTE);
 				}
-				rows.add(row(Collections.singletonMap("name", name), "_minute",
-						minute, 1, count, count, count, count * count));
+				// Will be inserted next minute
+				Metric.put("metric.size", count, "name", name);
 			}
-		}
-		if (!rows.isEmpty()) {
-			db.getCollection("metric.size").insert(rows);
 		}
 	}
 
@@ -419,7 +415,8 @@ public class Collector {
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);
-				if (serverId == 0 && minute % 15 == quarterDelay) {
+				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
+					// Skip "quarterly" when shutdown
 					quarterly(db, minute / 15);
 				}
 			});
