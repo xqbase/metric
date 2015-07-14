@@ -1,4 +1,4 @@
-package "Metric System" {
+package "Metric System" #99FF99 {
   [Collector (Slave)] --> [MongoDB (Slave)] : Aggr. Minutely
   [Collector (Master)] --> [MongoDB (Master)] : Aggr. Minutely
   [Query Server] <-- [MongoDB (Master)] : Aggr. by Query
@@ -6,14 +6,14 @@ package "Metric System" {
   database "MongoDB (Master)"
 }
 
-package "Online System" {
+package "Online System" #FFFF99 {
   [PHP Websites] --> [Collector (Slave)] : Events
   [PHP Websites] --> [Collector (Master)] : Events
   [Java App Servers] --> [Collector (Slave)] : Aggr. Minutely
   [Java App Servers] --> [Collector (Master)] : Aggr. Minutely
 }
 
-package "Offline System" {
+package "Offline System" #99FFFF {
   [Troubleshooting] <-- [Query Server] : Query API Response
   [Alerting] <-- [Query Server] : Query API Response
   [Business Analysis] <-- [Query Server] : Query API Response
