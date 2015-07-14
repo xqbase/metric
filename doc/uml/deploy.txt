@@ -1,0 +1,20 @@
+package "Metric System" {
+  [Collector (Slave)] --> [MongoDB (Slave)] : Aggr. Minutely
+  [Collector (Master)] --> [MongoDB (Master)] : Aggr. Minutely
+  [Query Server] <-- [MongoDB (Master)] : Aggr. by Query
+  database "MongoDB (Slave)"
+  database "MongoDB (Master)"
+}
+
+package "Online System" {
+  [PHP Websites] --> [Collector (Slave)] : Events
+  [PHP Websites] --> [Collector (Master)] : Events
+  [Java App Servers] --> [Collector (Slave)] : Aggr. Minutely
+  [Java App Servers] --> [Collector (Master)] : Aggr. Minutely
+}
+
+package "Offline System" {
+  [Troubleshooting] <-- [Query Server] : Query API Response
+  [Alerting] <-- [Query Server] : Query API Response
+  [Business Analysis] <-- [Query Server] : Query API Response
+}
