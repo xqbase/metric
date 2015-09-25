@@ -2,7 +2,7 @@
 
 A lightweight metric framework for aggregating, collecting and showing metric data.
 
-For basic concepts of metric, see [Metric and Dashboard](http://www.slideshare.net/auntyellow/metric-and-dashboard) in SlideShare, or 
+For basic concepts of metric, see [Metric and Dashboard](http://www.slideshare.net/auntyellow/metric-and-dashboard) in SlideShare, or download [here](https://github.com/xqbase/metric/blob/master/doc/Metric%20and%20Dashboard.ppt?raw=true).
 
 ## How to use Metric in server codes?
 
