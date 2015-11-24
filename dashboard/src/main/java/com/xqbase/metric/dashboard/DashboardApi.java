@@ -223,14 +223,8 @@ public class DashboardApi extends HttpServlet {
 						Comparator.comparingLong(o -> {
 					Object count = ((BSONObject) o).get("_count");
 					return (count instanceof Number ? ((Number) count).longValue() : 0);
-				}), maxTagValues / 2);
-				PriorityQueue<?> sumQueue = CollectionsEx.max(values,
-						Comparator.comparingDouble(o -> {
-					Object sum = ((BSONObject) o).get("_sum");
-					return (sum instanceof Number ? ((Number) sum).doubleValue() : 0);
-				}), maxTagValues / 2);
-				tagsRow.put(tag, CollectionsEx.merge(o -> ((BSONObject) o).get("_value"),
-						countQueue, sumQueue));
+				}), maxTagValues);
+				tagsRow.put(tag, countQueue);
 			}
 			outputJson(req, resp, tagsRow);
 			return;

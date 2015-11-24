@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 public class CollectionsEx {
 	public static <T> PriorityQueue<T> max(Collection<? extends T> collection,
@@ -37,17 +36,5 @@ public class CollectionsEx {
 		HashMap<K, V> map = new HashMap<>();
 		forEach(entries, map::put);
 		return map;
-	}
-
-	@SafeVarargs
-	public static <T, K> Collection<T> merge(Function<? super T, ? extends K> by,
-			Collection<? extends T>... collections) {
-		HashMap<K, T> map = new HashMap<>();
-		for (Collection<? extends T> collection : collections) {
-			for (T t : collection) {
-				map.put(by.apply(t), t);
-			}
-		}
-		return map.values();
 	}
 }

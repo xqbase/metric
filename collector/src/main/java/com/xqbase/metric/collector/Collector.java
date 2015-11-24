@@ -15,7 +15,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -205,13 +204,9 @@ public class Collector {
 						value.getMax(), value.getMin(), value.getSqr()));
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
-				HashMap<String, MetricValue> newValueMap = new HashMap<>();
-				Set<Map.Entry<String, MetricValue>> entries = valueMap.entrySet();
-				CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingLong(metricValue ->
-						metricValue.getValue().getCount()), maxTagValues / 2), newValueMap::put);
-				CollectionsEx.forEach(CollectionsEx.max(entries, Comparator. comparingDouble(metricValue ->
-						metricValue.getValue().getSum()), maxTagValues / 2), newValueMap::put);
-				newValueMap.forEach(action);
+				CollectionsEx.forEach(CollectionsEx.max(valueMap.entrySet(),
+						Comparator.comparingLong(metricValue ->
+						metricValue.getValue().getCount()), maxTagValues), action);
 			} else {
 				valueMap.forEach(action);
 			}
@@ -291,17 +286,9 @@ public class Collector {
 				}
 				int combinations = result.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name);
-				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
-					Set<Map.Entry<HashMap<String, String>, MetricValue>> entries = result.entrySet();
-					result = new HashMap<>();
-					CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingLong(entry ->
-							entry.getValue().getCount()), maxTagCombinations / 2), result::put);
-					CollectionsEx.forEach(CollectionsEx.max(entries, Comparator.comparingDouble(entry ->
-							entry.getValue().getSum()), maxTagCombinations / 2), result::put);
-				}
 				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
-				result.forEach((tags, value) -> {
+				BiConsumer<HashMap<String, String>, MetricValue> action = (tags, value) -> {
 					// {"_quarter": i}, but not {"_quarter": quarter} !
 					rows.add(row(tags, "_quarter", i_,
 							value.getCount(), value.getSum(),
@@ -309,7 +296,14 @@ public class Collector {
 					// Aggregate to "_meta.tags_quarter"
 					tags.forEach((tagKey, tagValue) ->
 							putTagValue(tagMap, tagKey, tagValue, value));
-				});
+				};
+				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
+					CollectionsEx.forEach(CollectionsEx.max(result.entrySet(),
+							Comparator.comparingLong(entry -> entry.getValue().getCount()),
+							maxTagCombinations), action);
+				} else {
+					result.forEach(action);
+				}
 				quarterCollection.insert(rows);
 				// Aggregate to "_meta.tags_quarter"
 				tagMap.forEach((tagKey, tagValue) -> {
