@@ -66,6 +66,10 @@ function APPEND_HTML(html, line) {
 	return DASHBOARD_TAGS_TOP ? html + line : line + html;
 }
 
+function HTML_ENTITIES(s) {
+	return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 var DROPDOWN_DIV = ["Method", "Group", "Interval", "Hour", "Minute"];
 var DROPDOWN_CLASS = DASHBOARD_TAGS_TOP ? "dropdown" : "dropup";
 
@@ -181,7 +185,7 @@ function showTags(tagMap) {
 		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
 			tagValue = tags[i]._value;
-			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + tagValue + "\"><a>" + tagValue + "</a></li>");
+			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + HTML_ENTITIES(tagValue) + "\"><a>" + HTML_ENTITIES(tagValue) + "</a></li>");
 		}
 		tagsHtml += valuesHtml +
 						"</ul>" +
