@@ -19,18 +19,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
-import com.mongodb.MongoClient;
-import com.mongodb.MongoCredential;
-import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -40,7 +37,6 @@ import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Runnables;
-import com.xqbase.util.Service;
 import com.xqbase.util.Time;
 
 public class Collector {
@@ -108,7 +104,6 @@ public class Collector {
 			INDEX_QUARTER = __("_quarter", Integer.valueOf(1)),
 			INDEX_NAME = __("_name", Integer.valueOf(1));
 
-	private static Service service = new Service();
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
@@ -356,13 +351,7 @@ public class Collector {
 		}
 	}
 
-	public static void main(String[] args) {
-		if (!service.startup(args)) {
-			return;
-		}
-		System.setProperty("java.util.logging.SimpleFormatter.format",
-				"%1$tY-%1$tm-%1$td %1$tk:%1$tM:%1$tS.%1$tL %2$s%n%4$s: %5$s%6$s%n");
-		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+	public static void main(DB db, AtomicBoolean interrupted) {
 		ExecutorService executor = Executors.newCachedThreadPool();
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
 
@@ -389,37 +378,24 @@ public class Collector {
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
-		p = Conf.load("Mongo");
-		MongoClient mongo = null;
 		Runnable minutely = null;
+
 		try (DatagramSocket socket = new DatagramSocket(new
 				InetSocketAddress(host, port))) {
-			ServerAddress addr = new ServerAddress(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port"), 27017));
-			String database = p.getProperty("db");
-			String username = p.getProperty("username");
-			String password = p.getProperty("password");
-			if (username == null || password == null) {
-				mongo = new MongoClient(addr);
-			} else {
-				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
-						createMongoCRCredential(username, database, password.toCharArray())));
-			}
-			DB db = mongo.getDB(database);
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);
-				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
+				if (serverId == 0 && !interrupted.get() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
 					quarterly(db, minute / 15);
 				}
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
-			service.register(socket);
+			// TODO
 
 			Log.i("Metric Collector Started on UDP " + host + ":" + port);
-			while (!Thread.interrupted()) {
+			while (!interrupted.get()) {
 				// Receive
 				byte[] buf = new byte[65536];
 				DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -535,13 +511,8 @@ public class Collector {
 			}
 			Runnables.shutdown(executor);
 			Runnables.shutdown(timer);
-			if (mongo != null) {
-				mongo.close();
-			}
 		}
 
 		Log.i("Metric Collector Stopped");
-		Conf.closeLogger(Log.getAndSet(logger));
-		service.shutdown();
 	}
 }

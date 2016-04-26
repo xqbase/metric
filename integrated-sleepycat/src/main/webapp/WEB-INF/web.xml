@@ -6,6 +6,7 @@
 	<servlet>
 		<servlet-name>DashboardApi</servlet-name>
 		<servlet-class>com.xqbase.metric.lucene.DashboardApi</servlet-class>
+		<load-on-startup>0</load-on-startup>
 	</servlet>
 	<servlet-mapping>
 		<servlet-name>DashboardApi</servlet-name>

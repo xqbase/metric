@@ -13,6 +13,7 @@ import com.xqbase.util.Log;
 
 public class Startup {
 	public static void main(String[] args) {
+		Conf.chdir("../src/main/webapp/WEB-INF");
 		Connector connector = new Connector();
 		connector.setPort(80);
 		Tomcat tomcat = new Tomcat();
@@ -22,8 +23,8 @@ public class Startup {
 		try {
 			Context ctx = tomcat.addWebapp("", Conf.getAbsolutePath("../src/main/webapp"));
 			WebResourceRoot resources = new StandardRoot(ctx);
-			resources.addPreResources(new DirResourceSet(resources,
-					"/WEB-INF/classes", Conf.getAbsolutePath("../target/classes"), "/"));
+			resources.addPreResources(new DirResourceSet(resources, "/WEB-INF/classes",
+					Conf.getAbsolutePath("../../../../target/classes"), "/"));
 			ctx.setResources(resources);
 			tomcat.start();
 			Thread.currentThread().join();

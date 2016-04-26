@@ -3,11 +3,11 @@
 		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
-	<artifactId>xqbase-integrated-lucene</artifactId>
+	<artifactId>xqbase-metric-integrated-sleepycat</artifactId>
 	<version>0.2.5</version>
 	<packaging>war</packaging>
-	<name>XQBase Metric Collector and Dashboard (Integrated with Lucene) </name>
-	<description>a lightweight metric framework for aggregating, collecting and showing metric data - integrated-with-lucene part</description>
+	<name>XQBase Metric Collector and Dashboard (Integrated with Sleepycat) </name>
+	<description>a lightweight metric framework for aggregating, collecting and showing metric data - integrated-with-sleepycat part</description>
 	<url>https://github.com/xqbase/metric</url>
 
 	<licenses>
@@ -39,7 +39,7 @@
 	</properties>
 
 	<build>
-		<finalName>intergrated-lucene</finalName>
+		<finalName>xqbase-metric-intergrated-sleepycat</finalName>
 	</build>
 
 	<dependencies>
@@ -64,9 +64,9 @@
 			<version>2.13.2</version>
 		</dependency>
 		<dependency>
-			<groupId>org.apache.lucene</groupId>
-			<artifactId>lucene-core</artifactId>
-			<version>6.0.0</version>
+			<groupId>com.sleepycat</groupId>
+			<artifactId>je</artifactId>
+			<version>5.0.73</version>
 		</dependency>
 
 		<dependency>

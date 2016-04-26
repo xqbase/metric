@@ -10,9 +10,10 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
+import java.util.logging.Logger;
 import java.util.stream.DoubleStream;
 
 import javax.servlet.ServletException;
@@ -26,10 +27,7 @@ import org.json.JSONObject;
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.DBObject;
-import com.mongodb.MongoClient;
-import com.mongodb.MongoCredential;
 import com.mongodb.MongoException;
-import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
@@ -64,41 +62,28 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
-	private int maxTagValues = 0;
-	private MongoClient mongo = null;
-	private DB db = null;
+	private static AtomicInteger count = new AtomicInteger(0);
+	private static int maxTagValues;
+	private static Logger logger;
+	private static DB db; // TODO Init
 
 	@Override
 	public void init() throws ServletException {
-		try {
-			Properties p = Conf.load("Mongo");
-			ServerAddress addr = new ServerAddress(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port"), 27017));
-			String database = p.getProperty("db");
-			String username = p.getProperty("username");
-			String password = p.getProperty("password");
-			if (username == null || password == null) {
-				mongo = new MongoClient(addr);
-			} else {
-				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
-						createMongoCRCredential(username, database, password.toCharArray())));
-			}
-			db = mongo.getDB(database);
-
-			maxTagValues = Numbers.parseInt(Conf.
-					load("Dashboard").getProperty("max_tag_values"));
-		} catch (IOException e) {
-			throw new ServletException(e);
+		if (count.getAndIncrement() > 0) {
+			return;
 		}
+
+		maxTagValues = Numbers.parseInt(Conf.
+				load("Dashboard").getProperty("max_tag_values"));
+		logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
 	}
 
 	@Override
 	public void destroy() {
-		if (mongo != null) {
-			mongo.close();
-			mongo = null;
-			db = null;
+		if (count.decrementAndGet() > 0) {
+			return;
 		}
+		Conf.closeLogger(Log.getAndSet(logger));
 	}
 
 	private static HashMap<String, ToDoubleFunction<MetricValue>>
@@ -221,8 +206,8 @@ public class DashboardApi extends HttpServlet {
 				}
 				PriorityQueue<?> countQueue = CollectionsEx.max(values,
 						Comparator.comparingLong(o -> {
-					Object count = ((BSONObject) o).get("_count");
-					return (count instanceof Number ? ((Number) count).longValue() : 0);
+					Object count_ = ((BSONObject) o).get("_count");
+					return (count_ instanceof Number ? ((Number) count_).longValue() : 0);
 				}), maxTagValues);
 				tagsRow.put(tag, countQueue);
 			}
