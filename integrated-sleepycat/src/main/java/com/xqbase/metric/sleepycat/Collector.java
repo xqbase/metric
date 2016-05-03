@@ -1,6 +1,7 @@
-package com.xqbase.metric.lucene;
+package com.xqbase.metric.sleepycat;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -28,6 +29,9 @@ import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
+import com.sleepycat.je.Environment;
+import com.sleepycat.je.EnvironmentConfig;
+import com.sleepycat.persist.StoreConfig;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -39,8 +43,10 @@ import com.xqbase.util.Numbers;
 import com.xqbase.util.Runnables;
 import com.xqbase.util.Time;
 
-public class Collector {
+public class Collector implements Runnable {
 	private static final int MAX_BUFFER_SIZE = 64000;
+
+	private static final StoreConfig STORE_CONFIG = new StoreConfig().setAllowCreate(true);
 
 	private static String decode(String s, int limit) {
 		try {
@@ -351,7 +357,25 @@ public class Collector {
 		}
 	}
 
-	public static void main(DB db, AtomicBoolean interrupted) {
+	private AtomicBoolean interrupted = new AtomicBoolean(false);
+	private volatile Environment env_;
+	private volatile DatagramSocket socket_;
+
+	public AtomicBoolean getInterrupted() {
+		return interrupted;
+	}
+
+	public Environment getEnv() {
+		return env_;
+	}
+
+	public DatagramSocket getSocket() {
+		return socket_;
+	}
+
+	@Override
+	public void run() {
+		DB db = null;
 		ExecutorService executor = Executors.newCachedThreadPool();
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
 
@@ -380,8 +404,14 @@ public class Collector {
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		Runnable minutely = null;
 
-		try (DatagramSocket socket = new DatagramSocket(new
-				InetSocketAddress(host, port))) {
+		File dataDir = new File(Conf.getAbsolutePath("data"));
+		dataDir.mkdir();
+		try (
+			Environment env = new Environment(dataDir,
+					new EnvironmentConfig().setAllowCreate(true));
+			DatagramSocket socket = new DatagramSocket(new
+					InetSocketAddress(host, port));
+		) {
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);
@@ -392,7 +422,8 @@ public class Collector {
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
-			// TODO
+			env_ = env;
+			socket_ = socket;
 
 			Log.i("Metric Collector Started on UDP " + host + ":" + port);
 			while (!interrupted.get()) {

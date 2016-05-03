@@ -1,7 +1,9 @@
-package com.xqbase.metric.lucene;
+package com.xqbase.metric.sleepycat;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.DatagramSocket;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -10,6 +12,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -28,6 +32,9 @@ import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.DBObject;
 import com.mongodb.MongoException;
+import com.sleepycat.je.Environment;
+import com.sleepycat.je.EnvironmentConfig;
+import com.sleepycat.persist.StoreConfig;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
@@ -65,7 +72,8 @@ public class DashboardApi extends HttpServlet {
 	private static AtomicInteger count = new AtomicInteger(0);
 	private static int maxTagValues;
 	private static Logger logger;
-	private static DB db; // TODO Init
+	private static Collector collector;
+	private static Thread thread;
 
 	@Override
 	public void init() throws ServletException {
@@ -76,6 +84,10 @@ public class DashboardApi extends HttpServlet {
 		maxTagValues = Numbers.parseInt(Conf.
 				load("Dashboard").getProperty("max_tag_values"));
 		logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+
+		collector = new Collector();
+		thread = new Thread(collector);
+		thread.start();
 	}
 
 	@Override
@@ -83,6 +95,13 @@ public class DashboardApi extends HttpServlet {
 		if (count.decrementAndGet() > 0) {
 			return;
 		}
+		collector.getInterrupted().set(true);
+		if (collector.getSocket() != null) {
+			collector.getSocket().close();
+		}
+		try {
+			thread.join();
+		} catch (InterruptedException e) {/**/}
 		Conf.closeLogger(Log.getAndSet(logger));
 	}
 
