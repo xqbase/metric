@@ -133,6 +133,11 @@ public class DashboardApi extends HttpServlet {
 		return value instanceof Number ? ((Number) value).intValue() : 0;
 	}
 
+	private static long getLong(DBObject row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).longValue() : 0;
+	}
+
 	private static double getDouble(DBObject row, String key) {
 		Object value = row.get(key);
 		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
@@ -268,7 +273,7 @@ public class DashboardApi extends HttpServlet {
 					continue;
 				}
 				GroupKey key = new GroupKey(groupBy.apply(row), index);
-				MetricValue newValue = new MetricValue(getInt(row, "_count"),
+				MetricValue newValue = new MetricValue(getLong(row, "_count"),
 						getDouble(row, "_sum"), getDouble(row, "_max"),
 						getDouble(row, "_min"), getDouble(row, "_sqr"));
 				MetricValue value = result.get(key);

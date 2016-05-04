@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
-import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -41,18 +40,14 @@ import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Runnables;
 import com.xqbase.util.Service;
+import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
 	private static String decode(String s, int limit) {
-		try {
-			String result = URLDecoder.decode(s, "UTF-8");
-			return limit > 0 && result.length() > limit ? result.substring(0, limit) : result;
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		return Strings.truncate(Strings.decodeUrl(s), limit);
 	}
 
 	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
@@ -528,16 +523,15 @@ public class Collector {
 			Log.w(e.getMessage());
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
-		} finally {
-			// Do not do Mongo operations in main thread (may be interrupted)
-			if (minutely != null) {
-				executor.execute(minutely);
-			}
-			Runnables.shutdown(executor);
-			Runnables.shutdown(timer);
-			if (mongo != null) {
-				mongo.close();
-			}
+		}
+		// Do not do Mongo operations in main thread (may be interrupted)
+		if (minutely != null) {
+			executor.execute(minutely);
+		}
+		Runnables.shutdown(executor);
+		Runnables.shutdown(timer);
+		if (mongo != null) {
+			mongo.close();
 		}
 
 		Log.i("Metric Collector Stopped");

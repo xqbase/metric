@@ -1,19 +1,15 @@
 package com.xqbase.metric.sleepycat;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.net.DatagramSocket;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.PriorityQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -28,18 +24,18 @@ import javax.servlet.http.HttpServletResponse;
 import org.bson.BSONObject;
 import org.json.JSONObject;
 
-import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBObject;
-import com.mongodb.MongoException;
-import com.sleepycat.je.Environment;
-import com.sleepycat.je.EnvironmentConfig;
-import com.sleepycat.persist.StoreConfig;
+import com.sleepycat.persist.EntityCursor;
+import com.sleepycat.persist.EntityStore;
+import com.sleepycat.persist.PrimaryIndex;
+import com.sleepycat.persist.SecondaryIndex;
 import com.xqbase.metric.common.MetricValue;
+import com.xqbase.metric.sleepycat.model.Row;
+import com.xqbase.metric.sleepycat.model.Tags;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
 class GroupKey {
@@ -72,6 +68,7 @@ public class DashboardApi extends HttpServlet {
 	private static AtomicInteger count = new AtomicInteger(0);
 	private static int maxTagValues;
 	private static Logger logger;
+	private static HashMap<String, EntityStore> tableMap;
 	private static Collector collector;
 	private static Thread thread;
 
@@ -85,6 +82,7 @@ public class DashboardApi extends HttpServlet {
 				load("Dashboard").getProperty("max_tag_values"));
 		logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
 
+		tableMap = new HashMap<>();
 		collector = new Collector();
 		thread = new Thread(collector);
 		thread.start();
@@ -94,6 +92,10 @@ public class DashboardApi extends HttpServlet {
 	public void destroy() {
 		if (count.decrementAndGet() > 0) {
 			return;
+		}
+
+		for (EntityStore table : tableMap.values()) {
+			table.close();
 		}
 		collector.getInterrupted().set(true);
 		if (collector.getSocket() != null) {
@@ -125,27 +127,9 @@ public class DashboardApi extends HttpServlet {
 		} catch (IOException e) {/**/}
 	}
 
-	private static void error500(HttpServletResponse resp, Throwable e) {
-		Log.e(e);
-		try {
-			resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-		} catch (IOException e_) {/**/}
-	}
-
-	private static int getInt(DBObject row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).intValue() : 0;
-	}
-
-	private static double getDouble(DBObject row, String key) {
-		Object value = row.get(key);
-		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
-		return Double.isFinite(d) ? d : 0;
-	}
-
-	private static String getString(DBObject row, String key) {
-		Object value = row.get(key);
-		return value instanceof String ? (String) value : "_";
+	private static String getString(Row row, String key) {
+		String value = row.tags.get(key);
+		return Strings.isEmpty(value) ? "_" : value;
 	}
 
 	private static void outputJson(HttpServletRequest req,
@@ -197,14 +181,10 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			DBObject tagsRow;
-			try {
-				tagsRow = db.getCollection("_meta.tags_all").
-						findOne(new BasicDBObject("_name", metricName));
-			} catch (MongoException e) {
-				error500(resp, e);
-				return;
-			}
+			// DBObject tagsRow;
+			HashMap<String, Collection<?>> tagsRow =
+					collector.getStore("_meta.tags_all").
+					getPrimaryIndex(String.class, Tags.class).get(metricName).tags;
 			if (tagsRow == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
@@ -219,7 +199,7 @@ public class DashboardApi extends HttpServlet {
 				if (maxTagValues <= 0) {
 					continue;
 				}
-				List<?> values = (List<?>) tagsRow.get(tag);
+				Collection<?> values = tagsRow.get(tag);
 				if (values.size() <= maxTagValues) {
 					continue;
 				}
@@ -234,7 +214,7 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Query Condition
-		BasicDBObject query = new BasicDBObject();
+		HashMap<String, String> query = new HashMap<>();
 		Enumeration<String> names = req.getParameterNames();
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
@@ -243,48 +223,39 @@ public class DashboardApi extends HttpServlet {
 			}
 		}
 		// Other Query Parameters
-		int end;
-		String rangeColumn;
-		if (metricName.startsWith("_quarter.")) {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "_quarter";
-		} else {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "_minute";
-		}
+		int end = Numbers.parseInt(req.getParameter("_end"),
+				(int) (System.currentTimeMillis() /
+				(metricName.startsWith("_quarter.") ? Time.MINUTE / 15 : Time.MINUTE)));
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length + 1;
-		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
-		range.put("$lte", Integer.valueOf(end));
-		query.put(rangeColumn, range);
+		
 		String groupBy_ = req.getParameter("_group_by");
-		Function<DBObject, String> groupBy = groupBy_ == null ?
+		Function<Row, String> groupBy = groupBy_ == null ?
 				row -> "_" : row -> getString(row, groupBy_);
-		// Query by MongoDB and Group by Java
+		// Query and Group by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
-		try {
-			for (DBObject row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, rangeColumn) - begin) / interval;
-				if (index < 0 || index >= length) {
-					continue;
-				}
-				GroupKey key = new GroupKey(groupBy.apply(row), index);
-				MetricValue newValue = new MetricValue(getInt(row, "_count"),
-						getDouble(row, "_sum"), getDouble(row, "_max"),
-						getDouble(row, "_min"), getDouble(row, "_sqr"));
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
-				}
+		EntityStore store = collector.getStore(metricName);
+		PrimaryIndex<Long, Row> pk =
+				store.getPrimaryIndex(Long.class, Row.class);
+		SecondaryIndex<Integer, Long, Row> sk =
+				store.getSecondaryIndex(pk, Integer.class, "time");
+		EntityCursor<Row> rows = sk.entities(Integer.valueOf(begin),
+				true, Integer.valueOf(end), true);
+		for (Row row : rows) {
+			int index = (row.time - begin) / interval;
+			if (index < 0 || index >= length) {
+				continue;
 			}
-		} catch (MongoException e) {
-			error500(resp, e);
-			return;
+			GroupKey key = new GroupKey(groupBy.apply(row), index);
+			MetricValue newValue = new MetricValue(row.count,
+					row.sum, row.max, row.min, row.sqr);
+			MetricValue value = result.get(key);
+			if (value == null) {
+				result.put(key, newValue);
+			} else {
+				value.add(newValue);
+			}
 		}
 		// Generate Data
 		HashMap<String, double[]> data = new HashMap<>();

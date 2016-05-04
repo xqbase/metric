@@ -1,12 +1,12 @@
 package com.xqbase.metric.sleepycat;
 
 import java.io.ByteArrayInputStream;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
-import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -16,8 +16,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,6 +35,7 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.sleepycat.je.Environment;
 import com.sleepycat.je.EnvironmentConfig;
+import com.sleepycat.persist.EntityStore;
 import com.sleepycat.persist.StoreConfig;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
@@ -41,6 +46,7 @@ import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Runnables;
+import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
 public class Collector implements Runnable {
@@ -49,12 +55,7 @@ public class Collector implements Runnable {
 	private static final StoreConfig STORE_CONFIG = new StoreConfig().setAllowCreate(true);
 
 	private static String decode(String s, int limit) {
-		try {
-			String result = URLDecoder.decode(s, "UTF-8");
-			return limit > 0 && result.length() > limit ? result.substring(0, limit) : result;
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		return Strings.truncate(Strings.decodeUrl(s), limit);
 	}
 
 	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
@@ -358,6 +359,8 @@ public class Collector implements Runnable {
 	}
 
 	private AtomicBoolean interrupted = new AtomicBoolean(false);
+	private ConcurrentHashMap<String, Future<EntityStore>>
+			storeCache = new ConcurrentHashMap<>();
 	private volatile Environment env_;
 	private volatile DatagramSocket socket_;
 
@@ -371,6 +374,24 @@ public class Collector implements Runnable {
 
 	public DatagramSocket getSocket() {
 		return socket_;
+	}
+
+	public EntityStore getStore(String name) {
+		Future<EntityStore> f = storeCache.get(name);
+		if (f == null) {
+			FutureTask<EntityStore> ft = new FutureTask<>(() ->
+					new EntityStore(env_, name, STORE_CONFIG));
+			f = storeCache.putIfAbsent(name, ft);
+			if (f == null) {
+				f = ft;
+				ft.run();
+			}
+		}
+		try {
+			return f.get();
+		} catch (InterruptedException | ExecutionException e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 	@Override
@@ -409,6 +430,15 @@ public class Collector implements Runnable {
 		try (
 			Environment env = new Environment(dataDir,
 					new EnvironmentConfig().setAllowCreate(true));
+			Closeable closeable = () -> {
+				for (Future<EntityStore> f : storeCache.values()) {
+					try {
+						f.get().close();
+					} catch (InterruptedException | ExecutionException e) {
+						throw new RuntimeException(e);
+					}
+				}
+			};
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
 		) {
@@ -535,14 +565,13 @@ public class Collector implements Runnable {
 			Log.w(e.getMessage());
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
-		} finally {
-			// Do not do Mongo operations in main thread (may be interrupted)
-			if (minutely != null) {
-				executor.execute(minutely);
-			}
-			Runnables.shutdown(executor);
-			Runnables.shutdown(timer);
 		}
+		// Do not do Mongo operations in main thread (may be interrupted)
+		if (minutely != null) {
+			executor.execute(minutely);
+		}
+		Runnables.shutdown(executor);
+		Runnables.shutdown(timer);
 
 		Log.i("Metric Collector Stopped");
 	}
