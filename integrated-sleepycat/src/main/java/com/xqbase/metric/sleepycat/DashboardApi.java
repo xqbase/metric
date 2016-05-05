@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -233,28 +234,42 @@ public class DashboardApi extends HttpServlet {
 		String groupBy_ = req.getParameter("_group_by");
 		Function<Row, String> groupBy = groupBy_ == null ?
 				row -> "_" : row -> getString(row, groupBy_);
-		// Query and Group by Java
+		// Query Time Range by Sleepycat, Query and Group Tags by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		EntityStore store = collector.getStore(metricName);
 		PrimaryIndex<Long, Row> pk =
 				store.getPrimaryIndex(Long.class, Row.class);
 		SecondaryIndex<Integer, Long, Row> sk =
 				store.getSecondaryIndex(pk, Integer.class, "time");
-		EntityCursor<Row> rows = sk.entities(Integer.valueOf(begin),
-				true, Integer.valueOf(end), true);
-		for (Row row : rows) {
-			int index = (row.time - begin) / interval;
-			if (index < 0 || index >= length) {
-				continue;
-			}
-			GroupKey key = new GroupKey(groupBy.apply(row), index);
-			MetricValue newValue = new MetricValue(row.count,
-					row.sum, row.max, row.min, row.sqr);
-			MetricValue value = result.get(key);
-			if (value == null) {
-				result.put(key, newValue);
-			} else {
-				value.add(newValue);
+		try (EntityCursor<Row> rows = sk.entities(Integer.valueOf(begin),
+				true, Integer.valueOf(end), true)) {
+			for (Row row : rows) {
+				int index = (row.time - begin) / interval;
+				if (index < 0 || index >= length) {
+					continue;
+				}
+				// Query Tags
+				boolean skip = false;
+				for (Map.Entry<String, String> entry : query.entrySet()) {
+					String value = row.tags.get(entry.getKey());
+					if (!entry.getValue().equals(value)) {
+						skip = true;
+						break;
+					}
+				}
+				if (skip) {
+					continue;
+				}
+				// Group Tags
+				GroupKey key = new GroupKey(groupBy.apply(row), index);
+				MetricValue newValue = new MetricValue(row.count,
+						row.sum, row.max, row.min, row.sqr);
+				MetricValue value = result.get(key);
+				if (value == null) {
+					result.put(key, newValue);
+				} else {
+					value.add(newValue);
+				}
 			}
 		}
 		// Generate Data

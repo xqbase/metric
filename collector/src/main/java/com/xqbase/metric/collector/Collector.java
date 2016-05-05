@@ -249,11 +249,11 @@ public class Collector {
 			collection.remove(removeBefore);
 			collection.remove(removeAfter);
 			// Aggregate to quarter
-			int start = quarter - expire;
 			BasicDBObject query = __("_name", name);
 			DBObject aggregatedRow = aggregated.findOne(query);
-			start = aggregatedRow == null ? 0 : getInt(aggregatedRow, "_quarter");
-			for (int i = (start == 0 ? quarter - expire : start) + 1; i <= quarter; i ++) {
+			int start = aggregatedRow == null ? quarter - expire :
+					getInt(aggregatedRow, "_quarter");
+			for (int i = start + 1; i <= quarter; i ++) {
 				ArrayList<DBObject> rows = new ArrayList<>();
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
 				BasicDBObject range = __("$gte", Integer.valueOf(i * 15 - 14));
@@ -285,8 +285,7 @@ public class Collector {
 				int i_ = i;
 				BiConsumer<HashMap<String, String>, MetricValue> action = (tags, value) -> {
 					// {"_quarter": i}, but not {"_quarter": quarter} !
-					rows.add(row(tags, "_quarter", i_,
-							value.getCount(), value.getSum(),
+					rows.add(row(tags, "_quarter", i_, value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
 					tags.forEach((tagKey, tagValue) ->
