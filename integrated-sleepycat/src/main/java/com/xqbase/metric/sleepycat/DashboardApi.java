@@ -2,6 +2,7 @@ package com.xqbase.metric.sleepycat;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -11,6 +12,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -29,8 +31,9 @@ import com.sleepycat.persist.EntityCursor;
 import com.sleepycat.persist.EntityStore;
 import com.sleepycat.persist.PrimaryIndex;
 import com.sleepycat.persist.SecondaryIndex;
+import com.xqbase.metric.client.MetricClient;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.sleepycat.model.QuarterTags;
+import com.xqbase.metric.sleepycat.model.AllTags;
 import com.xqbase.metric.sleepycat.model.Row;
 import com.xqbase.metric.sleepycat.model.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
@@ -80,9 +83,19 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 
-		maxTagValues = Numbers.parseInt(Conf.
-				load("Dashboard").getProperty("max_tag_values"));
-		logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+		logger = Log.getAndSet(Conf.openLogger("Dashboard.", 16777216, 10));
+		Properties p = Conf.load("Dashboard");
+		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
+		String addresses = p.getProperty("metric.collectors", "");
+		for (String s : addresses.split("[,;]")) {
+			String[] ss = s.split("[:/]");
+			if (ss.length > 1) {
+				addrs.add(new InetSocketAddress(ss[0],
+						Numbers.parseInt(ss[1], 5514, 0, 65535)));
+			}
+		}
+		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
+		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
 
 		tableMap = new HashMap<>();
 		collector = new Collector();
@@ -106,6 +119,7 @@ public class DashboardApi extends HttpServlet {
 		try {
 			thread.join();
 		} catch (InterruptedException e) {/**/}
+		MetricClient.shutdown();
 		Conf.closeLogger(Log.getAndSet(logger));
 	}
 
@@ -183,15 +197,13 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			HashMap<String, ArrayList<TagValue>> tags =
-					collector.getStore("_meta.tags_all").
-					getPrimaryIndex(String.class, QuarterTags.class).
-					get(metricName).tags;
-			if (tags == null) {
+			AllTags allTags = collector.getStore("_meta.tags_all").
+					getPrimaryIndex(String.class, AllTags.class).get(metricName);
+			if (allTags == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Iterator<String> it = tags.keySet().iterator();
+			Iterator<String> it = allTags.tags.keySet().iterator();
 			JSONObject json = new JSONObject();
 			while (it.hasNext()) {
 				String tag = it.next();
@@ -202,7 +214,7 @@ public class DashboardApi extends HttpServlet {
 				if (maxTagValues <= 0) {
 					continue;
 				}
-				ArrayList<TagValue> values = tags.get(tag);
+				ArrayList<TagValue> values = allTags.tags.get(tag);
 				if (values.size() <= maxTagValues) {
 					continue;
 				}

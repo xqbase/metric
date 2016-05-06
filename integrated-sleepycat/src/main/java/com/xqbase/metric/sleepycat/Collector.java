@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,6 +35,7 @@ import com.sleepycat.persist.EntityStore;
 import com.sleepycat.persist.PrimaryIndex;
 import com.sleepycat.persist.SecondaryIndex;
 import com.sleepycat.persist.StoreConfig;
+import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -73,20 +75,6 @@ public class Collector implements Runnable {
 		rows.add(row);
 	}
 
-	private void insert(HashMap<String, ArrayList<Row>> rowsMap) {
-		rowsMap.forEach((name, rows) -> {
-			PrimaryIndex<Long, Row> index = getStore(name).
-					getPrimaryIndex(Long.class, Row.class);
-			for (Row row : rows) {
-				index.put(row);
-			}
-		});
-	}
-
-	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
-			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
-	private static boolean verbose;
-
 	private static Row row(HashMap<String, String> tagMap, int now,
 			long count, double sum, double max, double min, double sqr) {
 		Row row = new Row();
@@ -103,43 +91,6 @@ public class Collector implements Runnable {
 			row.tags = tagMap;
 		}
 		return row;
-	}
-
-	private void minutely(int minute) {
-		// Insert aggregation-during-collection metrics
-		HashMap<String, ArrayList<Row>> rowsMap = new HashMap<>();
-		for (MetricEntry entry : Metric.removeAll()) {
-			Row row = row(entry.getTagMap(), minute, entry.getCount(),
-					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
-			put(rowsMap, entry.getName(), row);
-		}
-		if (!rowsMap.isEmpty()) {
-			insert(rowsMap);
-		}
-		// Ensure index and calculate metric size by master collector
-		if (serverId != 0) {
-			return;
-		}
-		for (String name : env_.getDatabaseNames()) {
-			if (name.startsWith("system.") || name.startsWith("_meta.")) {
-				continue;
-			}
-			long count = getStore(name).getPrimaryIndex(Long.class, Row.class).count();
-			if (count == 0) {
-				// Remove disappeared metric collections
-				env_.removeDatabase(null, name);
-				if (name.startsWith("_quarter.")) {
-					// Remove disappeared quarterly metric from meta collections
-					String minuteName = name.substring(9);
-					aggregatedPk.delete(minuteName);
-					tagsNameSk.delete(minuteName);
-					allTagsPk.delete(minuteName);
-				}
-			} else {
-				// Will be inserted next minute
-				Metric.put("metric.size", count, "name", name);
-			}
-		}
 	}
 
 	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
@@ -208,6 +159,88 @@ public class Collector implements Runnable {
 		}
 	}
 
+	private static HashSet<String> getMetricNames(List<String> databaseNames) {
+		HashSet<String> metricNames = new HashSet<>();
+		for (String s : databaseNames) {
+			if (s.startsWith("persist#")) {
+				metricNames.add(s.substring(8, s.indexOf('#', 8)));
+			}
+		}
+		return metricNames;
+	}
+
+	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
+	private static boolean verbose;
+
+	private void insert(HashMap<String, ArrayList<Row>> rowsMap) {
+		rowsMap.forEach((name, rows) -> {
+			PrimaryIndex<Long, Row> index = getStore(name).
+					getPrimaryIndex(Long.class, Row.class);
+			for (Row row : rows) {
+				index.put(row);
+			}
+		});
+	}
+
+	private List<String> getDatabaseNames() {
+		return env_.getDatabaseNames();
+	}
+
+	private HashSet<String> getMetricNames() {
+		return getMetricNames(env_.getDatabaseNames());
+	}
+
+	private void minutely(int minute) {
+		// Insert aggregation-during-collection metrics
+		HashMap<String, ArrayList<Row>> rowsMap = new HashMap<>();
+		for (MetricEntry entry : Metric.removeAll()) {
+			Row row = row(entry.getTagMap(), minute, entry.getCount(),
+					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
+			put(rowsMap, entry.getName(), row);
+		}
+		if (!rowsMap.isEmpty()) {
+			insert(rowsMap);
+		}
+		// Ensure index and calculate metric size by master collector
+		if (serverId != 0) {
+			return;
+		}
+		List<String> databaseNames = getDatabaseNames();
+		ArrayList<String> prefixesToRemove = new ArrayList<>();
+		for (String name : getMetricNames(databaseNames)) {
+			if (name.startsWith("_meta.")) {
+				continue;
+			}
+			EntityStore store = getStore(name);
+			long count = store.getPrimaryIndex(Long.class, Row.class).count();
+			if (count == 0) {
+				// Remove disappeared metric collections
+				store.close();
+				storeCache.remove(name);
+				prefixesToRemove.add("persist#" + name + "#");
+				if (name.startsWith("_quarter.")) {
+					// Remove disappeared quarterly metric from meta collections
+					String minuteName = name.substring(9);
+					aggregatedPk.delete(minuteName);
+					tagsNameSk.delete(minuteName);
+					allTagsPk.delete(minuteName);
+				}
+			} else {
+				// Will be inserted next minute
+				Metric.put("metric.size", count, "name", name);
+			}
+		}
+		for (String databaseName : databaseNames) {
+			for (String prefix : prefixesToRemove) {
+				if (databaseName.startsWith(prefix)) {
+					env_.removeDatabase(null, databaseName);
+				}
+			}
+		}
+		env_.flushLog(false);
+	}
+
 	private void quarterly(int quarter) {
 		Integer removeBefore = Integer.valueOf(quarter * 15 - expire);
 		Integer removeAfter = Integer.valueOf(quarter * 15 + expire);
@@ -217,9 +250,8 @@ public class Collector implements Runnable {
 		removeStale(tagsTimeSk, Integer.valueOf(quarter - tagsExpire),
 				Integer.valueOf(quarter + tagsExpire));
 		// Scan minutely collections
-		for (String name : env_.getDatabaseNames()) {
-			if (name.startsWith("system.") || name.startsWith("_meta.") ||
-					name.startsWith("_quarter.")) {
+		for (String name : getMetricNames()) {
+			if (name.startsWith("_meta.") || name.startsWith("_quarter.")) {
 				continue;
 			}
 			EntityStore store = getStore(name);
@@ -286,7 +318,7 @@ public class Collector implements Runnable {
 			aggregatedPk.put(aggregated);
 		}
 		// Scan quarterly collections
-		for (String name : env_.getDatabaseNames()) {
+		for (String name : getMetricNames()) {
 			if (!name.startsWith("_quarter.")) {
 				continue;
 			}
@@ -315,6 +347,7 @@ public class Collector implements Runnable {
 			allTags.tags = getTags(tagMap);
 			allTagsPk.put(allTags);
 		}
+		env_.flushLog(false);
 	}
 
 	private AtomicBoolean interrupted = new AtomicBoolean(false);
@@ -362,6 +395,8 @@ public class Collector implements Runnable {
 	public void run() {
 		ExecutorService executor = Executors.newCachedThreadPool();
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
+		timer.scheduleAtFixedRate(Runnables.wrap(new
+				ManagementMonitor("metric.sleepycat")), 0, 5, TimeUnit.SECONDS);
 
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);

@@ -21,7 +21,7 @@ public class Startup {
 		tomcat.getService().addConnector(connector);
 		tomcat.setConnector(connector);
 		try {
-			Context ctx = tomcat.addWebapp("", Conf.getAbsolutePath("../src/main/webapp"));
+			Context ctx = tomcat.addWebapp("", Conf.getAbsolutePath(".."));
 			WebResourceRoot resources = new StandardRoot(ctx);
 			resources.addPreResources(new DirResourceSet(resources, "/WEB-INF/classes",
 					Conf.getAbsolutePath("../../../../target/classes"), "/"));
