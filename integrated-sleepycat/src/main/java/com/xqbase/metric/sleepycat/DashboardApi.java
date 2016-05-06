@@ -2,8 +2,8 @@ package com.xqbase.metric.sleepycat;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
@@ -22,7 +22,7 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.bson.BSONObject;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.sleepycat.persist.EntityCursor;
@@ -30,8 +30,9 @@ import com.sleepycat.persist.EntityStore;
 import com.sleepycat.persist.PrimaryIndex;
 import com.sleepycat.persist.SecondaryIndex;
 import com.xqbase.metric.common.MetricValue;
+import com.xqbase.metric.sleepycat.model.QuarterTags;
 import com.xqbase.metric.sleepycat.model.Row;
-import com.xqbase.metric.sleepycat.model.Tags;
+import com.xqbase.metric.sleepycat.model.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -182,15 +183,16 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			// DBObject tagsRow;
-			HashMap<String, Collection<?>> tagsRow =
+			HashMap<String, ArrayList<TagValue>> tags =
 					collector.getStore("_meta.tags_all").
-					getPrimaryIndex(String.class, Tags.class).get(metricName).tags;
-			if (tagsRow == null) {
+					getPrimaryIndex(String.class, QuarterTags.class).
+					get(metricName).tags;
+			if (tags == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Iterator<String> it = tagsRow.keySet().iterator();
+			Iterator<String> it = tags.keySet().iterator();
+			JSONObject json = new JSONObject();
 			while (it.hasNext()) {
 				String tag = it.next();
 				if (tag.isEmpty() || tag.charAt(0) == '_') {
@@ -200,18 +202,26 @@ public class DashboardApi extends HttpServlet {
 				if (maxTagValues <= 0) {
 					continue;
 				}
-				Collection<?> values = tagsRow.get(tag);
+				ArrayList<TagValue> values = tags.get(tag);
 				if (values.size() <= maxTagValues) {
 					continue;
 				}
-				PriorityQueue<?> countQueue = CollectionsEx.max(values,
-						Comparator.comparingLong(o -> {
-					Object count_ = ((BSONObject) o).get("_count");
-					return (count_ instanceof Number ? ((Number) count_).longValue() : 0);
-				}), maxTagValues);
-				tagsRow.put(tag, countQueue);
+				PriorityQueue<TagValue> countQueue = CollectionsEx.max(values,
+						Comparator.comparingLong(o -> o.count), maxTagValues);
+				JSONArray arr = new JSONArray();
+				for (TagValue tagValue : countQueue) {
+					JSONObject obj = new JSONObject();
+					obj.put("_value", tagValue.value);
+					obj.put("_count", tagValue.count);
+					obj.put("_sum", tagValue.sum);
+					obj.put("_max", tagValue.max);
+					obj.put("_min", tagValue.min);
+					obj.put("_sqr", tagValue.sqr);
+					arr.put(obj);
+				}
+				json.put(tag, arr);
 			}
-			outputJson(req, resp, tagsRow);
+			outputJson(req, resp, json);
 			return;
 		}
 		// Query Condition
