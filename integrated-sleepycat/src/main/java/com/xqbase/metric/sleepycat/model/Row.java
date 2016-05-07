@@ -16,4 +16,11 @@ public class Row {
 	public long count;
 	public double sum, max, min, sqr;
 	public HashMap<String, String> tags;
+
+	@Override
+	public String toString() {
+		return "Row [id=" + id + ", time=" + time + ", count=" + count +
+				", sum=" + sum + ", max=" + max + ", min=" + min + ", sqr=" +
+				sqr + ", tags=" + tags + "]";
+	}
 }

@@ -5,13 +5,13 @@ import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -214,14 +214,13 @@ public class DashboardApi extends HttpServlet {
 				if (maxTagValues <= 0) {
 					continue;
 				}
-				ArrayList<TagValue> values = allTags.tags.get(tag);
-				if (values.size() <= maxTagValues) {
-					continue;
+				Collection<TagValue> tagValues = allTags.tags.get(tag);
+				if (tagValues.size() > maxTagValues) {
+					tagValues = CollectionsEx.max(tagValues,
+							Comparator.comparingLong(o -> o.count), maxTagValues);
 				}
-				PriorityQueue<TagValue> countQueue = CollectionsEx.max(values,
-						Comparator.comparingLong(o -> o.count), maxTagValues);
 				JSONArray arr = new JSONArray();
-				for (TagValue tagValue : countQueue) {
+				for (TagValue tagValue : tagValues) {
 					JSONObject obj = new JSONObject();
 					obj.put("_value", tagValue.value);
 					obj.put("_count", tagValue.count);

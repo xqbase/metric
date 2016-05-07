@@ -47,7 +47,8 @@ public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
 	private static String decode(String s, int limit) {
-		return Strings.truncate(Strings.decodeUrl(s), limit);
+		String result = Strings.decodeUrl(s);
+		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
 	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,

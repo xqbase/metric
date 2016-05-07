@@ -36,7 +36,6 @@ import com.sleepycat.persist.PrimaryIndex;
 import com.sleepycat.persist.SecondaryIndex;
 import com.sleepycat.persist.StoreConfig;
 import com.xqbase.metric.client.ManagementMonitor;
-import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.sleepycat.model.Aggregated;
@@ -53,7 +52,6 @@ import com.xqbase.util.Runnables;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
-
 public class Collector implements Runnable {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
@@ -62,7 +60,8 @@ public class Collector implements Runnable {
 	private static final Integer MAX_INT = Integer.valueOf(Integer.MAX_VALUE);
 
 	private static String decode(String s, int limit) {
-		return Strings.truncate(Strings.decodeUrl(s), limit);
+		String result = Strings.decodeUrl(s);
+		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
 	private static void put(HashMap<String, ArrayList<Row>> rowsMap,
@@ -159,7 +158,7 @@ public class Collector implements Runnable {
 		}
 	}
 
-	private static HashSet<String> getMetricNames(List<String> databaseNames) {
+	private static HashSet<String> getStoreNames(List<String> databaseNames) {
 		HashSet<String> metricNames = new HashSet<>();
 		for (String s : databaseNames) {
 			if (s.startsWith("persist#")) {
@@ -169,7 +168,7 @@ public class Collector implements Runnable {
 		return metricNames;
 	}
 
-	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+	private static int expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
@@ -187,8 +186,8 @@ public class Collector implements Runnable {
 		return env_.getDatabaseNames();
 	}
 
-	private HashSet<String> getMetricNames() {
-		return getMetricNames(env_.getDatabaseNames());
+	private HashSet<String> getStoreNames() {
+		return getStoreNames(env_.getDatabaseNames());
 	}
 
 	private void minutely(int minute) {
@@ -199,16 +198,10 @@ public class Collector implements Runnable {
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 			put(rowsMap, entry.getName(), row);
 		}
-		if (!rowsMap.isEmpty()) {
-			insert(rowsMap);
-		}
-		// Ensure index and calculate metric size by master collector
-		if (serverId != 0) {
-			return;
-		}
+		insert(rowsMap);
 		List<String> databaseNames = getDatabaseNames();
 		ArrayList<String> prefixesToRemove = new ArrayList<>();
-		for (String name : getMetricNames(databaseNames)) {
+		for (String name : getStoreNames(databaseNames)) {
 			if (name.startsWith("_meta.")) {
 				continue;
 			}
@@ -250,7 +243,7 @@ public class Collector implements Runnable {
 		removeStale(tagsTimeSk, Integer.valueOf(quarter - tagsExpire),
 				Integer.valueOf(quarter + tagsExpire));
 		// Scan minutely collections
-		for (String name : getMetricNames()) {
+		for (String name : getStoreNames()) {
 			if (name.startsWith("_meta.") || name.startsWith("_quarter.")) {
 				continue;
 			}
@@ -318,7 +311,7 @@ public class Collector implements Runnable {
 			aggregatedPk.put(aggregated);
 		}
 		// Scan quarterly collections
-		for (String name : getMetricNames()) {
+		for (String name : getStoreNames()) {
 			if (!name.startsWith("_quarter.")) {
 				continue;
 			}
@@ -402,7 +395,6 @@ public class Collector implements Runnable {
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
-		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
@@ -452,7 +444,7 @@ public class Collector implements Runnable {
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(minute);
-				if (serverId == 0 && !interrupted.get() && minute % 15 == quarterDelay) {
+				if (!interrupted.get() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
 					quarterly(minute / 15);
 				}
@@ -474,10 +466,9 @@ public class Collector implements Runnable {
 					continue;
 				}
 				if (enableRemoteAddr) {
-					Metric.put("metric.throughput", len,
-							"remote_addr", remoteAddr, "server_id", "" + serverId);
+					Metric.put("metric.throughput", len, "remote_addr", remoteAddr);
 				} else {
-					Metric.put("metric.throughput", len, "server_id", "" + serverId);
+					Metric.put("metric.throughput", len);
 				}
 				// Inflate
 				ByteArrayQueue baq = new ByteArrayQueue();
@@ -535,10 +526,9 @@ public class Collector implements Runnable {
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
 						Metric.put("metric.rows", 1, "name", name,
-								"remote_addr", remoteAddr, "server_id", "" + serverId);
+								"remote_addr", remoteAddr);
 					} else {
-						Metric.put("metric.rows", 1, "name", name,
-								"server_id", "" + serverId);
+						Metric.put("metric.rows", 1, "name", name);
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
