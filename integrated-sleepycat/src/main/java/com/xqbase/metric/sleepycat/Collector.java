@@ -324,16 +324,17 @@ public class Collector implements Runnable {
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			String minuteName = name.substring(9);
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
-			EntityCursor<QuarterTags> quarterTagss = tagsNameSk.
-					entities(minuteName, true, minuteName, true);
-			for (QuarterTags quarterTags : quarterTagss) {
-				quarterTags.tags.forEach((tagKey, tagValues) -> {
-					for (TagValue tagValue : tagValues) {
-						putTagValue(tagMap, tagKey, tagValue.value,
-								new MetricValue(tagValue.count, tagValue.sum,
-								tagValue.max, tagValue.min, tagValue.sqr));
-					}
-				});
+			try (EntityCursor<QuarterTags> quarterTagss = tagsNameSk.
+					entities(minuteName, true, minuteName, true)) {
+				for (QuarterTags quarterTags : quarterTagss) {
+					quarterTags.tags.forEach((tagKey, tagValues) -> {
+						for (TagValue tagValue : tagValues) {
+							putTagValue(tagMap, tagKey, tagValue.value,
+									new MetricValue(tagValue.count, tagValue.sum,
+									tagValue.max, tagValue.min, tagValue.sqr));
+						}
+					});
+				}
 			}
 			AllTags allTags = new AllTags();
 			allTags.name = minuteName;
