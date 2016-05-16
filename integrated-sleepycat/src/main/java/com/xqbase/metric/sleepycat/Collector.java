@@ -260,16 +260,18 @@ public class Collector implements Runnable {
 			int start = aggregated == null ? quarter - expire : aggregated.time;
 			for (int i = start + 1; i <= quarter; i ++) {
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
-				for (Row row : sk.entities(Integer.valueOf(i * 15 - 14),
+				try (EntityCursor<Row> rows = sk.entities(Integer.valueOf(i * 15 - 14),
 						true, Integer.valueOf(i * 15), true)) {
-					// Aggregate to "_quarter.*"
-					MetricValue newValue = new MetricValue(row.count,
-							row.sum, row.max, row.min, row.sqr);
-					MetricValue value = result.get(row.tags);
-					if (value == null) {
-						result.put(row.tags, newValue);
-					} else {
-						value.add(newValue);
+					for (Row row : rows) {
+						// Aggregate to "_quarter.*"
+						MetricValue newValue = new MetricValue(row.count,
+								row.sum, row.max, row.min, row.sqr);
+						MetricValue value = result.get(row.tags);
+						if (value == null) {
+							result.put(row.tags, newValue);
+						} else {
+							value.add(newValue);
+						}
 					}
 				}
 				if (result.isEmpty()) {
