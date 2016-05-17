@@ -554,16 +554,16 @@ public class Collector implements Runnable {
 		if (minutely != null) {
 			executor.execute(minutely);
 		}
+		Runnables.shutdown(executor);
+		Runnables.shutdown(timer);
 		for (Future<EntityStore> f : storeCache.values()) {
 			try {
 				f.get().close();
 			} catch (InterruptedException | ExecutionException e) {
-				throw new RuntimeException(e);
+				Log.e(e);
 			}
 		}
 		env.close();
-		Runnables.shutdown(executor);
-		Runnables.shutdown(timer);
 
 		Log.i("Metric Collector Stopped");
 	}
