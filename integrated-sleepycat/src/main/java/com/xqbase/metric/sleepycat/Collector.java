@@ -1,7 +1,6 @@
 package com.xqbase.metric.sleepycat;
 
 import java.io.ByteArrayInputStream;
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -183,11 +182,11 @@ public class Collector implements Runnable {
 	}
 
 	private List<String> getDatabaseNames() {
-		return env_.getDatabaseNames();
+		return env.getDatabaseNames();
 	}
 
 	private HashSet<String> getStoreNames() {
-		return getStoreNames(env_.getDatabaseNames());
+		return getStoreNames(env.getDatabaseNames());
 	}
 
 	private void minutely(int minute) {
@@ -227,11 +226,11 @@ public class Collector implements Runnable {
 		for (String databaseName : databaseNames) {
 			for (String prefix : prefixesToRemove) {
 				if (databaseName.startsWith(prefix)) {
-					env_.removeDatabase(null, databaseName);
+					env.removeDatabase(null, databaseName);
 				}
 			}
 		}
-		env_.flushLog(false);
+		env.flushLog(false);
 	}
 
 	private void quarterly(int quarter) {
@@ -343,7 +342,7 @@ public class Collector implements Runnable {
 			allTags.tags = getTags(tagMap);
 			allTagsPk.put(allTags);
 		}
-		env_.flushLog(false);
+		env.flushLog(false);
 	}
 
 	private AtomicBoolean interrupted = new AtomicBoolean(false);
@@ -354,26 +353,28 @@ public class Collector implements Runnable {
 	private SecondaryIndex<String, Long, QuarterTags> tagsNameSk;
 	private SecondaryIndex<Integer, Long, QuarterTags> tagsTimeSk;
 	private PrimaryIndex<String, AllTags> allTagsPk;
-	private volatile Environment env_;
-	private volatile DatagramSocket socket_;
+	private Environment env;
+	private volatile DatagramSocket socket = null;
 
-	public AtomicBoolean getInterrupted() {
-		return interrupted;
+	{
+		File dataDir = new File(Conf.getAbsolutePath("data"));
+		dataDir.mkdir();
+		env = new Environment(dataDir,
+				new EnvironmentConfig().setAllowCreate(true));
 	}
 
-	public Environment getEnv() {
-		return env_;
-	}
-
-	public DatagramSocket getSocket() {
-		return socket_;
+	public void interrupt() {
+		interrupted.set(true);
+		if (socket != null) {
+			socket.close();
+		}
 	}
 
 	public EntityStore getStore(String name) {
 		Future<EntityStore> f = storeCache.get(name);
 		if (f == null) {
 			FutureTask<EntityStore> ft = new FutureTask<>(() ->
-					new EntityStore(env_, name, STORE_CONFIG));
+					new EntityStore(env, name, STORE_CONFIG));
 			f = storeCache.putIfAbsent(name, ft);
 			if (f == null) {
 				f = ft;
@@ -418,25 +419,8 @@ public class Collector implements Runnable {
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		Runnable minutely = null;
 
-		File dataDir = new File(Conf.getAbsolutePath("data"));
-		dataDir.mkdir();
-		try (
-			Environment env = new Environment(dataDir,
-					new EnvironmentConfig().setAllowCreate(true));
-			Closeable closeable = () -> {
-				for (Future<EntityStore> f : storeCache.values()) {
-					try {
-						f.get().close();
-					} catch (InterruptedException | ExecutionException e) {
-						throw new RuntimeException(e);
-					}
-				}
-			};
-			DatagramSocket socket = new DatagramSocket(new
-					InetSocketAddress(host, port));
-		) {
-			env_ = env;
-			socket_ = socket;
+		try {
+			socket = new DatagramSocket(new InetSocketAddress(host, port));
 			aggregatedPk = getStore("_meta.aggregated").
 					getPrimaryIndex(String.class, Aggregated.class);
 			EntityStore tagsQuarter = getStore("_meta.tags_quarter");
@@ -564,10 +548,20 @@ public class Collector implements Runnable {
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
 		}
-		// Do not do Mongo operations in main thread (may be interrupted)
+		if (socket != null) {
+			socket.close();
+		}
 		if (minutely != null) {
 			executor.execute(minutely);
 		}
+		for (Future<EntityStore> f : storeCache.values()) {
+			try {
+				f.get().close();
+			} catch (InterruptedException | ExecutionException e) {
+				throw new RuntimeException(e);
+			}
+		}
+		env.close();
 		Runnables.shutdown(executor);
 		Runnables.shutdown(timer);
 

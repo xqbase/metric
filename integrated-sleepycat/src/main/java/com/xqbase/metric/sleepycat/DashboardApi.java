@@ -73,7 +73,6 @@ public class DashboardApi extends HttpServlet {
 	private static AtomicInteger count = new AtomicInteger(0);
 	private static int maxTagValues;
 	private static Logger logger;
-	private static HashMap<String, EntityStore> tableMap;
 	private static Collector collector;
 	private static Thread thread;
 
@@ -97,7 +96,6 @@ public class DashboardApi extends HttpServlet {
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
 
-		tableMap = new HashMap<>();
 		collector = new Collector();
 		thread = new Thread(collector);
 		thread.start();
@@ -109,13 +107,7 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 
-		for (EntityStore table : tableMap.values()) {
-			table.close();
-		}
-		collector.getInterrupted().set(true);
-		if (collector.getSocket() != null) {
-			collector.getSocket().close();
-		}
+		collector.interrupt();
 		try {
 			thread.join();
 		} catch (InterruptedException e) {/**/}
