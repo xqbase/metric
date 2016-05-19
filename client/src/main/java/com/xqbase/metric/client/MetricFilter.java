@@ -3,6 +3,7 @@ package com.xqbase.metric.client;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -17,10 +18,12 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import com.xqbase.metric.common.Metric;
+import com.xqbase.metric.common.MetricKey;
 
 public class MetricFilter implements Filter {
 	private FilterConfig conf;
 	private String requestTime;
+	private HashMap<String, String> tagMap;
 	private ScheduledThreadPoolExecutor timer;
 	private AtomicInteger connections = new AtomicInteger(0);
 
@@ -30,6 +33,10 @@ public class MetricFilter implements Filter {
 
 	protected String getPrefix() {
 		return conf.getInitParameter("prefix");
+	}
+
+	protected String getTags() {
+		return conf.getInitParameter("tags");
 	}
 
 	@Override
@@ -57,10 +64,22 @@ public class MetricFilter implements Filter {
 		String connections_ = prefix + ".webapp.connections";
 		requestTime = prefix + ".webapp.request_time";
 
+		tagMap = new HashMap<>();
+		String tags = getTags();
+		if (tags != null) {
+			for (String s : tags.split("[,;]")) {
+				String[] ss = s.split("[:=]");
+				if (ss.length > 1) {
+					tagMap.put(ss[0], ss[1]);
+				}
+			}
+		}
+
 		timer = new ScheduledThreadPoolExecutor(1);
-		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server"),
+		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server", tagMap),
 				0, 5, TimeUnit.SECONDS);
-		timer.scheduleAtFixedRate(() -> Metric.put(connections_, connections.get()),
+		timer.scheduleAtFixedRate(() ->
+				Metric.put(connections_, connections.get(), tagMap),
 				1, 1, TimeUnit.SECONDS);
 	}
 
@@ -98,9 +117,11 @@ public class MetricFilter implements Filter {
 			String type = "" + resp.getContentType();
 			int colon = type.indexOf(';', 1);
 			type = colon < 0 ? type : type.substring(0, colon);
-			Metric.put(requestTime, System.currentTimeMillis() - t,
-					"path", path, "status", "" + status, "content_type", type,
+			HashMap<String, String> tagMap_ = new HashMap<>(tagMap);
+			MetricKey.putTagMap(tagMap_, "path", path,
+					"status", "" + status, "content_type", type,
 					"charset", "" + resp.getCharacterEncoding());
+			Metric.put(requestTime, System.currentTimeMillis() - t, tagMap_);
 		}
 	}
 }

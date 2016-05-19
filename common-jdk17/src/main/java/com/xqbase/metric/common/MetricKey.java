@@ -3,6 +3,17 @@ package com.xqbase.metric.common;
 import java.util.HashMap;
 
 public class MetricKey {
+	public static void putTagMap(HashMap<String, String> tagMap,
+			String... tagPairs) {
+		for (int i = 0; i < tagPairs.length - 1; i += 2) {
+			String key = tagPairs[i];
+			String value = tagPairs[i + 1];
+			if (key != null && value != null) {
+				tagMap.put(key, value);
+			}
+		}
+	}
+
 	private String name;
 	private HashMap<String, String> tagMap;
 
@@ -14,13 +25,7 @@ public class MetricKey {
 	public MetricKey(String name, String... tagPairs) {
 		this.name = name;
 		tagMap = new HashMap<>();
-		for (int i = 0; i < tagPairs.length - 1; i += 2) {
-			String key = tagPairs[i];
-			String value = tagPairs[i + 1];
-			if (key != null && value != null) {
-				tagMap.put(key, value);
-			}
-		}
+		putTagMap(tagMap, tagPairs);
 	}
 
 	public String getName() {

@@ -176,7 +176,7 @@ public class Collector implements Runnable {
 			PrimaryIndex<Long, Row> index = getStore(name).
 					getPrimaryIndex(Long.class, Row.class);
 			for (Row row : rows) {
-				index.put(row);
+				index.putNoReturn(row);
 			}
 		});
 	}
@@ -282,7 +282,7 @@ public class Collector implements Runnable {
 				int i_ = i;
 				BiConsumer<HashMap<String, String>, MetricValue> action = (tags, value) -> {
 					// {"_quarter": i}, but not {"_quarter": quarter} !
-					quarterPk.put(row(tags, i_, value.getCount(), value.getSum(),
+					quarterPk.putNoReturn(row(tags, i_, value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
 					tags.forEach((tagKey, tagValue) ->
@@ -304,12 +304,12 @@ public class Collector implements Runnable {
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				quarterTags.time = i;
 				quarterTags.tags = getTags(tagMap);
-				tagsPk.put(quarterTags);
+				tagsPk.putNoReturn(quarterTags);
 			}
 			aggregated = new Aggregated();
 			aggregated.name = name;
 			aggregated.time = quarter;
-			aggregatedPk.put(aggregated);
+			aggregatedPk.putNoReturn(aggregated);
 		}
 		// Scan quarterly collections
 		for (String name : getStoreNames()) {
@@ -340,7 +340,7 @@ public class Collector implements Runnable {
 			AllTags allTags = new AllTags();
 			allTags.name = minuteName;
 			allTags.tags = getTags(tagMap);
-			allTagsPk.put(allTags);
+			allTagsPk.putNoReturn(allTags);
 		}
 		env.flushLog(false);
 	}
