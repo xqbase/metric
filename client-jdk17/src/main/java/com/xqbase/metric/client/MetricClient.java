@@ -30,7 +30,7 @@ public class MetricClient {
 	}
 
 	private static void send(DatagramSocket socket,
-			InetSocketAddress addr, String data) throws IOException {
+			InetSocketAddress[] addrs, String data) throws IOException {
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
 		try (DeflaterOutputStream dos = new
 				DeflaterOutputStream(baos)) {
@@ -38,10 +38,13 @@ public class MetricClient {
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
-		// Resolve "addr" every time
-		DatagramPacket packet = new DatagramPacket(baos.toByteArray(), baos.size(),
-				new InetSocketAddress(addr.getHostString(), addr.getPort()));
-		socket.send(packet);
+		byte[] b = baos.toByteArray();
+		for (InetSocketAddress addr : addrs) {
+			// Resolve "addr" every time
+			DatagramPacket packet = new DatagramPacket(b, b.length,
+					new InetSocketAddress(addr.getHostString(), addr.getPort()));
+			socket.send(packet);
+		}
 	}
 
 	static void send(InetSocketAddress[] addrs, int minute) {
@@ -70,16 +73,12 @@ public class MetricClient {
 					row.setCharAt(question, '?');
 				}
 				if (packet.length() + row.length() >= MAX_PACKET_SIZE) {
-					for (InetSocketAddress addr : addrs) {
-						send(socket, addr, packet.toString());
-					}
+					send(socket, addrs, packet.toString());
 					packet.setLength(0);
 				}
 				packet.append(row).append('\n');
 			}
-			for (InetSocketAddress addr : addrs) {
-				send(socket, addr, packet.toString());
-			}
+			send(socket, addrs, packet.toString());
 		} catch (IOException e) {
 			System.err.println(e.getMessage());
 		}
