@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-integrated-sleepycat</artifactId>
-	<version>0.2.5</version>
+	<version>0.2.6</version>
 	<packaging>war</packaging>
 	<name>XQBase Metric Collector and Dashboard (Integrated with Sleepycat) </name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - integrated-with-sleepycat part</description>
@@ -51,7 +51,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-metric-client</artifactId>
-			<version>0.2.5</version>
+			<version>0.2.6</version>
 		</dependency>
 		<dependency>
 			<groupId>org.json</groupId>
@@ -66,15 +66,22 @@
 
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>
-			<artifactId>tomcat-catalina</artifactId>
+			<artifactId>tomcat-servlet-api</artifactId>
 			<version>8.0.30</version>
 			<scope>provided</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.tomcat</groupId>
+			<artifactId>tomcat-catalina</artifactId>
+			<version>8.0.30</version>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>
 			<artifactId>tomcat-coyote</artifactId>
 			<version>8.0.30</version>
-			<scope>provided</scope>
+			<scope>test</scope>
 		</dependency>
 	</dependencies>
 </project>
