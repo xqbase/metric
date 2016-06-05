@@ -41,6 +41,7 @@ import com.xqbase.util.db.ConnectionPool;
 
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
+	private static final int MAX_METRIC_LEN = 64;
 
 	private static String decode(String s, int limit) {
 		String result = Strings.decodeUrl(s);
@@ -66,7 +67,7 @@ public class Collector {
 
 	private static Service service = new Service();
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
-			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
+			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
 	private static MetricRow row(HashMap<String, String> tagMap, int now,
@@ -329,7 +330,6 @@ public class Collector {
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
 		maxTagCombinations = Numbers.parseInt(p.getProperty("max_tag_combinations"));
-		maxMetricLen = Numbers.parseInt(p.getProperty("max_metric_len"));
 		maxTagNameLen = Numbers.parseInt(p.getProperty("max_tag_name_len"));
 		maxTagValueLen = Numbers.parseInt(p.getProperty("max_tag_value_len"));
 		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 2);
@@ -430,7 +430,7 @@ public class Collector {
 						Log.w("Incorrect format: [" + line + "]");
 						continue;
 					}
-					String name = decode(paths[0], maxMetricLen);
+					String name = decode(paths[0], MAX_METRIC_LEN);
 					if (name.isEmpty()) {
 						Log.w("Incorrect format: [" + line + "]");
 						continue;
