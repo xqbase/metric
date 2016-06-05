@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.xqbase</groupId>
+	<artifactId>xqbase-metric-collector</artifactId>
+	<version>0.2.5</version>
+	<packaging>jar</packaging>
+	<name>XQBase Metric Collector</name>
+	<description>a lightweight metric framework for aggregating, collecting and showing metric data - collector part</description>
+	<url>https://github.com/xqbase/metric</url>
+
+	<licenses>
+		<license>
+			<name>The Apache License, Version 2.0</name>
+			<url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+		</license>
+	</licenses>
+
+	<developers>
+		<developer>
+			<name>xqbase.com Development Team</name>
+			<email>webmaster@xqbase.com</email>
+			<organization>xqbase.com</organization>
+			<organizationUrl>http://www.xqbase.com</organizationUrl>
+		</developer>
+	</developers>
+
+	<scm>
+		<connection>scm:git:git@github.com:xqbase/metric.git</connection>
+		<developerConnection>scm:git:git@github.com:xqbase/metric.git</developerConnection>
+		<url>https://github.com/xqbase/metric.git</url>
+	</scm>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<maven.compiler.source>1.8</maven.compiler.source>
+		<maven.compiler.target>1.8</maven.compiler.target>
+	</properties>
+
+	<build>
+		<plugins>
+			<plugin>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<configuration>
+					<appendAssemblyId>false</appendAssemblyId>
+					<descriptorRefs>
+						<descriptorRef>jar-with-dependencies</descriptorRef>
+					</descriptorRefs>
+					<archive>
+						<manifest>
+							<mainClass>com.xqbase.metric.collector.Collector</mainClass>
+						</manifest>
+					</archive>
+				</configuration>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>assembly</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+		<finalName>metric-collector</finalName>
+	</build>
+
+	<dependencies>
+		<dependency>
+			<groupId>com.xqbase</groupId>
+			<artifactId>xqbase-util</artifactId>
+			<version>0.2.9</version>
+		</dependency>
+		<dependency>
+			<groupId>com.xqbase</groupId>
+			<artifactId>xqbase-metric-common</artifactId>
+			<version>0.2.5</version>
+		</dependency>
+		<dependency>
+			<groupId>com.esotericsoftware</groupId>
+			<artifactId>kryo</artifactId>
+			<version>3.0.3</version>
+		</dependency>
+
+		<dependency>
+			<groupId>mysql</groupId>
+			<artifactId>mysql-connector-java</artifactId>
+			<version>5.1.38</version>
+			<scope>runtime</scope>
+		</dependency>
+	</dependencies>
+</project>

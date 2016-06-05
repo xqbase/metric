@@ -20,9 +20,11 @@ hs_err_pid*
 /client/target
 /client-jdk17/target
 /collector/target
+/collector-sql/target
 /common/target
 /common-jdk17/target
 /dashboard/target
+/dashboard-sql/target
 /integrated-sleepycat/target
 /integrated-sleepycat/src/main/webapp/WEB-INF/data
 /integrated-sleepycat/src/main/webapp/WEB-INF/logs

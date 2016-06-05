@@ -1,0 +1,1 @@
+java -agentlib:jdwp=transport=dt_socket,address=localhost:8000,server=y,suspend=n -jar lib/metric-collector.jar
