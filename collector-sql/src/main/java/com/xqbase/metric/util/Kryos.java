@@ -1,12 +1,11 @@
 package com.xqbase.metric.util;
 
-import java.nio.charset.StandardCharsets;
-
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.KryoException;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import com.xqbase.util.ByteArrayQueue;
+import com.xqbase.util.Bytes;
 import com.xqbase.util.Log;
 import com.xqbase.util.Pool;
 
@@ -21,7 +20,7 @@ public class Kryos {
 		}
 	};
 
-	public static String serialize(Object o) {
+	public static byte[] serialize(Object o) {
 		ByteArrayQueue baq = new ByteArrayQueue();
 		try (
 			Pool<Kryo, RuntimeException>.Entry entry = kryoPool.borrow();
@@ -30,14 +29,14 @@ public class Kryos {
 			entry.getObject().writeObject(output, o);
 			entry.setValid(true);
 		}
-		return baq.toString(StandardCharsets.ISO_8859_1);
+		return Bytes.sub(baq.array(), baq.offset(), baq.length());
 	}
 
 	/** Be sure to do null pointer check on return value !!! */
-	public static <T> T deserialize(String s, Class<T> clazz) {
+	public static <T> T deserialize(byte[] b, Class<T> clazz) {
 		try (
 			Pool<Kryo, RuntimeException>.Entry entry = kryoPool.borrow();
-			Input input = new Input(s.getBytes(StandardCharsets.ISO_8859_1));
+			Input input = new Input(b);
 		) {
 			T t = entry.getObject().readObject(input, clazz);
 			entry.setValid(true);

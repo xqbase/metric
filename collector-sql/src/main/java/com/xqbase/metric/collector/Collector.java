@@ -29,6 +29,7 @@ import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricKey;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
+import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -38,6 +39,13 @@ import com.xqbase.util.Service;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 import com.xqbase.util.db.ConnectionPool;
+
+class MetricRow {
+	int time;
+	long count;
+	double sum, max, min, sqr;
+	HashMap<String, String> tags;
+}
 
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
@@ -61,7 +69,31 @@ public class Collector {
 	private static void insert(ConnectionPool db,
 			HashMap<String, ArrayList<MetricRow>> rowsMap, boolean quarter) {
 		rowsMap.forEach((name, rows) -> {
-			
+			if (rows.isEmpty()) {
+				return;
+			}
+			String type = (quarter ? "quarter" : "minute");
+			ArrayList<Object> ins = new ArrayList<>();
+			StringBuilder sb = new StringBuilder("INSERT INTO metric_" + type +
+					" (name, time, _count, _sum, _max, _min, _sqr, tags) VALUES ");
+			for (MetricRow row : rows) {
+				sb.append("(?, ?, ?, ?, ?, ?, ?), ");
+				ins.add(name);
+				ins.add(Integer.valueOf(row.time));
+				ins.add(Long.valueOf(row.count));
+				ins.add(Double.valueOf(row.sum));
+				ins.add(Double.valueOf(row.max));
+				ins.add(Double.valueOf(row.min));
+				ins.add(Double.valueOf(row.sqr));
+				ins.add(Kryos.serialize(row.tags));
+			}
+			String sql = sb.substring(0, sb.length() - 2);
+			db.updateEx(sql, ins.toArray());
+			sql = "UPDATE metric_" + type + "_size SET size = size + ? WHERE name = ?";
+			if (db.updateEx(sql, Integer.valueOf(rows.size()), name) == 0) {
+				sql = "INSERT INTO metric_" + type + "_size (name, size) VALUES (?, ?)";
+				db.updateEx(sql, name, Integer.valueOf(rows.size()));
+			}
 		});
 	}
 
@@ -104,30 +136,29 @@ public class Collector {
 		if (serverId != 0) {
 			return;
 		}
-		for (String name : db.getCollectionNames()) {
-			if (name.startsWith("system.") || name.startsWith("_meta.")) {
-				continue;
-			}
-			DBCollection collection = db.getCollection(name);
-			long count = collection.count();
+		db.query(row -> {
+			String name = row.getString(1);
+			long count = row.getLong(2);
 			if (count == 0) {
-				// Remove disappeared metric collections
-				collection.drop();
-				if (name.startsWith("_quarter.")) {
-					// Remove disappeared quarterly metric from meta collections
-					BasicDBObject query = __("name", name.substring(9));
-					db.getCollection("_meta.aggregated").remove(query);
-					db.getCollection("_meta.tags_quarter").remove(query);
-					db.getCollection("_meta.tags_all").remove(query);
-				}
+				db.updateEx("DELETE FROM metric_minute_size WHERE name = ?", name);
 			} else {
-				if (!name.startsWith("_quarter.")) {
-					collection.createIndex(INDEX_MINUTE);
-				}
 				// Will be inserted next minute
 				Metric.put("metric.size", count, "name", name);
 			}
-		}
+		}, "SELECT name, size FROM metric_minute_size");
+		db.query(row -> {
+			String name = row.getString(1);
+			long count = row.getLong(2);
+			if (count == 0) {
+				db.updateEx("DELETE FROM metric_quarter_size WHERE name = ?", name);
+				db.updateEx("DELETE FROM metric_aggregated WHERE name = ?", name);
+				db.updateEx("DELETE FROM metric_tags_all WHERE name = ?", name);
+				db.updateEx("DELETE FROM metric_tags_quarter WHERE name = ?", name);
+			} else {
+				// Will be inserted next minute
+				Metric.put("metric.size", count, "name", "_quarter." + name);
+			}
+		}, "SELECT name, size FROM metric_quarter_size");
 	}
 
 	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
@@ -149,14 +180,20 @@ public class Collector {
 		}
 	}
 
-	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
-		BasicDBObject row = new BasicDBObject();
+	private static HashMap<String, ArrayList<TagRow>>
+			getTagRows(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+		HashMap<String, ArrayList<TagRow>> tagRows = new HashMap<>();
 		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
-			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
+			ArrayList<TagRow> tagValues = new ArrayList<>();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
-				tagValues.add(row(Collections.singletonMap("_value", tagValue),
-						null, 0, value.getCount(), value.getSum(),
-						value.getMax(), value.getMin(), value.getSqr()));
+				TagRow row = new TagRow();
+				row.value = tagValue;
+				row.count = value.getCount();
+				row.sum = value.getSum();
+				row.max = value.getMax();
+				row.min = value.getMin();
+				row.sqr = value.getSqr();
+				tagValues.add(row);
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
 				CollectionsEx.forEach(CollectionsEx.max(valueMap.entrySet(),
@@ -165,7 +202,7 @@ public class Collector {
 			} else {
 				valueMap.forEach(action);
 			}
-			row.put(tagName, tagValues);
+			tagRows.put(tagName, tagValues);
 		};
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
@@ -173,7 +210,7 @@ public class Collector {
 		} else {
 			tagMap.forEach(mainAction);
 		}
-		return row;
+		return tagRows;
 	}
 
 	private static void quarterly(ConnectionPool db, int quarter) {
