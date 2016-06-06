@@ -6,13 +6,12 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.sql.Driver;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -26,7 +25,6 @@ import java.util.zip.InflaterInputStream;
 
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
-import com.xqbase.metric.common.MetricKey;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Kryos;
@@ -88,11 +86,15 @@ public class Collector {
 				ins.add(Kryos.serialize(row.tags));
 			}
 			String sql = sb.substring(0, sb.length() - 2);
-			db.updateEx(sql, ins.toArray());
-			sql = "UPDATE metric_" + type + "_size SET size = size + ? WHERE name = ?";
-			if (db.updateEx(sql, Integer.valueOf(rows.size()), name) == 0) {
-				sql = "INSERT INTO metric_" + type + "_size (name, size) VALUES (?, ?)";
-				db.updateEx(sql, name, Integer.valueOf(rows.size()));
+			try {
+				db.updateEx(sql, ins.toArray());
+				sql = "UPDATE metric_" + type + "_size SET size = size + ? WHERE name = ?";
+				if (db.updateEx(sql, Integer.valueOf(rows.size()), name) == 0) {
+					sql = "INSERT INTO metric_" + type + "_size (name, size) VALUES (?, ?)";
+					db.updateEx(sql, name, Integer.valueOf(rows.size()));
+				}
+			} catch (SQLException e) {
+				Log.e(e);
 			}
 		});
 	}
@@ -121,6 +123,18 @@ public class Collector {
 		return row;
 	}
 
+	private static HashMap<String, Long> getSizeMap(ConnectionPool db, boolean quarter) {
+		HashMap<String, Long> sizeMap = new HashMap<>();
+		try {
+			db.query(row -> sizeMap.put(row.getString(1), Long.valueOf(row.getLong(2))),
+					"SELECT name, size FROM metric_" +
+					(quarter ? "quarter" : "minute") + "_size");
+		} catch (SQLException e) {
+			Log.e(e);
+		}
+		return sizeMap;
+	}
+
 	private static void minutely(ConnectionPool db, int minute) {
 		// Insert aggregation-during-collection metrics
 		HashMap<String, ArrayList<MetricRow>> rowsMap = new HashMap<>();
@@ -136,29 +150,35 @@ public class Collector {
 		if (serverId != 0) {
 			return;
 		}
-		db.query(row -> {
-			String name = row.getString(1);
-			long count = row.getLong(2);
-			if (count == 0) {
-				db.updateEx("DELETE FROM metric_minute_size WHERE name = ?", name);
+		getSizeMap(db, false).forEach((name, size_) -> {
+			long size = size_.longValue();
+			if (size <= 0) {
+				try {
+					db.updateEx("DELETE FROM metric_minute_size WHERE name = ?", name);
+				} catch (SQLException e) {
+					Log.e(e);
+				}
 			} else {
 				// Will be inserted next minute
-				Metric.put("metric.size", count, "name", name);
+				Metric.put("metric.size", size, "name", name);
 			}
-		}, "SELECT name, size FROM metric_minute_size");
-		db.query(row -> {
-			String name = row.getString(1);
-			long count = row.getLong(2);
-			if (count == 0) {
-				db.updateEx("DELETE FROM metric_quarter_size WHERE name = ?", name);
-				db.updateEx("DELETE FROM metric_aggregated WHERE name = ?", name);
-				db.updateEx("DELETE FROM metric_tags_all WHERE name = ?", name);
-				db.updateEx("DELETE FROM metric_tags_quarter WHERE name = ?", name);
+		});
+		getSizeMap(db, true).forEach((name, size_) -> {
+			long size = size_.longValue();
+			if (size <= 0) {
+				try {
+					db.updateEx("DELETE FROM metric_quarter_size WHERE name = ?", name);
+					db.updateEx("DELETE FROM metric_aggregated WHERE name = ?", name);
+					db.updateEx("DELETE FROM metric_tags_all WHERE name = ?", name);
+					db.updateEx("DELETE FROM metric_tags_quarter WHERE name = ?", name);
+				} catch (SQLException e) {
+					Log.e(e);
+				}
 			} else {
 				// Will be inserted next minute
-				Metric.put("metric.size", count, "name", "_quarter." + name);
+				Metric.put("metric.size", size, "name", "_quarter." + name);
 			}
-		}, "SELECT name, size FROM metric_quarter_size");
+		});
 	}
 
 	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
@@ -341,7 +361,7 @@ public class Collector {
 					}
 				}
 			}
-			BasicDBObject row = getTagRow(tagMap);
+			BasicDBObject row = getTagRows(tagMap);
 			row.put("_name", minuteName);
 			tagsAll.update(query, row, true, false);
 		}
@@ -388,12 +408,13 @@ public class Collector {
 					getProperty("driver")).newInstance();
 			db = new ConnectionPool(driver, p.getProperty("url", ""),
 					p.getProperty("user"), p.getProperty("password"));
+			ConnectionPool db_ = db;
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
-				minutely(db, minute);
+				minutely(db_, minute);
 				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
-					quarterly(db, minute / 15);
+					quarterly(db_, minute / 15);
 				}
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
@@ -437,7 +458,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+				HashMap<String, ArrayList<MetricRow>> rowsMap = new HashMap<>();
 				HashMap<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
@@ -484,7 +505,7 @@ public class Collector {
 						// For aggregation-before-collection metric, insert immediately
 						long count = Numbers.parseLong(paths[2]);
 						double sum = Numbers.parseDouble(paths[3]);
-						put(rowsMap, name, row(tagMap, "_minute",
+						put(rowsMap, name, row(tagMap,
 								Numbers.parseInt(paths[1], currentMinute.get()), count, sum,
 								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
 								Numbers.parseDouble(paths[6])));
@@ -503,7 +524,7 @@ public class Collector {
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {
-					executor.execute(Runnables.wrap(() -> insert(db, rowsMap)));
+					executor.execute(Runnables.wrap(() -> insert(db_, rowsMap, false)));
 				}
 			}
 		} catch (IOException | ReflectiveOperationException e) {
