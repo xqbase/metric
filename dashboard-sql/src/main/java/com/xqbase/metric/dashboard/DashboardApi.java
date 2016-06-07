@@ -2,14 +2,16 @@ package com.xqbase.metric.dashboard;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.sql.Driver;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.PriorityQueue;
+import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -20,22 +22,20 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.bson.BSONObject;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
-import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBObject;
-import com.mongodb.MongoClient;
-import com.mongodb.MongoCredential;
-import com.mongodb.MongoException;
-import com.mongodb.ServerAddress;
 import com.xqbase.metric.common.MetricValue;
+import com.xqbase.metric.model.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
+import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
+import com.xqbase.util.db.ConnectionPool;
+import com.xqbase.util.db.Row;
 
 class GroupKey {
 	String tag;
@@ -61,43 +61,39 @@ class GroupKey {
 	}
 }
 
+class MetricRow {
+	int time;
+	long count;
+	double sum, max, min, sqr;
+	HashMap<String, String> tags;
+}
+
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
 	private int maxTagValues = 0;
-	private MongoClient mongo = null;
-	private DB db = null;
+	private ConnectionPool db = null;
 
 	@Override
 	public void init() throws ServletException {
 		try {
-			Properties p = Conf.load("Mongo");
-			ServerAddress addr = new ServerAddress(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port"), 27017));
-			String database = p.getProperty("db");
-			String username = p.getProperty("username");
-			String password = p.getProperty("password");
-			if (username == null || password == null) {
-				mongo = new MongoClient(addr);
-			} else {
-				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
-						createMongoCRCredential(username, database, password.toCharArray())));
-			}
-			db = mongo.getDB(database);
+			Properties p = Conf.load("jdbc");
+			Driver driver = (Driver) Class.forName(p.
+					getProperty("driver")).newInstance();
+			db = new ConnectionPool(driver, p.getProperty("url", ""),
+					p.getProperty("user"), p.getProperty("password"));
 
 			maxTagValues = Numbers.parseInt(Conf.
 					load("Dashboard").getProperty("max_tag_values"));
-		} catch (IOException e) {
+		} catch (ReflectiveOperationException e) {
 			throw new ServletException(e);
 		}
 	}
 
 	@Override
 	public void destroy() {
-		if (mongo != null) {
-			mongo.close();
-			mongo = null;
-			db = null;
+		if (db != null) {
+			db.close();
 		}
 	}
 
@@ -126,27 +122,6 @@ public class DashboardApi extends HttpServlet {
 		try {
 			resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
 		} catch (IOException e_) {/**/}
-	}
-
-	private static int getInt(DBObject row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).intValue() : 0;
-	}
-
-	private static long getLong(DBObject row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).longValue() : 0;
-	}
-
-	private static double getDouble(DBObject row, String key) {
-		Object value = row.get(key);
-		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
-		return Double.isFinite(d) ? d : 0;
-	}
-
-	private static String getString(DBObject row, String key) {
-		Object value = row.get(key);
-		return value instanceof String ? (String) value : "_";
 	}
 
 	private static void outputJson(HttpServletRequest req,
@@ -198,44 +173,58 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			DBObject tagsRow;
+			Row row;
 			try {
-				tagsRow = db.getCollection("_meta.tags_all").
-						findOne(new BasicDBObject("_name", metricName));
-			} catch (MongoException e) {
+				row = db.queryEx("SELECT tags FROM metric_tags_all WHERE name = ?", metricName);
+			} catch (SQLException e) {
 				error500(resp, e);
 				return;
 			}
-			if (tagsRow == null) {
+			if (row == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Iterator<String> it = tagsRow.keySet().iterator();
-			while (it.hasNext()) {
-				String tag = it.next();
-				if (tag.isEmpty() || tag.charAt(0) == '_') {
-					it.remove();
-					continue;
-				}
-				if (maxTagValues <= 0) {
-					continue;
-				}
-				List<?> values = (List<?>) tagsRow.get(tag);
-				if (values.size() <= maxTagValues) {
-					continue;
-				}
-				PriorityQueue<?> countQueue = CollectionsEx.max(values,
-						Comparator.comparingLong(o -> {
-					Object count = ((BSONObject) o).get("_count");
-					return (count instanceof Number ? ((Number) count).longValue() : 0);
-				}), maxTagValues);
-				tagsRow.put(tag, countQueue);
+			@SuppressWarnings("unchecked")
+			HashMap<String, ArrayList<TagValue>> tags =
+					Kryos.deserialize(row.getBytes(1), HashMap.class);
+			if (tags == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
 			}
-			outputJson(req, resp, tagsRow);
+			JSONObject json = new JSONObject();
+			tags.forEach((tagKey, tagValues) -> {
+				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
+					return;
+				}
+				Collection<TagValue> tagValues_;
+				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
+					tagValues_ = CollectionsEx.max(tagValues,
+							Comparator.comparingLong(o -> o.count), maxTagValues);
+				} else {
+					tagValues_ = tagValues;
+				}
+				JSONArray arr = new JSONArray();
+				for (TagValue tagValue : tagValues_) {
+					JSONObject obj = new JSONObject();
+					obj.put("_value", tagValue.value);
+					obj.put("_count", tagValue.count);
+					obj.put("_sum", tagValue.sum);
+					obj.put("_max", tagValue.max);
+					obj.put("_min", tagValue.min);
+					obj.put("_sqr", tagValue.sqr);
+					arr.put(obj);
+				}
+				json.put(tagKey, arr);
+			});
+			outputJson(req, resp, json);
 			return;
 		}
+		boolean quarter = metricName.startsWith("_quarter.");
+		if (quarter) {
+			metricName = metricName.substring(9);
+		}
 		// Query Condition
-		BasicDBObject query = new BasicDBObject();
+		HashMap<String, String> query = new HashMap<>();
 		Enumeration<String> names = req.getParameterNames();
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
@@ -244,46 +233,63 @@ public class DashboardApi extends HttpServlet {
 			}
 		}
 		// Other Query Parameters
-		int end;
-		String rangeColumn;
-		if (metricName.startsWith("_quarter.")) {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "_quarter";
-		} else {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "_minute";
-		}
+		int end = Numbers.parseInt(req.getParameter("_end"),
+				(int) (System.currentTimeMillis() /
+				(quarter ? Time.MINUTE / 15 : Time.MINUTE)));
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length + 1;
-		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
-		range.put("$lte", Integer.valueOf(end));
-		query.put(rangeColumn, range);
+
 		String groupBy_ = req.getParameter("_group_by");
-		Function<DBObject, String> groupBy = groupBy_ == null ?
-				row -> "_" : row -> getString(row, groupBy_);
-		// Query by MongoDB and Group by Java
+		Function<HashMap<String, String>, String> groupBy = groupBy_ == null ?
+				tags -> "_" : tags -> {
+			String value = tags.get(groupBy_);
+			return Strings.isEmpty(value) ? "_" : value;
+		};
+		//Query Time Range by SQL, Query and Group Tags by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
+		String sql = "SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+				"FROM metric_" + (quarter ? "quarter" : "minute") +
+				" WHERE name = ? AND time >= ? AND time <= ?";
 		try {
-			for (DBObject row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, rangeColumn) - begin) / interval;
+			db.queryEx(row -> {
+				int index = (row.getInt(1) - begin) / interval;
 				if (index < 0 || index >= length) {
-					continue;
+					return;
 				}
-				GroupKey key = new GroupKey(groupBy.apply(row), index);
-				MetricValue newValue = new MetricValue(getLong(row, "_count"),
-						getDouble(row, "_sum"), getDouble(row, "_max"),
-						getDouble(row, "_min"), getDouble(row, "_sqr"));
+				@SuppressWarnings("unchecked")
+				HashMap<String, String> tags = Kryos.
+						deserialize(row.getBytes(7), HashMap.class);
+				if (tags == null) {
+					tags = new HashMap<>();
+				}
+				// Query Tags
+				boolean skip = false;
+				for (Map.Entry<String, String> entry : query.entrySet()) {
+					String value = tags.get(entry.getKey());
+					if (!entry.getValue().equals(value)) {
+						skip = true;
+						break;
+					}
+				}
+				if (skip) {
+					return;
+				}
+				// Group Tags
+				GroupKey key = new GroupKey(groupBy.apply(tags), index);
+				MetricValue newValue = new MetricValue(row.getLong(2),
+						((Number) row.get(3)).doubleValue(),
+						((Number) row.get(4)).doubleValue(),
+						((Number) row.get(5)).doubleValue(),
+						((Number) row.get(6)).doubleValue());
 				MetricValue value = result.get(key);
 				if (value == null) {
 					result.put(key, newValue);
 				} else {
 					value.add(newValue);
 				}
-			}
-		} catch (MongoException e) {
+			}, sql, metricName, Integer.valueOf(begin), Integer.valueOf(end));
+		} catch (SQLException e) {
 			error500(resp, e);
 			return;
 		}

@@ -10,7 +10,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -135,11 +134,6 @@ public class DashboardApi extends HttpServlet {
 		} catch (IOException e) {/**/}
 	}
 
-	private static String getString(Row row, String key) {
-		String value = row.tags.get(key);
-		return Strings.isEmpty(value) ? "_" : value;
-	}
-
 	private static void outputJson(HttpServletRequest req,
 			HttpServletResponse resp, Object data) {
 		resp.setCharacterEncoding("UTF-8");
@@ -195,24 +189,20 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Iterator<String> it = allTags.tags.keySet().iterator();
 			JSONObject json = new JSONObject();
-			while (it.hasNext()) {
-				String tag = it.next();
-				if (tag.isEmpty() || tag.charAt(0) == '_') {
-					it.remove();
-					continue;
+			allTags.tags.forEach((tagKey, tagValues) -> {
+				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
+					return;
 				}
-				if (maxTagValues <= 0) {
-					continue;
-				}
-				Collection<TagValue> tagValues = allTags.tags.get(tag);
-				if (tagValues.size() > maxTagValues) {
-					tagValues = CollectionsEx.max(tagValues,
+				Collection<TagValue> tagValues_;
+				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
+					tagValues_ = CollectionsEx.max(tagValues,
 							Comparator.comparingLong(o -> o.count), maxTagValues);
+				} else {
+					tagValues_ = tagValues;
 				}
 				JSONArray arr = new JSONArray();
-				for (TagValue tagValue : tagValues) {
+				for (TagValue tagValue : tagValues_) {
 					JSONObject obj = new JSONObject();
 					obj.put("_value", tagValue.value);
 					obj.put("_count", tagValue.count);
@@ -222,8 +212,8 @@ public class DashboardApi extends HttpServlet {
 					obj.put("_sqr", tagValue.sqr);
 					arr.put(obj);
 				}
-				json.put(tag, arr);
-			}
+				json.put(tagKey, arr);
+			});
 			outputJson(req, resp, json);
 			return;
 		}
@@ -245,8 +235,11 @@ public class DashboardApi extends HttpServlet {
 		int begin = end - interval * length + 1;
 		
 		String groupBy_ = req.getParameter("_group_by");
-		Function<Row, String> groupBy = groupBy_ == null ?
-				row -> "_" : row -> getString(row, groupBy_);
+		Function<HashMap<String, String>, String> groupBy = groupBy_ == null ?
+				tags -> "_" : tags -> {
+			String value = tags.get(groupBy_);
+			return Strings.isEmpty(value) ? "_" : value;
+		};
 		// Query Time Range by Sleepycat, Query and Group Tags by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		EntityStore store = collector.getStore(metricName);
@@ -274,7 +267,7 @@ public class DashboardApi extends HttpServlet {
 					continue;
 				}
 				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(row), index);
+				GroupKey key = new GroupKey(groupBy.apply(row.tags), index);
 				MetricValue newValue = new MetricValue(row.count,
 						row.sum, row.max, row.min, row.sqr);
 				MetricValue value = result.get(key);
