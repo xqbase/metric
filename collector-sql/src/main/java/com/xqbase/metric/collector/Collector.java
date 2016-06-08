@@ -128,9 +128,9 @@ public class Collector {
 
 	private static HashMap<String, Long> getSizeMap(boolean quarter) throws SQLException {
 		HashMap<String, Long> sizeMap = new HashMap<>();
-		DB.query(row -> sizeMap.put(row.getString(1), Long.valueOf(row.getLong(2))),
-					"SELECT name, size FROM metric_" +
-					(quarter ? "quarter" : "minute") + "_size");
+		String sql = "SELECT name, size FROM metric_" +
+				(quarter ? "quarter" : "minute") + "_size";
+		DB.query(row -> sizeMap.put(row.getString(1), Long.valueOf(row.getLong(2))), sql);
 		return sizeMap;
 	}
 
@@ -220,16 +220,16 @@ public class Collector {
 		DB.update("DELETE FROM metric_tags_quarter WHERE time <= ?", quarter - tagsExpire);
 		// Scan minutely collections
 		for (String name : getSizeMap(false).keySet()) {
-			int deleted = DB.updateEx("DELETE FROM metric_minute WHERE name = ? AND time <= ?",
-					name, Integer.valueOf(quarter * 15 - expire));
-			DB.updateEx("UPDATE metric_minute_size SET size = size - ? WHERE name = ?",
-					Integer.valueOf(deleted), name);
+			String sql = "DELETE FROM metric_minute WHERE name = ? AND time <= ?";
+			int deleted = DB.updateEx(sql, name, Integer.valueOf(quarter * 15 - expire));
+			sql = "UPDATE metric_minute_size SET size = size - ? WHERE name = ?";
+			DB.updateEx(sql, Integer.valueOf(deleted), name);
 			Row row_ = DB.queryEx("SELECT time FROM metric_aggregated WHERE name = ?", name);
 			int start = row_ == null ? quarter - expire : row_.getInt(1);
 			for (int i = start + 1; i <= quarter; i ++) {
 				ArrayList<MetricRow> rows = new ArrayList<>();
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
-				String sql = "SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+				sql = "SELECT time, _count, _sum, _max, _min, _sqr, tags " +
 						"FROM metric_minute WHERE name = ? AND time >= ? AND time <= ?";
 				DB.queryEx(row -> {
 					@SuppressWarnings("unchecked")
@@ -282,18 +282,18 @@ public class Collector {
 				sql = "INSERT INTO metric_tags_quarter (name, time, tags) VALUES (?, ?, ?)";
 				DB.updateEx(sql, name, Integer.valueOf(i), Kryos.serialize(limit(tagMap)));
 			}
-			if (DB.updateEx("UPDATE metric_aggregated SET time = ? WHERE name = ?",
-					Integer.valueOf(quarter), name) <= 0) {
-				DB.updateEx("INSERT INTO metric_aggregated (name, time) VALUES (?, ?)",
-						name, Integer.valueOf(quarter));
+			sql = "UPDATE metric_aggregated SET time = ? WHERE name = ?";
+			if (DB.updateEx(sql, Integer.valueOf(quarter), name) <= 0) {
+				sql = "INSERT INTO metric_aggregated (name, time) VALUES (?, ?)";
+				DB.updateEx(sql, name, Integer.valueOf(quarter));
 			}
 		}
 		// Scan quarterly collections
 		for (String name : getSizeMap(true).keySet()) {
-			int deleted = DB.updateEx("DELETE FROM metric_quarter WHERE name = ? AND time <= ?",
-					name, Integer.valueOf(quarter - expire));
-			DB.updateEx("UPDATE metric_quarter_size SET size = size - ? WHERE name = ?",
-					Integer.valueOf(deleted), name);
+			String sql = "DELETE FROM metric_quarter WHERE name = ? AND time <= ?";
+			int deleted = DB.updateEx(sql, name, Integer.valueOf(quarter - expire));
+			sql = "UPDATE metric_quarter_size SET size = size - ? WHERE name = ?";
+			DB.updateEx(sql, Integer.valueOf(deleted), name);
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 			DB.queryEx(row -> {
@@ -311,10 +311,10 @@ public class Collector {
 			}, "SELECT tags FROM metric_tags_quarter WHERE name = ?", name);
 
 			byte[] b = Kryos.serialize(limit(tagMap));
-			if (DB.updateEx("UPDATE metric_tags_all SET tags = ? WHERE name = ?",
-					b, name) <= 0) {
-				DB.updateEx("INSERT INTO metric_tags_all (name, tags) VALUES (?, ?)",
-						name, b);
+			sql = "UPDATE metric_tags_all SET tags = ? WHERE name = ?";
+			if (DB.updateEx(sql, b, name) <= 0) {
+				sql = "INSERT INTO metric_tags_all (name, tags) VALUES (?, ?)";
+				DB.updateEx(sql, name, b);
 			}
 		}
 	}

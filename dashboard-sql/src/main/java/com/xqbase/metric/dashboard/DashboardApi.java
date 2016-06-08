@@ -164,9 +164,10 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
+			String sql = "SELECT tags FROM metric_tags_all WHERE name = ?";
 			Row row;
 			try {
-				row = db.queryEx("SELECT tags FROM metric_tags_all WHERE name = ?", metricName);
+				row = db.queryEx(sql, metricName);
 			} catch (SQLException e) {
 				error500(resp, e);
 				return;
