@@ -26,7 +26,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.model.TagValue;
+import com.xqbase.metric.common.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.Conf;

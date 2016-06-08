@@ -1,4 +1,4 @@
-package com.xqbase.metric.model;
+package com.xqbase.metric.common;
 
 public final class TagValue {
 	public String value;

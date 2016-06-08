@@ -5,7 +5,7 @@ CREATE TABLE metric_aggregated (
 CREATE TABLE metric_minute (
 	name VARCHAR(64) NOT NULL,
 	time INTEGER NOT NULL,
-	_count LONG NOT NULL,
+	_count BIGINT NOT NULL,
 	_sum FLOAT NOT NULL,
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE metric_minute_size (
 CREATE TABLE metric_quarter (
 	name VARCHAR(64) NOT NULL,
 	time INTEGER NOT NULL,
-	_count LONG NOT NULL,
+	_count BIGINT NOT NULL,
 	_sum FLOAT NOT NULL,
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,

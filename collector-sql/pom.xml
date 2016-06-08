@@ -75,7 +75,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-metric-common</artifactId>
-			<version>0.2.5</version>
+			<version>0.2.7</version>
 		</dependency>
 		<dependency>
 			<groupId>com.esotericsoftware</groupId>

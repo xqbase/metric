@@ -26,7 +26,7 @@ import java.util.zip.InflaterInputStream;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.model.TagValue;
+import com.xqbase.metric.common.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.ByteArrayQueue;
@@ -76,7 +76,7 @@ public class Collector {
 		StringBuilder sb = new StringBuilder("INSERT INTO metric_" + type +
 				" (name, time, _count, _sum, _max, _min, _sqr, tags) VALUES ");
 		for (MetricRow row : rows) {
-			sb.append("(?, ?, ?, ?, ?, ?, ?), ");
+			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
 			ins.add(name);
 			ins.add(Integer.valueOf(row.time));
 			ins.add(Long.valueOf(row.count));
