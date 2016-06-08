@@ -4,6 +4,10 @@ public class MetricValue implements Cloneable {
 	private long count;
 	private double sum, max, min, sqr;
 
+	protected MetricValue() {
+		// For Serialization
+	}
+
 	public MetricValue(long count, double sum, double max, double min, double sqr) {
 		this.count = count;
 		this.sum = sum;
