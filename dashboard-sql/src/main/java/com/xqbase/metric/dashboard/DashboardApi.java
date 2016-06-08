@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Driver;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -26,7 +25,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.common.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.Conf;
@@ -185,7 +183,7 @@ public class DashboardApi extends HttpServlet {
 				return;
 			}
 			@SuppressWarnings("unchecked")
-			HashMap<String, ArrayList<TagValue>> tags =
+			HashMap<String, HashMap<String, MetricValue>> tags =
 					Kryos.deserialize(row.getBytes(1), HashMap.class);
 			if (tags == null) {
 				outputJson(req, resp, Collections.emptyMap());
@@ -196,22 +194,23 @@ public class DashboardApi extends HttpServlet {
 				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
 					return;
 				}
-				Collection<TagValue> tagValues_;
+				Collection<Map.Entry<String, MetricValue>> tagValues_ =
+						tagValues.entrySet();
 				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
-					tagValues_ = CollectionsEx.max(tagValues,
-							Comparator.comparingLong(o -> o.count), maxTagValues);
-				} else {
-					tagValues_ = tagValues;
+					tagValues_ = CollectionsEx.max(tagValues_,
+							Comparator.comparingLong(o -> o.getValue().getCount()),
+							maxTagValues);
 				}
 				JSONArray arr = new JSONArray();
-				for (TagValue tagValue : tagValues_) {
+				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
+					MetricValue metric = tagValue.getValue();
 					JSONObject obj = new JSONObject();
-					obj.put("_value", tagValue.value);
-					obj.put("_count", tagValue.count);
-					obj.put("_sum", tagValue.sum);
-					obj.put("_max", tagValue.max);
-					obj.put("_min", tagValue.min);
-					obj.put("_sqr", tagValue.sqr);
+					obj.put("_value", tagValue.getKey());
+					obj.put("_count", metric.getCount());
+					obj.put("_sum", metric.getSum());
+					obj.put("_max", metric.getMax());
+					obj.put("_min", metric.getMin());
+					obj.put("_sqr", metric.getSqr());
 					arr.put(obj);
 				}
 				json.put(tagKey, arr);

@@ -26,7 +26,6 @@ import java.util.zip.InflaterInputStream;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.common.TagValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Kryos;
 import com.xqbase.util.ByteArrayQueue;
@@ -194,35 +193,25 @@ public class Collector {
 		}
 	}
 
-	private static HashMap<String, ArrayList<TagValue>>
-			getTags(HashMap<String, HashMap<String, MetricValue>> tagMap) {
-		HashMap<String, ArrayList<TagValue>> tags = new HashMap<>();
-		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
-			ArrayList<TagValue> tagValues = new ArrayList<>();
-			BiConsumer<String, MetricValue> action = (value, metric) -> {
-				TagValue tagValue = new TagValue();
-				tagValue.value = value;
-				tagValue.count = metric.getCount();
-				tagValue.sum = metric.getSum();
-				tagValue.max = metric.getMax();
-				tagValue.min = metric.getMin();
-				tagValue.sqr = metric.getSqr();
-				tagValues.add(tagValue);
-			};
+	private static HashMap<String, HashMap<String, MetricValue>>
+			limit(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+		HashMap<String, HashMap<String, MetricValue>> tags = new HashMap<>();
+		BiConsumer<String, HashMap<String, MetricValue>> action = (tagName, valueMap) -> {
+			HashMap<String, MetricValue> tagValues = new HashMap<>();
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
 				CollectionsEx.forEach(CollectionsEx.max(valueMap.entrySet(),
 						Comparator.comparingLong(metricValue ->
-						metricValue.getValue().getCount()), maxTagValues), action);
+						metricValue.getValue().getCount()), maxTagValues), tagValues::put);
 			} else {
-				valueMap.forEach(action);
+				tagValues.putAll(valueMap);
 			}
 			tags.put(tagName, tagValues);
 		};
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
-					Comparator.comparing(Map.Entry::getKey), maxTags), mainAction);
+					Comparator.comparing(Map.Entry::getKey), maxTags), action);
 		} else {
-			tagMap.forEach(mainAction);
+			tagMap.forEach(action);
 		}
 		return tags;
 	}
@@ -291,7 +280,7 @@ public class Collector {
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				sql = "INSERT INTO metric_tags_quarter (name, time, tags) VALUES (?, ?, ?)";
-				DB.updateEx(sql, name, Integer.valueOf(i), Kryos.serialize(getTags(tagMap)));
+				DB.updateEx(sql, name, Integer.valueOf(i), Kryos.serialize(limit(tagMap)));
 			}
 			if (DB.updateEx("UPDATE metric_aggregated SET time = ? WHERE name = ?",
 					Integer.valueOf(quarter), name) <= 0) {
@@ -309,21 +298,19 @@ public class Collector {
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 			DB.queryEx(row -> {
 				@SuppressWarnings("unchecked")
-				HashMap<String, ArrayList<TagValue>> tags =
+				HashMap<String, HashMap<String, MetricValue>> tags =
 						Kryos.deserialize(row.getBytes(1), HashMap.class);
 				if (tags == null) {
 					return;
 				}
 				tags.forEach((tagKey, tagValues) -> {
-					for (TagValue tagValue : tagValues) {
-						putTagValue(tagMap, tagKey, tagValue.value,
-								new MetricValue(tagValue.count, tagValue.sum,
-								tagValue.max, tagValue.min, tagValue.sqr));
-					}
+					tagValues.forEach((value, metric) -> {
+						putTagValue(tagMap, tagKey, value, metric);
+					});
 				});
 			}, "SELECT tags FROM metric_tags_quarter WHERE name = ?", name);
 
-			byte[] b = Kryos.serialize(getTags(tagMap));
+			byte[] b = Kryos.serialize(limit(tagMap));
 			if (DB.updateEx("UPDATE metric_tags_all SET tags = ? WHERE name = ?",
 					b, name) <= 0) {
 				DB.updateEx("INSERT INTO metric_tags_all (name, tags) VALUES (?, ?)",
