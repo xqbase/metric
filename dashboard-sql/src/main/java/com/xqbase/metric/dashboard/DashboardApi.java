@@ -59,13 +59,6 @@ class GroupKey {
 	}
 }
 
-class MetricRow {
-	int time;
-	long count;
-	double sum, max, min, sqr;
-	HashMap<String, String> tags;
-}
-
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
@@ -245,7 +238,7 @@ public class DashboardApi extends HttpServlet {
 			String value = tags.get(groupBy_);
 			return Strings.isEmpty(value) ? "_" : value;
 		};
-		//Query Time Range by SQL, Query and Group Tags by Java
+		// Query Time Range by SQL, Query and Group Tags by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		String sql = "SELECT time, _count, _sum, _max, _min, _sqr, tags " +
 				"FROM metric_" + (quarter ? "quarter" : "minute") +
