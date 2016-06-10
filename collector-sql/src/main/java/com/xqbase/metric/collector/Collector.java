@@ -88,7 +88,7 @@ public class Collector {
 		String sql = sb.substring(0, sb.length() - 2);
 		DB.updateEx(sql, ins.toArray());
 		sql = "UPDATE metric_" + type + "_size SET size = size + ? WHERE name = ?";
-		if (DB.updateEx(sql, Integer.valueOf(rows.size()), name) == 0) {
+		if (DB.updateEx(sql, Integer.valueOf(rows.size()), name) <= 0) {
 			sql = "INSERT INTO metric_" + type + "_size (name, size) VALUES (?, ?)";
 			DB.updateEx(sql, name, Integer.valueOf(rows.size()));
 		}
