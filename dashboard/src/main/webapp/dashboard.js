@@ -70,6 +70,53 @@ function HTML_ENTITIES(s) {
 	return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function METRIC_NAME_TEXT() {
+	if (typeof DASHBOARD_TEXT != "object") {
+		return metricName;
+	}
+	var o = DASHBOARD_TEXT[metricName];
+	if (typeof o != "object") {
+		return metricName;
+	}
+	var text = o["_" + METHOD_NAME[method]];
+	if (typeof text != "string") {
+		text = o._text;
+	}
+	return typeof text == "string" ? text : metricName;
+}
+
+function TAG_NAME_TEXT(tagName) {
+	if (typeof DASHBOARD_TEXT != "object") {
+		return tagName;
+	}
+	var o = DASHBOARD_TEXT[metricName];
+	if (typeof o != "object") {
+		return tagName;
+	}
+	o = o[tagName];
+	if (typeof o != "object") {
+		return tagName;
+	}
+	o = o._text;
+	return typeof o == "string" ? o : tagName;
+}
+
+function TAG_VALUE_TEXT(tagName, tagValue) {
+	if (typeof DASHBOARD_TEXT != "object") {
+		return tagValue;
+	}
+	var o = DASHBOARD_TEXT[metricName];
+	if (typeof o != "object") {
+		return tagValue;
+	}
+	o = o[tagName];
+	if (typeof o != "object") {
+		return tagValue;
+	}
+	o = o[tagValue];
+	return typeof o == "string" ? o : tagValue;
+}
+
 var DROPDOWN_DIV = ["Method", "Group", "Interval", "Hour", "Minute"];
 var DROPDOWN_CLASS = DASHBOARD_TAGS_TOP ? "dropdown" : "dropup";
 
@@ -170,12 +217,12 @@ function showTags(tagMap) {
 	var methodComparator = METHOD_COMPARATOR[method];
 	for (var tagName in tagMap) {
 		selectedTags[tagName] = "_";
-		groupHtml = APPEND_HTML(groupHtml, "<li value=\"" + tagName + "\"><a>" + tagName + "</a></li>");
+		groupHtml = APPEND_HTML(groupHtml, "<li value=\"" + tagName + "\"><a>" + TAG_NAME_TEXT(tagName) + "</a></li>");
 		var tags = tagMap[tagName];
 		tags.sort(methodComparator);
 		tagsHtml +=
 				"<div class=\"btn-group\">" +
-					"<button type=\"button\" class=\"btn btn-danger disabled\">" + tagName + "</button>" +
+					"<button type=\"button\" class=\"btn btn-danger disabled\">" + TAG_NAME_TEXT(tagName) + "</button>" +
 					"<div class=\"btn-group " + DROPDOWN_CLASS + "\">" +
 						"<button type=\"button\" class=\"btn btn-info dropdown-toggle\" data-toggle=\"dropdown\">" +
 							"<span id=\"spnTag_" + tagName + "\"></span>" +
@@ -185,7 +232,7 @@ function showTags(tagMap) {
 		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
 			tagValue = tags[i]._value;
-			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + HTML_ENTITIES(tagValue) + "\"><a>" + HTML_ENTITIES(tagValue) + "</a></li>");
+			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + HTML_ENTITIES(tagValue) + "\"><a>" + HTML_ENTITIES(TAG_VALUE_TEXT(tagName, tagValue)) + "</a></li>");
 		}
 		tagsHtml += valuesHtml +
 						"</ul>" +
@@ -196,14 +243,14 @@ function showTags(tagMap) {
 	$("#ulGroup").html(groupHtml);
 	$("#ulGroup li").click(function() {
 		selectedGroup = $(this).attr("value");
-		$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : selectedGroup);
+		$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : TAG_NAME_TEXT(selectedGroup));
 	});
 
 	$("#divTags").html(tagsHtml);
 	$("#divTags li").click(function() {
 		var tagName = $(this).parent().attr("value");
 		var tagValue = $(this).attr("value");
-		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : tagValue);
+		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : TAG_VALUE_TEXT(tagName, tagValue));
 		selectedTags[tagName] = tagValue;
 	});
 }
@@ -211,7 +258,7 @@ function showTags(tagMap) {
 function loadParams2() {
 	var groupBy = paramMap._group_by;
 	selectedGroup = (typeof groupBy == "undefined" ? "_" : groupBy);
-	$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : selectedGroup);
+	$("#spnGroup").text(selectedGroup == "_" ? "===NONE===" : TAG_NAME_TEXT(selectedGroup));
 	if (selectedGroup != "_") {
 		apiUrl += "&_group_by=" + groupBy;
 	}
@@ -219,7 +266,7 @@ function loadParams2() {
 		var tagValue = paramMap[tagName];
 		tagValue = (typeof tagValue == "undefined" ? "_" : tagValue);
 		selectedTags[tagName] = tagValue;
-		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : tagValue);
+		$("#spnTag_" + tagName).text(tagValue == "_" ? "===ALL===" : TAG_VALUE_TEXT(tagName, tagValue));
 	}
 	for (var tagName in paramMap) {
 		if (tagName.charAt(0) != "_") {
@@ -292,12 +339,12 @@ function drawChart(data) {
 	if (groupKeys.length == 1 && groupKeys[0] == "_") {
 		chart.options.legend.enabled = false;
 	}
-	chart.setTitle({text: metricName}, null, false);
+	chart.setTitle({text: METRIC_NAME_TEXT()}, null, false);
 	chart.yAxis[0].setTitle({text: METHOD_NAME[method].toUpperCase()}, false);
 	for (var i = 0; i < groupKeys.length; i ++) {
 		var key = groupKeys[i];
 		chart.addSeries({
-			name: key,
+			name: TAG_VALUE_TEXT(selectedGroup, key),
 			pointStart: pointStart,
 			pointInterval: pointInterval,
 			data: data[key],
