@@ -21,6 +21,8 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricKey;
 
 public class MetricFilter implements Filter {
+	private static AtomicInteger count = new AtomicInteger(0);
+
 	private FilterConfig conf;
 	private String requestTime;
 	private ScheduledThreadPoolExecutor timer;
@@ -42,6 +44,10 @@ public class MetricFilter implements Filter {
 
 	@Override
 	public void init(FilterConfig conf_) {
+		if (count.getAndIncrement() > 0) {
+			return;
+		}
+
 		conf = conf_;
 
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
@@ -89,6 +95,9 @@ public class MetricFilter implements Filter {
 
 	@Override
 	public void destroy() {
+		if (count.decrementAndGet() > 0) {
+			return;
+		}
 		timer.shutdown();
 		MetricClient.shutdown();
 	}
