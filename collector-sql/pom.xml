@@ -82,6 +82,11 @@
 			<artifactId>kryo</artifactId>
 			<version>3.0.3</version>
 		</dependency>
+		<dependency>
+			<groupId>p6spy</groupId>
+			<artifactId>p6spy</artifactId>
+			<version>3.0.0-rc3</version>
+		</dependency>
 
 		<dependency>
 			<groupId>mysql</groupId>
