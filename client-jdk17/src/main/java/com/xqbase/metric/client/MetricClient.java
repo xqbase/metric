@@ -9,6 +9,7 @@ import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,11 +48,8 @@ public class MetricClient {
 		}
 	}
 
-	static void send(InetSocketAddress[] addrs, int minute) {
-		ArrayList<MetricEntry> metrics = Metric.removeAll();
-		if (metrics.isEmpty()) {
-			return;
-		}
+	static void send(InetSocketAddress[] addrs, int minute,
+			ArrayList<MetricEntry> metrics) {
 		StringBuilder packet = new StringBuilder();
 		try (DatagramSocket socket = new DatagramSocket()) {
 			for (MetricEntry metric : metrics) {
@@ -84,7 +82,8 @@ public class MetricClient {
 		}
 	}
 
-	private static ScheduledThreadPoolExecutor timer = null;
+	static volatile ScheduledThreadPoolExecutor timer = null;
+
 	private static Runnable command;
 
 	public static synchronized void startup(final InetSocketAddress... addrs) {
@@ -93,11 +92,30 @@ public class MetricClient {
 		}
 		long start = System.currentTimeMillis();
 		final AtomicInteger now = new AtomicInteger((int) (start / MINUTE));
+		final Random random = new Random();
 		command = new Runnable() {
 			@Override
 			public void run() {
 				try {
-					send(addrs, now.incrementAndGet());
+					final int minute = now.incrementAndGet();
+					final ArrayList<MetricEntry> metrics = Metric.removeAll();
+					if (metrics.isEmpty()) {
+						return;
+					}
+					if (timer == null) {
+						send(addrs, minute, metrics);
+						return;
+					}
+					timer.schedule(new Runnable() {
+						@Override
+						public void run() {
+							try {
+								send(addrs, minute, metrics);
+							} catch (Error | RuntimeException e) {
+								e.printStackTrace();
+							}
+						}
+					}, random.nextInt(MINUTE), TimeUnit.MILLISECONDS);
 				} catch (Error | RuntimeException e) {
 					e.printStackTrace();
 				}
