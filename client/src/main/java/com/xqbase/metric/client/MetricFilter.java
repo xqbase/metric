@@ -22,11 +22,11 @@ import com.xqbase.metric.common.MetricKey;
 
 public class MetricFilter implements Filter {
 	private static AtomicInteger count = new AtomicInteger(0);
+	private static ScheduledThreadPoolExecutor timer;
 
 	private FilterConfig conf;
 	private String requestTime;
 	private HashMap<String, String> tagMap;
-	private ScheduledThreadPoolExecutor timer;
 	private AtomicInteger connections = new AtomicInteger(0);
 
 	protected String getAddresses() {
@@ -43,11 +43,26 @@ public class MetricFilter implements Filter {
 
 	@Override
 	public void init(FilterConfig conf_) {
+		conf = conf_;
+
+		String prefix = getPrefix();
+		String connections_ = prefix + ".webapp.connections";
+		requestTime = prefix + ".webapp.request_time";
+
+		tagMap = new HashMap<>();
+		String tags = getTags();
+		if (tags != null) {
+			for (String s : tags.split("[,;]")) {
+				String[] ss = s.split("[:=]");
+				if (ss.length > 1) {
+					tagMap.put(ss[0], ss[1]);
+				}
+			}
+		}
+
 		if (count.getAndIncrement() > 0) {
 			return;
 		}
-
-		conf = conf_;
 
 		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
 		String addresses = getAddresses();
@@ -65,21 +80,6 @@ public class MetricFilter implements Filter {
 			}
 		}
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
-
-		String prefix = getPrefix();
-		String connections_ = prefix + ".webapp.connections";
-		requestTime = prefix + ".webapp.request_time";
-
-		tagMap = new HashMap<>();
-		String tags = getTags();
-		if (tags != null) {
-			for (String s : tags.split("[,;]")) {
-				String[] ss = s.split("[:=]");
-				if (ss.length > 1) {
-					tagMap.put(ss[0], ss[1]);
-				}
-			}
-		}
 
 		timer = new ScheduledThreadPoolExecutor(1);
 		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server", tagMap),
