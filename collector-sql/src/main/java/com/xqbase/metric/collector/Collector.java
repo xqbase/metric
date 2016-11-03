@@ -59,20 +59,35 @@ public class Collector {
 	private static final String CREATE_ID = "INSERT INTO metric_name (name) VALUES (?)";
 	private static final String QUERY_NAME =
 			"SELECT id, name, minute_size, quarter_size, aggregated_time FROM metric_name";
+	private static final String INSERT_MINUTE = "INSERT INTO metric_minute " +
+			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
+	private static final String INSERT_QUARTER = "INSERT INTO metric_quarter " +
+			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
+	private static final String INCREMENT_MINUTE =
+			"UPDATE metric_name SET minute_size = minute_size + ? WHERE id = ?";
+	private static final String INCREMENT_QUARTER =
+			"UPDATE metric_name SET quarter_size = quarter_size + ? WHERE id = ?";
+
 	private static final String DELETE_TAGS_BY_ID =
 			"DELETE FROM metric_tags_quarter WHERE id = ?";
 	private static final String DELETE_TAGS_BY_TIME =
 			"DELETE FROM metric_tags_quarter WHERE time <= ?";
 	private static final String DELETE_NAME = "DELETE FROM metric_name WHERE id = ?";
+
 	private static final String DELETE_MINUTE =
 			"DELETE FROM metric_minute WHERE id = ? AND time <= ?";
-	private static final String DECREMENT_MINUTE =
-			"UPDATE metric_minute_size SET size = size - ? WHERE id = ?";
-	private static final String AGGREGATE_MINUTE =
+	private static final String DELETE_QUARTER =
+			"DELETE FROM metric_quarter WHERE id = ? AND time <= ?";
+	private static final String AGGREGATE_FROM =
 			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
-	private static final String INSERT_AGGREGATED =
+	private static final String AGGREGATE_TO =
 			"INSERT INTO metric_tags_quarter (id, time, tags) VALUES (?, ?, ?)";
+	private static final String AGGREGATE_TAGS_FROM =
+			"SELECT tags FROM metric_tags_quarter WHERE id = ?";
+	private static final String UPDATE_NAME =
+			"UPDATE metric_name SET minute_size = minute_size - ?, " +
+			"quarter_size = quarter_size - ?, aggregated_time = ?, tags = ? WHERE id = ?";
 
 	private static String decode(String s, int limit) {
 		String result = Strings.decodeUrl(s);
@@ -108,10 +123,8 @@ public class Collector {
 			}
 		}
 		Integer id_ = Integer.valueOf(id);
-		String type = (quarter ? "quarter" : "minute");
 		ArrayList<Object> ins = new ArrayList<>();
-		StringBuilder sb = new StringBuilder("INSERT INTO metric_" + type +
-				" (id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ");
+		StringBuilder sb = new StringBuilder(quarter ? INSERT_QUARTER : INSERT_MINUTE);
 		for (MetricRow row : rows) {
 			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
 			ins.add(id_);
@@ -123,16 +136,13 @@ public class Collector {
 			ins.add(Double.valueOf(row.sqr));
 			ins.add(Kryos.serialize(row.tags));
 		}
-		String sql = sb.substring(0, sb.length() - 2);
-		DB.updateEx(sql, ins.toArray());
-		sql = "UPDATE metric_name SET " + type + "_size = " + type + "_size + ? WHERE id = ?";
-		DB.updateEx(sql, Integer.valueOf(rows.size()), id_);
+		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
+		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, rows.size(), id);
 	}
 
-	private static void insert(HashMap<String, ArrayList<MetricRow>> rowsMap,
-			boolean quarter) throws SQLException {
+	private static void insert(HashMap<String, ArrayList<MetricRow>> rowsMap) throws SQLException {
 		for (Map.Entry<String, ArrayList<MetricRow>> entry : rowsMap.entrySet()) {
-			insert(entry.getKey(), entry.getValue(), quarter);
+			insert(entry.getKey(), entry.getValue(), false);
 		}
 	}
 
@@ -183,7 +193,7 @@ public class Collector {
 			put(rowsMap, entry.getName(), row);
 		}
 		if (!rowsMap.isEmpty()) {
-			insert(rowsMap, false);
+			insert(rowsMap);
 		}
 		// Ensure index and calculate metric size by master collector
 		if (serverId != 0) {
@@ -243,11 +253,10 @@ public class Collector {
 
 	private static void quarterly(int quarter) throws SQLException {
 		DB.update(DELETE_TAGS_BY_TIME, quarter - tagsExpire);
-		ArrayList<Name> names = getNames();
-		// Scan minutely collections
-		for (Name name : names) {
-			int deleted = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
-			DB.update(DECREMENT_MINUTE, deleted, name.id);
+
+		for (Name name : getNames()) {
+			int deletedMinute = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
+			int deletedQuarter = DB.update(DELETE_QUARTER, name.id, quarter - expire);
 			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
 			for (int i = start + 1; i <= quarter; i ++) {
 				ArrayList<MetricRow> rows = new ArrayList<>();
@@ -271,7 +280,7 @@ public class Collector {
 					} else {
 						value.add(newValue);
 					}
-				}, AGGREGATE_MINUTE, name.id, i * 15 - 14, i * 15);
+				}, AGGREGATE_FROM, name.id, i * 15 - 14, i * 15);
 				if (result.isEmpty()) {
 					continue;
 				}
@@ -300,20 +309,10 @@ public class Collector {
 					Metric.put("metric.tags.values", tagValue.size(), "name", name.name, "key", tagKey);
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
-				DB.updateEx(INSERT_AGGREGATED, name, Integer.valueOf(i), Kryos.serialize(limit(tagMap)));
+				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
+						Integer.valueOf(i), Kryos.serialize(limit(tagMap)));
 			}
-			sql = "UPDATE metric_aggregated SET time = ? WHERE name = ?";
-			if (DB.updateEx(sql, Integer.valueOf(quarter), name) <= 0) {
-				sql = "INSERT INTO metric_aggregated (name, time) VALUES (?, ?)";
-				DB.updateEx(sql, name, Integer.valueOf(quarter));
-			}
-		}
-		// Scan quarterly collections
-		for (String name : getSizeMap(true).keySet()) {
-			String sql = "DELETE FROM metric_quarter WHERE name = ? AND time <= ?";
-			int deleted = DB.updateEx(sql, name, Integer.valueOf(quarter - expire));
-			sql = "UPDATE metric_quarter_size SET size = size - ? WHERE name = ?";
-			DB.updateEx(sql, Integer.valueOf(deleted), name);
+
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 			DB.queryEx(row -> {
@@ -328,14 +327,12 @@ public class Collector {
 						putTagValue(tagMap, tagKey, value, metric);
 					});
 				});
-			}, "SELECT tags FROM metric_tags_quarter WHERE name = ?", name);
+			}, AGGREGATE_TAGS_FROM, name);
 
 			byte[] b = Kryos.serialize(limit(tagMap));
-			sql = "UPDATE metric_tags_all SET tags = ? WHERE name = ?";
-			if (DB.updateEx(sql, b, name) <= 0) {
-				sql = "INSERT INTO metric_tags_all (name, tags) VALUES (?, ?)";
-				DB.updateEx(sql, name, b);
-			}
+			DB.updateEx(UPDATE_NAME, Integer.valueOf(deletedMinute),
+					Integer.valueOf(deletedQuarter), Integer.valueOf(quarter),
+					b, Integer.valueOf(name.id));
 		}
 	}
 
@@ -500,7 +497,7 @@ public class Collector {
 				if (!rowsMap.isEmpty()) {
 					executor.execute(Runnables.wrap(() -> {
 						try {
-							insert(rowsMap, false);
+							insert(rowsMap);
 						} catch (SQLException e) {
 							Log.e(e);
 						}
