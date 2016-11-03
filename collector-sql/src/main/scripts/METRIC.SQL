@@ -1,9 +1,14 @@
-CREATE TABLE metric_aggregated (
-	name VARCHAR(64) NOT NULL PRIMARY KEY,
-	time INTEGER NOT NULL);
+CREATE TABLE metric_name (
+	id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+	name VARCHAR(64) NOT NULL,
+	minute_size INTEGER NOT NULL DEFAULT 0,
+	quarter_size INTEGER NOT NULL DEFAULT 0,
+	aggregated_time INTEGER NOT NULL DEFAULT 0,
+	tags LONGBLOB DEFAULT NULL,
+	UNIQUE (name));
 
 CREATE TABLE metric_minute (
-	name VARCHAR(64) NOT NULL,
+	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
 	_sum FLOAT NOT NULL,
@@ -11,14 +16,10 @@ CREATE TABLE metric_minute (
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
 	tags LONGBLOB NOT NULL,
-	KEY (name, time));
-
-CREATE TABLE metric_minute_size (
-	name VARCHAR(64) NOT NULL PRIMARY KEY,
-	size INTEGER NOT NULL);
+	KEY (id, time));
 
 CREATE TABLE metric_quarter (
-	name VARCHAR(64) NOT NULL,
+	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
 	_sum FLOAT NOT NULL,
@@ -26,19 +27,11 @@ CREATE TABLE metric_quarter (
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
 	tags LONGBLOB NOT NULL,
-	KEY (name, time));
-
-CREATE TABLE metric_quarter_size (
-	name VARCHAR(64) NOT NULL PRIMARY KEY,
-	size INTEGER NOT NULL);
-
-CREATE TABLE metric_tags_all (
-	name VARCHAR(64) NOT NULL PRIMARY KEY,
-	tags LONGBLOB NOT NULL);
+	KEY (id, time));
 
 CREATE TABLE metric_tags_quarter (
-	name VARCHAR(64) NOT NULL,
+	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	tags LONGBLOB NOT NULL,
-	PRIMARY KEY (name, time),
+	PRIMARY KEY (id, time),
 	KEY (time));
