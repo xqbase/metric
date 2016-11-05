@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-collector</artifactId>
-	<version>0.2.5</version>
+	<version>0.2.8</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Collector</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - collector part</description>
@@ -70,12 +70,12 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
-			<version>0.2.9</version>
+			<version>0.2.10</version>
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-metric-common</artifactId>
-			<version>0.2.7</version>
+			<version>0.2.8</version>
 		</dependency>
 		<dependency>
 			<groupId>com.esotericsoftware</groupId>
@@ -85,7 +85,7 @@
 		<dependency>
 			<groupId>p6spy</groupId>
 			<artifactId>p6spy</artifactId>
-			<version>3.0.0-rc3</version>
+			<version>3.0.0</version>
 		</dependency>
 
 		<dependency>

@@ -46,7 +46,7 @@ class MetricRow {
 	HashMap<String, String> tags;
 }
 
-class Name {
+class MetricName {
 	int id, minuteSize, quarterSize, aggregatedTime;
 	String name;
 }
@@ -110,17 +110,16 @@ public class Collector {
 			return;
 		}
 		int id;
-		while (true) {
-			Row row = DB.queryEx(QUERY_ID, name);
-			if (row != null) {
-				id = row.getInt(1);
-				break;
-			}
+		Row idRow = DB.queryEx(QUERY_ID, name);
+		if (idRow == null) {
 			long[] id_ = new long[1];
-			if (DB.updateEx(id_, CREATE_ID, name) > 0) {
-				id = (int) id_[0];
-				break;
+			if (DB.updateEx(id_, CREATE_ID, name) <= 0) {
+				Log.w("Unable to create name " + name);
+				return;
 			}
+			id = (int) id_[0];
+		} else {
+			id = idRow.getInt(1);
 		}
 		Integer id_ = Integer.valueOf(id);
 		ArrayList<Object> ins = new ArrayList<>();
@@ -171,15 +170,16 @@ public class Collector {
 		return row;
 	}
 
-	private static ArrayList<Name> getNames() throws SQLException {
-		ArrayList<Name> names = new ArrayList<>();
+	private static ArrayList<MetricName> getNames() throws SQLException {
+		ArrayList<MetricName> names = new ArrayList<>();
 		DB.query(row -> {
-			Name name = new Name();
+			MetricName name = new MetricName();
 			name.id = row.getInt(1);
 			name.name = row.getString(2);
 			name.minuteSize = row.getInt(3);
 			name.quarterSize = row.getInt(4);
 			name.aggregatedTime = row.getInt(5);
+			names.add(name);
 		}, QUERY_NAME);
 		return names;
 	}
@@ -199,7 +199,7 @@ public class Collector {
 		if (serverId != 0) {
 			return;
 		}
-		for (Name name : getNames()) {
+		for (MetricName name : getNames()) {
 			Metric.put("metric.size", name.minuteSize, "name", name.name);
 			Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
 			if (name.minuteSize <= 0 && name.quarterSize <= 0) {
@@ -254,7 +254,7 @@ public class Collector {
 	private static void quarterly(int quarter) throws SQLException {
 		DB.update(DELETE_TAGS_BY_TIME, quarter - tagsExpire);
 
-		for (Name name : getNames()) {
+		for (MetricName name : getNames()) {
 			int deletedMinute = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
 			int deletedQuarter = DB.update(DELETE_QUARTER, name.id, quarter - expire);
 			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
@@ -315,7 +315,7 @@ public class Collector {
 
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
-			DB.queryEx(row -> {
+			DB.query(row -> {
 				@SuppressWarnings("unchecked")
 				HashMap<String, HashMap<String, MetricValue>> tags =
 						Kryos.deserialize(row.getBytes(1), HashMap.class);
@@ -327,12 +327,11 @@ public class Collector {
 						putTagValue(tagMap, tagKey, value, metric);
 					});
 				});
-			}, AGGREGATE_TAGS_FROM, name);
+			}, AGGREGATE_TAGS_FROM, name.id);
 
-			byte[] b = Kryos.serialize(limit(tagMap));
 			DB.updateEx(UPDATE_NAME, Integer.valueOf(deletedMinute),
 					Integer.valueOf(deletedQuarter), Integer.valueOf(quarter),
-					b, Integer.valueOf(name.id));
+					Kryos.serialize(limit(tagMap)), Integer.valueOf(name.id));
 		}
 	}
 

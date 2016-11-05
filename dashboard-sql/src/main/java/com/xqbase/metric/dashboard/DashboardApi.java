@@ -62,6 +62,15 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
+	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
+	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
+	private static final String AGGREGATE_MINUTE =
+			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
+	private static final String AGGREGATE_QUARTER =
+			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
+
 	private int maxTagValues = 0;
 	private ConnectionPool db = null;
 
@@ -164,10 +173,9 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			String sql = "SELECT tags FROM metric_tags_all WHERE name = ?";
 			Row row;
 			try {
-				row = db.queryEx(sql, metricName);
+				row = db.queryEx(QUERY_TAGS, metricName);
 			} catch (SQLException e) {
 				error500(resp, e);
 				return;
@@ -212,10 +220,24 @@ public class DashboardApi extends HttpServlet {
 			outputJson(req, resp, json);
 			return;
 		}
+
 		boolean quarter = metricName.startsWith("_quarter.");
 		if (quarter) {
 			metricName = metricName.substring(9);
 		}
+		int id;
+		try {
+			Row row = db.queryEx(QUERY_ID, metricName);
+			if (row == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
+			id = row.getInt(1);
+		} catch (SQLException e) {
+			error500(resp, e);
+			return;
+		}
+
 		// Query Condition
 		HashMap<String, String> query = new HashMap<>();
 		Enumeration<String> names = req.getParameterNames();
@@ -241,11 +263,8 @@ public class DashboardApi extends HttpServlet {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
-		String sql = "SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-				"FROM metric_" + (quarter ? "quarter" : "minute") +
-				" WHERE name = ? AND time >= ? AND time <= ?";
 		try {
-			db.queryEx(row -> {
+			db.query(row -> {
 				int index = (row.getInt(1) - begin) / interval;
 				if (index < 0 || index >= length) {
 					return;
@@ -281,7 +300,7 @@ public class DashboardApi extends HttpServlet {
 				} else {
 					value.add(newValue);
 				}
-			}, sql, metricName, Integer.valueOf(begin), Integer.valueOf(end));
+			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
 		} catch (SQLException e) {
 			error500(resp, e);
 			return;
