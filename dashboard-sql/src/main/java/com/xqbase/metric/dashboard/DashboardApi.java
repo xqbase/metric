@@ -184,9 +184,14 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
+			byte[] b = row.getBytes(1);
+			if (b == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
 			@SuppressWarnings("unchecked")
 			HashMap<String, HashMap<String, MetricValue>> tags =
-					Kryos.deserialize(row.getBytes(1), HashMap.class);
+					Kryos.deserialize(b, HashMap.class);
 			if (tags == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
