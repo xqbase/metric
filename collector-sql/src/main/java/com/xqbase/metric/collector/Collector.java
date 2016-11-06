@@ -202,10 +202,6 @@ public class Collector {
 		for (MetricName name : getNames()) {
 			Metric.put("metric.size", name.minuteSize, "name", name.name);
 			Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
-			if (name.minuteSize <= 0 && name.quarterSize <= 0) {
-				DB.update(DELETE_TAGS_BY_ID, name.id);
-				DB.update(DELETE_NAME, name.id);
-			}
 		}
 	}
 
@@ -255,6 +251,11 @@ public class Collector {
 		DB.update(DELETE_TAGS_BY_TIME, quarter - tagsExpire);
 
 		for (MetricName name : getNames()) {
+			if (name.minuteSize <= 0 && name.quarterSize <= 0) {
+				DB.update(DELETE_TAGS_BY_ID, name.id);
+				DB.update(DELETE_NAME, name.id);
+				continue;
+			}
 			int deletedMinute = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
 			int deletedQuarter = DB.update(DELETE_QUARTER, name.id, quarter - expire);
 			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
