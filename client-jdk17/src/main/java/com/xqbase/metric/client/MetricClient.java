@@ -83,6 +83,7 @@ public class MetricClient {
 	}
 
 	static volatile ScheduledThreadPoolExecutor timer = null;
+	static volatile Runnable scheduled = null;
 
 	private static Runnable command;
 
@@ -106,22 +107,27 @@ public class MetricClient {
 						send(addrs, minute, metrics);
 						return;
 					}
-					timer.schedule(new Runnable() {
+					Runnable scheduled_ = new Runnable() {
 						@Override
 						public void run() {
+							scheduled = null;
 							try {
 								send(addrs, minute, metrics);
 							} catch (Error | RuntimeException e) {
 								e.printStackTrace();
 							}
 						}
-					}, random.nextInt(MINUTE), TimeUnit.MILLISECONDS);
+					};
+					scheduled = scheduled_;
+					timer.schedule(scheduled_,
+							random.nextInt(MINUTE), TimeUnit.MILLISECONDS);
 				} catch (Error | RuntimeException e) {
 					e.printStackTrace();
 				}
 			}
 		};
 		timer = new ScheduledThreadPoolExecutor(1);
+		timer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
 		timer.scheduleAtFixedRate(command,
 				MINUTE - start % MINUTE, MINUTE, TimeUnit.MILLISECONDS);
 	}
@@ -131,7 +137,14 @@ public class MetricClient {
 			return;
 		}
 		timer.shutdown();
+		try {
+			while (!timer.awaitTermination(1, TimeUnit.SECONDS)) {/**/}
+		} catch (InterruptedException e) {/**/}
 		timer = null;
+		if (scheduled != null) {
+			scheduled.run();
+			scheduled = null;
+		}
 		command.run();
 	}
 }
