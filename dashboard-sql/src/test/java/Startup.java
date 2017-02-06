@@ -2,6 +2,7 @@ import javax.servlet.ServletException;
 
 import org.apache.catalina.Context;
 import org.apache.catalina.LifecycleException;
+import org.apache.catalina.Server;
 import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.connector.Connector;
 import org.apache.catalina.loader.WebappLoader;
@@ -31,12 +32,14 @@ public class Startup {
 			});
 			WebResourceRoot resources = new StandardRoot(ctx);
 			resources.addPreResources(new DirResourceSet(resources,
-					"/WEB-INF/classes", Conf.getAbsolutePath("../target/classes"), "/"));
+					"/WEB-INF/classes", Conf.getAbsolutePath("classes"), "/"));
 			ctx.setResources(resources);
-			tomcat.start();
-			Thread.currentThread().join();
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
+
+			Server server = tomcat.getServer();
+			server.start();
+			server.setPort(8005);
+			server.await();
+			server.stop();
 		} catch (ServletException | LifecycleException e) {
 			Log.e(e);
 		}
