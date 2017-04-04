@@ -70,7 +70,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
-			<version>0.2.12-SNAPSHOT</version>
+			<version>0.2.11</version>
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
