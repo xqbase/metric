@@ -6,8 +6,8 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.URLEncoder;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -48,7 +48,7 @@ public class MetricClient {
 	}
 
 	private static void send(InetSocketAddress[] addrs, int minute,
-			ArrayList<MetricEntry> metrics) {
+			List<MetricEntry> metrics) {
 		StringBuilder packet = new StringBuilder();
 		try (DatagramSocket socket = new DatagramSocket()) {
 			for (MetricEntry metric : metrics) {
@@ -60,7 +60,7 @@ public class MetricClient {
 						append(metric.getMax()).append('/').
 						append(metric.getMin()).append('/').
 						append(metric.getSqr());
-				HashMap<String, String> tagMap = metric.getTagMap();
+				Map<String, String> tagMap = metric.getTagMap();
 				if (!tagMap.isEmpty()) {
 					int question = row.length();
 					tagMap.forEach((key, value) -> {
@@ -95,7 +95,7 @@ public class MetricClient {
 		command = () -> {
 			try {
 				int minute = now.incrementAndGet();
-				ArrayList<MetricEntry> metrics = Metric.removeAll();
+				List<MetricEntry> metrics = Metric.removeAll();
 				if (metrics.isEmpty()) {
 					return;
 				}

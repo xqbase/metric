@@ -20,8 +20,8 @@ public class ManagementMonitor implements Runnable {
 		return divisor == 0 ? 0 : (double) dividend * 100 / divisor;
 	}
 
-	private static HashMap<String, String> getTagMap(String... tagPairs) {
-		HashMap<String, String> tagMap = new HashMap<>();
+	private static Map<String, String> getTagMap(String... tagPairs) {
+		Map<String, String> tagMap = new HashMap<>();
 		MetricKey.putTagMap(tagMap, tagPairs);
 		return tagMap;
 	}
@@ -33,7 +33,7 @@ public class ManagementMonitor implements Runnable {
 	private OperatingSystemMXBean os = null;
 
 	private void put(String name, double value, String... tagPairs) {
-		HashMap<String, String> tagMap_ = new HashMap<>(tagMap);
+		Map<String, String> tagMap_ = new HashMap<>(tagMap);
 		MetricKey.putTagMap(tagMap_, tagPairs);
 		Metric.put(name, value, tagMap_);
 	}
@@ -42,7 +42,7 @@ public class ManagementMonitor implements Runnable {
 		this(prefix, getTagMap(tagPairs));
 	}
 
-	public ManagementMonitor(String prefix, HashMap<String, String> tagMap) {
+	public ManagementMonitor(String prefix, Map<String, String> tagMap) {
 		cpu = prefix + ".cpu";
 		threads = prefix + ".threads";
 		memoryMB = prefix + ".memory.mb";

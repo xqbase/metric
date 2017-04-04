@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -27,7 +29,7 @@ public class MetricFilter implements Filter {
 	private FilterConfig conf;
 	private String requestTime;
 
-	HashMap<String, String> tagMap;
+	Map<String, String> tagMap;
 	AtomicInteger connections = new AtomicInteger(0);
 
 	protected String getAddresses() {
@@ -65,7 +67,7 @@ public class MetricFilter implements Filter {
 			return;
 		}
 
-		ArrayList<InetSocketAddress> addrs = new ArrayList<>();
+		List<InetSocketAddress> addrs = new ArrayList<>();
 		String addresses = getAddresses();
 		if (addresses != null) {
 			for (String s : addresses.split("[,;]")) {
@@ -130,7 +132,7 @@ public class MetricFilter implements Filter {
 			String type = "" + resp.getContentType();
 			int colon = type.indexOf(';', 1);
 			type = colon < 0 ? type : type.substring(0, colon);
-			HashMap<String, String> tagMap_ = new HashMap<>(tagMap);
+			Map<String, String> tagMap_ = new HashMap<>(tagMap);
 			MetricKey.putTagMap(tagMap_, "path", path,
 					"status", "" + status, "content_type", type,
 					"charset", "" + resp.getCharacterEncoding());

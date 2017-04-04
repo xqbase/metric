@@ -1,11 +1,13 @@
 package com.xqbase.metric.common;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class Metric {
-	private static ConcurrentHashMap<MetricKey, MetricValue>
+	private static ConcurrentMap<MetricKey, MetricValue>
 			map = new ConcurrentHashMap<>();
 
 	private static void put(MetricKey key, double value) {
@@ -16,7 +18,7 @@ public class Metric {
 				!map.replace(key, current, new MetricValue(current, value)));
 	}
 
-	public static void put(String name, double value, HashMap<String, String> tagMap) {
+	public static void put(String name, double value, Map<String, String> tagMap) {
 		put(new MetricKey(name, tagMap), value);
 	}
 
@@ -24,9 +26,9 @@ public class Metric {
 		put(new MetricKey(name, tagPairs), value);
 	}
 
-	public static ArrayList<MetricEntry> removeAll() {
-		ArrayList<MetricEntry> metrics = new ArrayList<>();
-		ArrayList<MetricKey> keys = new ArrayList<>(map.keySet());
+	public static List<MetricEntry> removeAll() {
+		List<MetricEntry> metrics = new ArrayList<>();
+		List<MetricKey> keys = new ArrayList<>(map.keySet());
 		for (MetricKey key : keys) {
 			MetricValue value = map.remove(key);
 			if (value != null) {

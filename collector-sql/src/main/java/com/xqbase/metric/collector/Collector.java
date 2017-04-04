@@ -43,7 +43,7 @@ class MetricRow {
 	int time;
 	long count;
 	double sum, max, min, sqr;
-	HashMap<String, String> tags;
+	Map<String, String> tags;
 }
 
 class MetricName {
@@ -151,7 +151,7 @@ public class Collector {
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
-	private static MetricRow row(HashMap<String, String> tagMap, int now,
+	private static MetricRow row(Map<String, String> tagMap, int now,
 			long count, double sum, double max, double min, double sqr) {
 		MetricRow row = new MetricRow();
 		if (maxTags > 0 && tagMap.size() > maxTags) {

@@ -1,9 +1,10 @@
 package com.xqbase.metric.common;
 
 import java.util.HashMap;
+import java.util.Map;
 
 public class MetricKey {
-	public static void putTagMap(HashMap<String, String> tagMap,
+	public static void putTagMap(Map<String, String> tagMap,
 			String... tagPairs) {
 		for (int i = 0; i < tagPairs.length - 1; i += 2) {
 			String key = tagPairs[i];
@@ -15,9 +16,9 @@ public class MetricKey {
 	}
 
 	private String name;
-	private HashMap<String, String> tagMap;
+	private Map<String, String> tagMap;
 
-	public MetricKey(String name, HashMap<String, String> tagMap) {
+	public MetricKey(String name, Map<String, String> tagMap) {
 		this.name = name;
 		this.tagMap = tagMap;
 	}
@@ -32,7 +33,7 @@ public class MetricKey {
 		return name;
 	}
 
-	public HashMap<String, String> getTagMap() {
+	public Map<String, String> getTagMap() {
 		return tagMap;
 	}
 

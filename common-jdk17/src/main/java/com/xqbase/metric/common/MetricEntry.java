@@ -1,6 +1,6 @@
 package com.xqbase.metric.common;
 
-import java.util.HashMap;
+import java.util.Map;
 
 public class MetricEntry {
 	private MetricKey key;
@@ -15,7 +15,7 @@ public class MetricEntry {
 		return key.getName();
 	}
 
-	public HashMap<String, String> getTagMap() {
+	public Map<String, String> getTagMap() {
 		return key.getTagMap();
 	}
 
