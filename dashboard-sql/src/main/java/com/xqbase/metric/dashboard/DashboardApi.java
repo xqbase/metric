@@ -184,7 +184,7 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			byte[] b = row.getBytes(1);
+			byte[] b = row.getBytes("tags");
 			if (b == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
@@ -237,7 +237,7 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			id = row.getInt(1);
+			id = row.getInt("id");
 		} catch (SQLException e) {
 			error500(resp, e);
 			return;
@@ -270,13 +270,13 @@ public class DashboardApi extends HttpServlet {
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			db.query(row -> {
-				int index = (row.getInt(1) - begin) / interval;
+				int index = (row.getInt("time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					return;
 				}
 				@SuppressWarnings("unchecked")
 				HashMap<String, String> tags = Kryos.
-						deserialize(row.getBytes(7), HashMap.class);
+						deserialize(row.getBytes("tags"), HashMap.class);
 				if (tags == null) {
 					tags = new HashMap<>();
 				}
@@ -294,11 +294,11 @@ public class DashboardApi extends HttpServlet {
 				}
 				// Group Tags
 				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue newValue = new MetricValue(row.getLong(2),
-						((Number) row.get(3)).doubleValue(),
-						((Number) row.get(4)).doubleValue(),
-						((Number) row.get(5)).doubleValue(),
-						((Number) row.get(6)).doubleValue());
+				MetricValue newValue = new MetricValue(row.getLong("_count"),
+						((Number) row.get("_sum")).doubleValue(),
+						((Number) row.get("_max")).doubleValue(),
+						((Number) row.get("_min")).doubleValue(),
+						((Number) row.get("_sqr")).doubleValue());
 				MetricValue value = result.get(key);
 				if (value == null) {
 					result.put(key, newValue);

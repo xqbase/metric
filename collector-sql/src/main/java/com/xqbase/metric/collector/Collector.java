@@ -79,7 +79,7 @@ public class Collector {
 	private static final String DELETE_QUARTER =
 			"DELETE FROM metric_quarter WHERE id = ? AND time <= ?";
 	private static final String AGGREGATE_FROM =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+			"SELECT _count, _sum, _max, _min, _sqr, tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_TO =
 			"INSERT INTO metric_tags_quarter (id, time, tags) VALUES (?, ?, ?)";
@@ -119,7 +119,7 @@ public class Collector {
 			}
 			id = (int) id_[0];
 		} else {
-			id = idRow.getInt(1);
+			id = idRow.getInt("id");
 		}
 		Integer id_ = Integer.valueOf(id);
 		ArrayList<Object> ins = new ArrayList<>();
@@ -174,11 +174,11 @@ public class Collector {
 		ArrayList<MetricName> names = new ArrayList<>();
 		DB.query(row -> {
 			MetricName name = new MetricName();
-			name.id = row.getInt(1);
-			name.name = row.getString(2);
-			name.minuteSize = row.getInt(3);
-			name.quarterSize = row.getInt(4);
-			name.aggregatedTime = row.getInt(5);
+			name.id = row.getInt("id");
+			name.name = row.getString("name");
+			name.minuteSize = row.getInt("minute_size");
+			name.quarterSize = row.getInt("quarter_size");
+			name.aggregatedTime = row.getInt("aggregated_time");
 			names.add(name);
 		}, QUERY_NAME);
 		return names;
@@ -265,16 +265,16 @@ public class Collector {
 				DB.query(row -> {
 					@SuppressWarnings("unchecked")
 					HashMap<String, String> tags =
-							Kryos.deserialize(row.getBytes(7), HashMap.class);
+							Kryos.deserialize(row.getBytes("tags"), HashMap.class);
 					if (tags == null) {
 						tags = new HashMap<>();
 					}
 					// Aggregate to "_quarter.*"
-					MetricValue newValue = new MetricValue(row.getLong(2),
-							((Number) row.get(3)).doubleValue(),
-							((Number) row.get(4)).doubleValue(),
-							((Number) row.get(5)).doubleValue(),
-							((Number) row.get(6)).doubleValue());
+					MetricValue newValue = new MetricValue(row.getLong("_count"),
+							((Number) row.get("_sum")).doubleValue(),
+							((Number) row.get("_max")).doubleValue(),
+							((Number) row.get("_min")).doubleValue(),
+							((Number) row.get("_sqr")).doubleValue());
 					MetricValue value = result.get(tags);
 					if (value == null) {
 						result.put(tags, newValue);
@@ -319,7 +319,7 @@ public class Collector {
 			DB.query(row -> {
 				@SuppressWarnings("unchecked")
 				HashMap<String, HashMap<String, MetricValue>> tags =
-						Kryos.deserialize(row.getBytes(1), HashMap.class);
+						Kryos.deserialize(row.getBytes("tags"), HashMap.class);
 				if (tags == null) {
 					return;
 				}
