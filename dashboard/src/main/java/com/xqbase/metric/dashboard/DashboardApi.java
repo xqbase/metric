@@ -149,6 +149,14 @@ public class DashboardApi extends HttpServlet {
 		return value instanceof String ? (String) value : "_";
 	}
 
+	private static void copyHeader(HttpServletRequest req,
+			HttpServletResponse resp, String reqHeader, String respHeader) {
+		String value = req.getHeader(reqHeader);
+		if (value != null) {
+			resp.setHeader(respHeader, value);
+		}
+	}
+
 	private static void outputJson(HttpServletRequest req,
 			HttpServletResponse resp, Object data) {
 		resp.setCharacterEncoding("UTF-8");
@@ -161,10 +169,11 @@ public class DashboardApi extends HttpServlet {
 		}
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
-			String origin = req.getHeader("Origin");
-			if (origin != null) {
-				resp.setHeader("Access-Control-Allow-Origin", origin);
-			}
+			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
+			copyHeader(req, resp, "Access-Control-Request-Methods",
+					"Access-Control-Allow-Methods");
+			copyHeader(req, resp, "Access-Control-Request-Headers",
+					"Access-Control-Allow-Headers");
 			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
 			out.print(JSONObject.wrap(data));
