@@ -1,10 +1,12 @@
 package com.xqbase.metric.client;
 
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.sun.management.OperatingSystemMXBean;
@@ -26,8 +28,11 @@ public class ManagementMonitor implements Runnable {
 		return tagMap;
 	}
 
-	private String cpu, threads, memoryMB, memoryPercent;
-	private Map<String, String> tagMap; 
+	private String gc, cpu, threads, memoryMB, memoryPercent;
+	private Map<String, String> tagMap;
+	private Map<String, long[]> gcMap = new HashMap<>();
+	private List<GarbageCollectorMXBean> gcBeans =
+			ManagementFactory.getGarbageCollectorMXBeans();
 	private ThreadMXBean thread = ManagementFactory.getThreadMXBean();
 	private MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
 	private OperatingSystemMXBean os = null;
@@ -43,6 +48,7 @@ public class ManagementMonitor implements Runnable {
 	}
 
 	public ManagementMonitor(String prefix, Map<String, String> tagMap) {
+		gc = prefix + ".gc";
 		cpu = prefix + ".cpu";
 		threads = prefix + ".threads";
 		memoryMB = prefix + ".memory.mb";
@@ -57,6 +63,10 @@ public class ManagementMonitor implements Runnable {
 
 	@Override
 	public void run() {
+		for (GarbageCollectorMXBean gcBean : gcBeans) {
+			
+		}
+
 		put(threads, thread.getThreadCount(), "type", "total");
 		put(threads, thread.getDaemonThreadCount(), "type", "daemon");
 
