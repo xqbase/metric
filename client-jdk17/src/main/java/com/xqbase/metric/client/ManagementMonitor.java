@@ -1,5 +1,6 @@
 package com.xqbase.metric.client;
 
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
@@ -7,11 +8,16 @@ import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.management.ListenerNotFoundException;
+import javax.management.Notification;
+import javax.management.NotificationBroadcaster;
+import javax.management.NotificationListener;
+
 import com.sun.management.OperatingSystemMXBean;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricKey;
 
-public class ManagementMonitor implements Runnable {
+public class ManagementMonitor implements Runnable, AutoCloseable {
 	private static double MB(long value) {
 		return (double) value / 1048576;
 	}
@@ -27,10 +33,12 @@ public class ManagementMonitor implements Runnable {
 	}
 
 	private String cpu, threads, memoryMB, memoryPercent;
-	private Map<String, String> tagMap; 
+	private Map<String, String> tagMap;
 	private ThreadMXBean thread = ManagementFactory.getThreadMXBean();
 	private MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
 	private OperatingSystemMXBean os = null;
+	private Map<NotificationBroadcaster, NotificationListener>
+			gcListeners = new HashMap<>();
 
 	private void put(String name, double value, String... tagPairs) {
 		Map<String, String> tagMap_ = new HashMap<>(tagMap);
@@ -53,6 +61,27 @@ public class ManagementMonitor implements Runnable {
 			os = (OperatingSystemMXBean) os_;
 		}
 		this.tagMap = tagMap;
+
+		final String gc = prefix + ".gc";
+		for (final GarbageCollectorMXBean gcBean :
+				ManagementFactory.getGarbageCollectorMXBeans()) {
+			if (!(gcBean instanceof NotificationBroadcaster)) {
+				continue;
+			}
+			final String gcName = gcBean.getName();
+			NotificationListener listener = new NotificationListener() {
+				@Override
+				public void handleNotification(Notification notification, Object handback) {
+					if (gcBean instanceof com.sun.management.GarbageCollectorMXBean) {
+						put(gc, ((com.sun.management.GarbageCollectorMXBean) gcBean).
+								getLastGcInfo().getDuration(), "name", gcName);
+					}
+				}
+			};
+			NotificationBroadcaster broadcaster = ((NotificationBroadcaster) gcBean);
+			broadcaster.addNotificationListener(listener, null, null);
+			gcListeners.put(broadcaster, listener); 
+		}
 	}
 
 	@Override
@@ -89,5 +118,18 @@ public class ManagementMonitor implements Runnable {
 
 		put(cpu, Math.max(os.getSystemCpuLoad() * 100, 0), "type", "system");
 		put(cpu, Math.max(os.getProcessCpuLoad() * 100, 0), "type", "process");
+	}
+
+	@Override
+	public void close() {
+		for (Map.Entry<NotificationBroadcaster, NotificationListener> entry :
+				gcListeners.entrySet()) {
+			try {
+				entry.getKey().removeNotificationListener(entry.getValue());
+			} catch (ListenerNotFoundException e) {
+				// Ignored
+			}
+		}
+		gcListeners.clear();
 	}
 }
