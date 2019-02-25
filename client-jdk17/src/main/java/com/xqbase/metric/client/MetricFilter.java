@@ -24,13 +24,15 @@ import com.xqbase.metric.common.MetricKey;
 
 public class MetricFilter implements Filter {
 	private static AtomicInteger count = new AtomicInteger(0);
+	private static ManagementMonitor monitor;
 	private static ScheduledThreadPoolExecutor timer;
+
+	static AtomicInteger connections = new AtomicInteger(0);
 
 	private FilterConfig conf;
 	private String requestTime;
 
 	Map<String, String> tagMap;
-	AtomicInteger connections = new AtomicInteger(0);
 
 	protected String getAddresses() {
 		return conf.getInitParameter("addresses");
@@ -83,10 +85,9 @@ public class MetricFilter implements Filter {
 			}
 		}
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
-
+		monitor = new ManagementMonitor(prefix + ".server", tagMap);
 		timer = new ScheduledThreadPoolExecutor(1);
-		timer.scheduleAtFixedRate(new ManagementMonitor(prefix + ".server", tagMap),
-				0, 5, TimeUnit.SECONDS);
+		timer.scheduleAtFixedRate(monitor, 0, 5, TimeUnit.SECONDS);
 		timer.scheduleAtFixedRate(new Runnable() {
 			@Override
 			public void run() {
@@ -101,6 +102,7 @@ public class MetricFilter implements Filter {
 			return;
 		}
 		timer.shutdown();
+		monitor.close();
 		MetricClient.shutdown();
 	}
 
