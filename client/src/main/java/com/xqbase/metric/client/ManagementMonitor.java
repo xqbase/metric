@@ -61,7 +61,7 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 		}
 		this.tagMap = tagMap;
 
-		String gc = prefix + ".gc";
+		String gc = prefix + ".gc.time";
 		for (GarbageCollectorMXBean gcBean :
 				ManagementFactory.getGarbageCollectorMXBeans()) {
 			if (!(gcBean instanceof NotificationBroadcaster)) {

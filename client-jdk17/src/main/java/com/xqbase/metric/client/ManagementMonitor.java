@@ -40,7 +40,7 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 	private Map<NotificationBroadcaster, NotificationListener>
 			gcListeners = new HashMap<>();
 
-	private void put(String name, double value, String... tagPairs) {
+	void put(String name, double value, String... tagPairs) {
 		Map<String, String> tagMap_ = new HashMap<>(tagMap);
 		MetricKey.putTagMap(tagMap_, tagPairs);
 		Metric.put(name, value, tagMap_);
@@ -62,7 +62,7 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 		}
 		this.tagMap = tagMap;
 
-		final String gc = prefix + ".gc";
+		final String gc = prefix + ".gc.time";
 		for (final GarbageCollectorMXBean gcBean :
 				ManagementFactory.getGarbageCollectorMXBeans()) {
 			if (!(gcBean instanceof NotificationBroadcaster)) {
