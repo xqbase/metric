@@ -3,9 +3,11 @@ package com.xqbase.metric.client;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.management.ListenerNotFoundException;
@@ -32,9 +34,12 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 	}
 
 	private String cpu, threads, memoryMB, memoryPercent;
+	private String memoryPoolMB, memoryPoolPercent;
 	private Map<String, String> tagMap;
 	private ThreadMXBean thread = ManagementFactory.getThreadMXBean();
 	private MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
+	private List<MemoryPoolMXBean> memoryPools =
+			ManagementFactory.getMemoryPoolMXBeans();
 	private OperatingSystemMXBean os = null;
 	private Map<NotificationBroadcaster, NotificationListener>
 			gcListeners = new HashMap<>();
@@ -54,6 +59,8 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 		threads = prefix + ".threads";
 		memoryMB = prefix + ".memory.mb";
 		memoryPercent = prefix + ".memory.percent";
+		memoryPoolMB = prefix + ".memory_pool.mb";
+		memoryPoolPercent = prefix + ".memory_pool.percent";
 		java.lang.management.OperatingSystemMXBean os_ =
 				ManagementFactory.getOperatingSystemMXBean();
 		if (os_ instanceof OperatingSystemMXBean) {
@@ -89,28 +96,52 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 		// add(memory, MB(rt.totalMemory() - rt.freeMemory()), "type", "heap_used");
 		MemoryUsage heap = memory.getHeapMemoryUsage();
 		put(memoryMB, MB(heap.getCommitted()), "type", "heap_committed");
-		put(memoryMB, MB(heap.getUsed()), "type", "heap_used");
-		put(memoryPercent, PERCENT(heap.getUsed(), heap.getMax()), "type", "heap");
+		long heapUsed = heap.getUsed();
+		put(memoryMB, MB(heapUsed), "type", "heap_used");
+		long heapMax = heap.getMax();
+		put(memoryMB, MB(heapMax), "type", "heap_max");
+		put(memoryPercent, PERCENT(heapUsed, heapMax), "type", "heap");
 		MemoryUsage nonHeap = memory.getNonHeapMemoryUsage();
 		put(memoryMB, MB(nonHeap.getCommitted()), "type", "non_heap_committed");
-		put(memoryMB, MB(nonHeap.getUsed()), "type", "non_heap_used");
-		// nonHeap.getMax() always returns -1 in Java 1.8
-		// put(memoryPercent, PERCENT(nonHeap.getUsed(), nonHeap.getMax()), "type", "non_heap");
+		long nonHeapUsed = nonHeap.getUsed();
+		put(memoryMB, MB(nonHeapUsed), "type", "non_heap_used");
+		long nonHeapMax = nonHeap.getMax();
+		if (nonHeapMax > 0) {
+			put(memoryMB, MB(nonHeapMax), "type", "non_heap_max");
+			put(memoryPercent, PERCENT(nonHeapUsed, nonHeapMax), "type", "non_heap");
+		}
+
+		for (MemoryPoolMXBean memoryPool : memoryPools) {
+			String poolName = memoryPool.getName();
+			MemoryUsage pool = memoryPool.getUsage();
+			if (pool == null) {
+				continue;
+			}
+			put(memoryPoolMB, MB(pool.getCommitted()), "type", "committed", "name", poolName);
+			long poolUsed = pool.getUsed();
+			put(memoryPoolMB, MB(poolUsed), "type", "used", "name", poolName);
+			long poolMax = pool.getMax();
+			if (poolMax > 0) {
+				put(memoryPoolMB, MB(poolMax), "type", "max", "name", poolName);
+				put(memoryPoolPercent, PERCENT(poolUsed, poolMax), "name", poolName);
+			}
+		}
 
 		if (os == null) {
 			return;
 		}
 		long totalPhysical = os.getTotalPhysicalMemorySize();
+		put(memoryMB, MB(totalPhysical), "type", "physical_total");
 		long usedPhysical = totalPhysical - os.getFreePhysicalMemorySize();
-		put(memoryMB, MB(usedPhysical), "type", "physical");
-		put(memoryPercent, PERCENT(usedPhysical, totalPhysical),
-				"type", "physical_memory");
+		put(memoryMB, MB(usedPhysical), "type", "physical_used");
+		put(memoryPercent, PERCENT(usedPhysical, totalPhysical), "type", "physical");
 		long totalSwap = os.getTotalSwapSpaceSize();
+		put(memoryMB, MB(totalSwap), "type", "swap_total");
 		long usedSwap = totalSwap - os.getFreeSwapSpaceSize();
-		put(memoryMB, MB(usedSwap), "type", "swap");
+		put(memoryMB, MB(usedSwap), "type", "swap_used");
+		put(memoryPercent, PERCENT(usedSwap, totalSwap), "type", "swap");
 		put(memoryMB, MB(os.getCommittedVirtualMemorySize()),
 				"type", "process_committed");
-		put(memoryPercent, PERCENT(usedSwap, totalSwap), "type", "swap_space");
 
 		put(cpu, Math.max(os.getSystemCpuLoad() * 100, 0), "type", "system");
 		put(cpu, Math.max(os.getProcessCpuLoad() * 100, 0), "type", "process");
