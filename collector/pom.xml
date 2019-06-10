@@ -70,7 +70,7 @@
 		<dependency>
 			<groupId>com.xqbase</groupId>
 			<artifactId>xqbase-util</artifactId>
-			<version>0.2.12</version>
+			<version>0.2.16</version>
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
@@ -80,7 +80,7 @@
 		<dependency>
 			<groupId>org.mongodb</groupId>
 			<artifactId>mongo-java-driver</artifactId>
-			<version>2.13.2</version>
+			<version>3.10.2</version>
 		</dependency>
 	</dependencies>
 </project>

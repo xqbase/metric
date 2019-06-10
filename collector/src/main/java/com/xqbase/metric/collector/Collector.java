@@ -23,13 +23,17 @@ import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
+import org.bson.Document;
+
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.MongoClientOptions;
 import com.mongodb.MongoCredential;
 import com.mongodb.ServerAddress;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -61,8 +65,9 @@ public class Collector {
 		rows.add(row);
 	}
 
-	private static void insert(DB db, HashMap<String, ArrayList<DBObject>> rowsMap) {
-		rowsMap.forEach((name, rows) -> db.getCollection(name).insert(rows));
+	private static void insert(MongoDatabase db,
+			HashMap<String, ArrayList<DBObject>> rowsMap) {
+		rowsMap.forEach((name, rows) -> db.getCollection(name, DBObject.class).insertMany(rows));
 	}
 
 	private static boolean isTag(String key) {
@@ -103,6 +108,7 @@ public class Collector {
 			INDEX_MINUTE = __("_minute", Integer.valueOf(1)),
 			INDEX_QUARTER = __("_quarter", Integer.valueOf(1)),
 			INDEX_NAME = __("_name", Integer.valueOf(1));
+	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
@@ -130,7 +136,7 @@ public class Collector {
 		return row;
 	}
 
-	private static void minutely(DB db, int minute) {
+	private static void minutely(MongoDatabase db, int minute) {
 		// Insert aggregation-during-collection metrics
 		HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
@@ -145,21 +151,21 @@ public class Collector {
 		if (serverId != 0) {
 			return;
 		}
-		for (String name : db.getCollectionNames()) {
+		for (String name : db.listCollectionNames()) {
 			if (name.startsWith("system.") || name.startsWith("_meta.")) {
 				continue;
 			}
-			DBCollection collection = db.getCollection(name);
-			long count = collection.count();
+			MongoCollection<DBObject> collection = db.getCollection(name, DBObject.class);
+			long count = collection.countDocuments();
 			if (count == 0) {
 				// Remove disappeared metric collections
 				collection.drop();
 				if (name.startsWith("_quarter.")) {
 					// Remove disappeared quarterly metric from meta collections
 					BasicDBObject query = __("name", name.substring(9));
-					db.getCollection("_meta.aggregated").remove(query);
-					db.getCollection("_meta.tags_quarter").remove(query);
-					db.getCollection("_meta.tags_all").remove(query);
+					db.getCollection("_meta.aggregated").deleteMany(query);
+					db.getCollection("_meta.tags_quarter").deleteMany(query);
+					db.getCollection("_meta.tags_all").deleteMany(query);
 				}
 			} else {
 				if (!name.startsWith("_quarter.")) {
@@ -217,7 +223,7 @@ public class Collector {
 		return row;
 	}
 
-	private static void quarterly(DB db, int quarter) {
+	private static void quarterly(MongoDatabase db, int quarter) {
 		BasicDBObject removeBefore = __("_minute", __("$lte",
 				Integer.valueOf(quarter * 15 - expire)));
 		BasicDBObject removeAfter = __("_minute", __("$gte",
@@ -227,31 +233,31 @@ public class Collector {
 		BasicDBObject removeAfterQuarter = __("_quarter", __("$gte",
 				Integer.valueOf(quarter + expire)));
 		// Ensure index on meta collections
-		DBCollection aggregated = db.getCollection("_meta.aggregated");
+		MongoCollection<DBObject> aggregated = db.getCollection("_meta.aggregated", DBObject.class);
 		aggregated.createIndex(INDEX_NAME);
-		DBCollection tagsQuarter = db.getCollection("_meta.tags_quarter");
+		MongoCollection<DBObject> tagsQuarter = db.getCollection("_meta.tags_quarter", DBObject.class);
 		tagsQuarter.createIndex(INDEX_NAME);
 		tagsQuarter.createIndex(INDEX_QUARTER);
-		tagsQuarter.remove(__("_quarter", __("$lte",
+		tagsQuarter.deleteMany(__("_quarter", __("$lte",
 				Integer.valueOf(quarter - tagsExpire))));
-		tagsQuarter.remove(__("_quarter", __("$gte",
+		tagsQuarter.deleteMany(__("_quarter", __("$gte",
 				Integer.valueOf(quarter + tagsExpire))));
-		DBCollection tagsAll = db.getCollection("_meta.tags_all");
+		MongoCollection<Document> tagsAll = db.getCollection("_meta.tags_all");
 		tagsAll.createIndex(INDEX_NAME);
 		// Scan minutely collections
-		for (String name : db.getCollectionNames()) {
+		for (String name : db.listCollectionNames()) {
 			if (name.startsWith("system.") || name.startsWith("_meta.") ||
 					name.startsWith("_quarter.")) {
 				continue;
 			}
-			DBCollection collection = db.getCollection(name);
-			DBCollection quarterCollection = db.getCollection("_quarter." + name);
+			MongoCollection<DBObject> collection = db.getCollection(name, DBObject.class);
+			MongoCollection<DBObject> quarterCollection = db.getCollection("_quarter." + name, DBObject.class);
 			// Remove stale
-			collection.remove(removeBefore);
-			collection.remove(removeAfter);
+			collection.deleteMany(removeBefore);
+			collection.deleteMany(removeAfter);
 			// Aggregate to quarter
 			BasicDBObject query = __("_name", name);
-			DBObject aggregatedRow = aggregated.findOne(query);
+			DBObject aggregatedRow = aggregated.find(query).first();
 			int start = aggregatedRow == null ? quarter - expire :
 					getInt(aggregatedRow, "_quarter");
 			for (int i = start + 1; i <= quarter; i ++) {
@@ -299,7 +305,7 @@ public class Collector {
 				} else {
 					result.forEach(action);
 				}
-				quarterCollection.insert(rows);
+				quarterCollection.insertMany(rows);
 				// Aggregate to "_meta.tags_quarter"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(), "name", name, "key", tagKey);
@@ -308,22 +314,22 @@ public class Collector {
 				row.put("_name", name);
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				row.put("_quarter", Integer.valueOf(i));
-				tagsQuarter.insert(row);
+				tagsQuarter.insertOne(row);
 			}
 			BasicDBObject update = __("$set", __("_quarter", Integer.valueOf(quarter)));
-			aggregated.update(query, update, true, false);
+			aggregated.updateOne(query, update, UPSERT);
 		}
 		// Scan quarterly collections
-		for (String name : db.getCollectionNames()) {
+		for (String name : db.listCollectionNames()) {
 			if (!name.startsWith("_quarter.")) {
 				continue;
 			}
-			DBCollection collection = db.getCollection(name);
+			MongoCollection<Document> collection = db.getCollection(name);
 			// Ensure index
 			collection.createIndex(INDEX_QUARTER);
 			// Remove stale
-			collection.remove(removeBeforeQuarter);
-			collection.remove(removeAfterQuarter);
+			collection.deleteMany(removeBeforeQuarter);
+			collection.deleteMany(removeAfterQuarter);
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			String minuteName = name.substring(9);
 			BasicDBObject query = __("_name", minuteName);
@@ -347,10 +353,11 @@ public class Collector {
 			}
 			BasicDBObject row = getTagRow(tagMap);
 			row.put("_name", minuteName);
-			tagsAll.update(query, row, true, false);
+			tagsAll.updateOne(query, row, UPSERT);
 		}
 	}
 
+	@SuppressWarnings("resource")
 	public static void main(String[] args) {
 		if (!service.startup(args)) {
 			return;
@@ -397,10 +404,11 @@ public class Collector {
 			if (username == null || password == null) {
 				mongo = new MongoClient(addr);
 			} else {
-				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
-						createMongoCRCredential(username, database, password.toCharArray())));
+				mongo = new MongoClient(addr, MongoCredential.
+						createCredential(username, database, password.toCharArray()),
+						MongoClientOptions.builder().build());
 			}
-			DB db = mongo.getDB(database);
+			MongoDatabase db = mongo.getDatabase(database);
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);

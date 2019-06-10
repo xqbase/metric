@@ -24,12 +24,13 @@ import org.bson.BSONObject;
 import org.json.JSONObject;
 
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.MongoClientOptions;
 import com.mongodb.MongoCredential;
 import com.mongodb.MongoException;
 import com.mongodb.ServerAddress;
+import com.mongodb.client.MongoDatabase;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
@@ -66,30 +67,27 @@ public class DashboardApi extends HttpServlet {
 
 	private int maxTagValues = 0;
 	private MongoClient mongo = null;
-	private DB db = null;
+	private MongoDatabase db = null;
 
 	@Override
 	public void init() throws ServletException {
-		try {
-			Properties p = Conf.load("Mongo");
-			ServerAddress addr = new ServerAddress(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port"), 27017));
-			String database = p.getProperty("db");
-			String username = p.getProperty("username");
-			String password = p.getProperty("password");
-			if (username == null || password == null) {
-				mongo = new MongoClient(addr);
-			} else {
-				mongo = new MongoClient(addr, Collections.singletonList(MongoCredential.
-						createMongoCRCredential(username, database, password.toCharArray())));
-			}
-			db = mongo.getDB(database);
-
-			maxTagValues = Numbers.parseInt(Conf.
-					load("Dashboard").getProperty("max_tag_values"));
-		} catch (IOException e) {
-			throw new ServletException(e);
+		Properties p = Conf.load("Mongo");
+		ServerAddress addr = new ServerAddress(p.getProperty("host"),
+				Numbers.parseInt(p.getProperty("port"), 27017));
+		String database = p.getProperty("db");
+		String username = p.getProperty("username");
+		String password = p.getProperty("password");
+		if (username == null || password == null) {
+			mongo = new MongoClient(addr);
+		} else {
+			mongo = new MongoClient(addr, MongoCredential.
+					createCredential(username, database, password.toCharArray()),
+					MongoClientOptions.builder().build());
 		}
+		db = mongo.getDatabase(database);
+
+		maxTagValues = Numbers.parseInt(Conf.
+				load("Dashboard").getProperty("max_tag_values"));
 	}
 
 	@Override
@@ -209,8 +207,8 @@ public class DashboardApi extends HttpServlet {
 		if (method == TAGS_METHOD) {
 			DBObject tagsRow;
 			try {
-				tagsRow = db.getCollection("_meta.tags_all").
-						findOne(new BasicDBObject("_name", metricName));
+				tagsRow = db.getCollection("_meta.tags_all", DBObject.class).
+						find(new BasicDBObject("_name", metricName)).first();
 			} catch (MongoException e) {
 				error500(resp, e);
 				return;
@@ -276,7 +274,7 @@ public class DashboardApi extends HttpServlet {
 		// Query by MongoDB and Group by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			for (DBObject row : db.getCollection(metricName).find(query)) {
+			for (DBObject row : db.getCollection(metricName, DBObject.class).find(query)) {
 				int index = (getInt(row, rangeColumn) - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
