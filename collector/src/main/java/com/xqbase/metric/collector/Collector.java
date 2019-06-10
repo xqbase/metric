@@ -111,7 +111,7 @@ public class Collector {
 	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
-	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+	private static int serverId, expire, aggrExpire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
@@ -258,7 +258,7 @@ public class Collector {
 			// Aggregate to quarter
 			BasicDBObject query = __("_name", name);
 			DBObject aggregatedRow = aggregated.find(query).first();
-			int start = aggregatedRow == null ? quarter - expire :
+			int start = aggregatedRow == null ? quarter - aggrExpire :
 					getInt(aggregatedRow, "_quarter");
 			for (int i = start + 1; i <= quarter; i ++) {
 				ArrayList<DBObject> rows = new ArrayList<>();
@@ -351,9 +351,7 @@ public class Collector {
 					}
 				}
 			}
-			BasicDBObject row = getTagRow(tagMap);
-			row.put("_name", minuteName);
-			tagsAll.updateOne(query, row, UPSERT);
+			tagsAll.updateOne(query, __("$set", getTagRow(tagMap)), UPSERT);
 		}
 	}
 
@@ -374,6 +372,7 @@ public class Collector {
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
+		aggrExpire = Numbers.parseInt(p.getProperty("aggr_expire"), 60);
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
@@ -411,10 +410,14 @@ public class Collector {
 			MongoDatabase db = mongo.getDatabase(database);
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
+				System.out.println("Begin Minutely");
 				minutely(db, minute);
+				System.out.println("End Minutely");
 				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
+					Log.d("Begin Quarterly");
 					quarterly(db, minute / 15);
+					Log.d("End Quarterly");
 				}
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
