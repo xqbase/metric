@@ -67,7 +67,8 @@ public class Collector {
 
 	private static void insert(MongoDatabase db,
 			HashMap<String, ArrayList<DBObject>> rowsMap) {
-		rowsMap.forEach((name, rows) -> db.getCollection(name, DBObject.class).insertMany(rows));
+		rowsMap.forEach((name, rows) ->
+			db.getCollection(name, DBObject.class).insertMany(rows));
 	}
 
 	private static boolean isTag(String key) {
@@ -415,9 +416,7 @@ public class Collector {
 				System.out.println("End Minutely");
 				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
-					Log.d("Begin Quarterly");
 					quarterly(db, minute / 15);
-					Log.d("End Quarterly");
 				}
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
