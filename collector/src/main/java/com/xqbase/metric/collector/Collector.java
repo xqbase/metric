@@ -411,9 +411,7 @@ public class Collector {
 			MongoDatabase db = mongo.getDatabase(database);
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
-				System.out.println("Begin Minutely");
 				minutely(db, minute);
-				System.out.println("End Minutely");
 				if (serverId == 0 && !service.isInterrupted() && minute % 15 == quarterDelay) {
 					// Skip "quarterly" when shutdown
 					quarterly(db, minute / 15);
