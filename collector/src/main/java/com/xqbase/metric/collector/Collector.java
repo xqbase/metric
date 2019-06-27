@@ -166,7 +166,6 @@ public class Collector {
 					BasicDBObject query = __("name", name.substring(9));
 					db.getCollection("_meta.aggregated").deleteMany(query);
 					db.getCollection("_meta.tags_quarter").deleteMany(query);
-					db.getCollection("_meta.tags_all").deleteMany(query);
 				}
 			} else {
 				if (!name.startsWith("_quarter.")) {
@@ -243,8 +242,6 @@ public class Collector {
 				Integer.valueOf(quarter - tagsExpire))));
 		tagsQuarter.deleteMany(__("_quarter", __("$gte",
 				Integer.valueOf(quarter + tagsExpire))));
-		MongoCollection<Document> tagsAll = db.getCollection("_meta.tags_all");
-		tagsAll.createIndex(INDEX_NAME);
 		// Scan minutely collections
 		for (String name : db.listCollectionNames()) {
 			if (name.startsWith("system.") || name.startsWith("_meta.") ||
@@ -331,7 +328,7 @@ public class Collector {
 			// Remove stale
 			collection.deleteMany(removeBeforeQuarter);
 			collection.deleteMany(removeAfterQuarter);
-			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
+			// Aggregate "_meta.tags_quarter" to "_meta.aggregated";
 			String minuteName = name.substring(9);
 			BasicDBObject query = __("_name", minuteName);
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
@@ -352,7 +349,8 @@ public class Collector {
 					}
 				}
 			}
-			tagsAll.updateOne(query, __("$set", getTagRow(tagMap)), UPSERT);
+			aggregated.updateOne(query, __("$set",
+					__("_tags", getTagRow(tagMap))), UPSERT);
 		}
 	}
 
@@ -532,12 +530,12 @@ public class Collector {
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
 		}
+		Runnables.shutdown(timer);
 		// Do not do Mongo operations in main thread (may be interrupted)
 		if (minutely != null) {
 			executor.execute(minutely);
 		}
 		Runnables.shutdown(executor);
-		Runnables.shutdown(timer);
 		if (mongo != null) {
 			mongo.close();
 		}

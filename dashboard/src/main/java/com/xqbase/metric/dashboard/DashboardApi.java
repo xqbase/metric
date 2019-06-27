@@ -207,12 +207,17 @@ public class DashboardApi extends HttpServlet {
 		if (method == TAGS_METHOD) {
 			DBObject tagsRow;
 			try {
-				tagsRow = db.getCollection("_meta.tags_all", DBObject.class).
+				tagsRow = db.getCollection("_meta.aggregated", DBObject.class).
 						find(new BasicDBObject("_name", metricName)).first();
 			} catch (MongoException e) {
 				error500(resp, e);
 				return;
 			}
+			if (tagsRow == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
+			tagsRow = (DBObject) tagsRow.get("_tags");
 			if (tagsRow == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;

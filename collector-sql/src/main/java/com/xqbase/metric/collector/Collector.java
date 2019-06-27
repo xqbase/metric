@@ -509,12 +509,12 @@ public class Collector {
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
 		}
+		Runnables.shutdown(timer);
 		// Do not do SQL operations in main thread (may be interrupted)
 		if (minutely != null) {
 			executor.execute(minutely);
 		}
 		Runnables.shutdown(executor);
-		Runnables.shutdown(timer);
 		if (DB != null) {
 			DB.close();
 		}

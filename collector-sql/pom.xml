@@ -3,7 +3,7 @@
 		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
-	<artifactId>xqbase-metric-collector</artifactId>
+	<artifactId>xqbase-metric-collector-sql</artifactId>
 	<version>0.2.10</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Collector</name>
@@ -63,7 +63,7 @@
 				</executions>
 			</plugin>
 		</plugins>
-		<finalName>metric-collector</finalName>
+		<finalName>metric-collector-sql</finalName>
 	</build>
 
 	<dependencies>
