@@ -28,9 +28,7 @@ import org.bson.Document;
 import com.mongodb.BasicDBObject;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
-import com.mongodb.MongoClientOptions;
-import com.mongodb.MongoCredential;
-import com.mongodb.ServerAddress;
+import com.mongodb.MongoClientURI;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.UpdateOptions;
@@ -389,24 +387,13 @@ public class Collector {
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
-		p = Conf.load("Mongo");
 		MongoClient mongo = null;
 		Runnable minutely = null;
 		try (DatagramSocket socket = new DatagramSocket(new
 				InetSocketAddress(host, port))) {
-			ServerAddress addr = new ServerAddress(p.getProperty("host"),
-					Numbers.parseInt(p.getProperty("port"), 27017));
-			String database = p.getProperty("db");
-			String username = p.getProperty("username");
-			String password = p.getProperty("password");
-			if (username == null || password == null) {
-				mongo = new MongoClient(addr);
-			} else {
-				mongo = new MongoClient(addr, MongoCredential.
-						createCredential(username, database, password.toCharArray()),
-						MongoClientOptions.builder().build());
-			}
-			MongoDatabase db = mongo.getDatabase(database);
+			p = Conf.load("Mongo");
+			mongo = new MongoClient(new MongoClientURI(p.getProperty("uri")));
+			MongoDatabase db = mongo.getDatabase(p.getProperty("database", "metric"));
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);

@@ -26,10 +26,8 @@ import org.json.JSONObject;
 import com.mongodb.BasicDBObject;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
-import com.mongodb.MongoClientOptions;
-import com.mongodb.MongoCredential;
+import com.mongodb.MongoClientURI;
 import com.mongodb.MongoException;
-import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoDatabase;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
@@ -72,19 +70,8 @@ public class DashboardApi extends HttpServlet {
 	@Override
 	public void init() throws ServletException {
 		Properties p = Conf.load("Mongo");
-		ServerAddress addr = new ServerAddress(p.getProperty("host"),
-				Numbers.parseInt(p.getProperty("port"), 27017));
-		String database = p.getProperty("db");
-		String username = p.getProperty("username");
-		String password = p.getProperty("password");
-		if (username == null || password == null) {
-			mongo = new MongoClient(addr);
-		} else {
-			mongo = new MongoClient(addr, MongoCredential.
-					createCredential(username, database, password.toCharArray()),
-					MongoClientOptions.builder().build());
-		}
-		db = mongo.getDatabase(database);
+		mongo = new MongoClient(new MongoClientURI(p.getProperty("uri")));
+		db = mongo.getDatabase(p.getProperty("database", "metric"));
 
 		maxTagValues = Numbers.parseInt(Conf.
 				load("Dashboard").getProperty("max_tag_values"));
