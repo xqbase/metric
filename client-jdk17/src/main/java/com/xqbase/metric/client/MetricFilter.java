@@ -46,6 +46,11 @@ public class MetricFilter implements Filter {
 		return conf.getInitParameter("tags");
 	}
 
+	protected String truncatePath(String path) {
+		int slash = path.indexOf('/', 1);
+		return slash < 0 ? path : path.substring(0, slash);
+	}
+
 	@Override
 	public void init(FilterConfig conf_) {
 		conf = conf_;
@@ -120,8 +125,7 @@ public class MetricFilter implements Filter {
 
 		String path = req.getServletPath();
 		path = path == null || path.isEmpty() ? "/" : path;
-		int slash = path.indexOf('/', 1);
-		path = slash < 0 ? path : path.substring(0, slash);
+		path = truncatePath(path);
 
 		connections.incrementAndGet();
 		try {
