@@ -52,7 +52,7 @@ class MetricName {
 }
 
 public class Collector {
-	private static final int MAX_BUFFER_SIZE = 64000;
+	private static final int MAX_BUFFER_SIZE = 1048576;
 	private static final int MAX_METRIC_LEN = 64;
 
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
