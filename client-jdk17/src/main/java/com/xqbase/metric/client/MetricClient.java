@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLEncoder;
 import java.util.List;
@@ -18,8 +19,16 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 
 public class MetricClient {
+	public static final int MAX_PACKET_SIZE_FRAG = 65535 - 28;
+	public static final int MAX_PACKET_SIZE = 1500 - 28;
+
 	private static final int MINUTE = 60000;
-	private static final int MAX_PACKET_SIZE = 64000;
+
+	private static int maxPacketSize = MAX_PACKET_SIZE;
+
+	public static void setMaxPacketSize(int maxPacketSize) {
+		MetricClient.maxPacketSize = maxPacketSize;
+	}
 
 	private static String encode(String s) {
 		try {
@@ -30,26 +39,19 @@ public class MetricClient {
 	}
 
 	private static void send(DatagramSocket socket,
-			InetSocketAddress[] addrs, String data) throws IOException {
-		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		try (DeflaterOutputStream dos = new
-				DeflaterOutputStream(baos)) {
-			dos.write(data.getBytes());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-		byte[] b = baos.toByteArray();
+			InetSocketAddress[] addrs, byte[] b) throws IOException {
 		for (InetSocketAddress addr : addrs) {
 			// Resolve "addr" every time
 			DatagramPacket packet = new DatagramPacket(b, b.length,
-					new InetSocketAddress(addr.getHostString(), addr.getPort()));
+					InetAddress.getByName(addr.getHostString()), addr.getPort());
 			socket.send(packet);
 		}
 	}
 
 	static void send(InetSocketAddress[] addrs, int minute,
 			List<MetricEntry> metrics) {
-		StringBuilder packet = new StringBuilder();
+		ByteArrayOutputStream baos = new ByteArrayOutputStream();
+		DeflaterOutputStream dos = new DeflaterOutputStream(baos, true);
 		try (DatagramSocket socket = new DatagramSocket()) {
 			for (MetricEntry metric : metrics) {
 				StringBuilder row = new StringBuilder();
@@ -69,13 +71,18 @@ public class MetricClient {
 					}
 					row.setCharAt(question, '?');
 				}
-				if (packet.length() + row.length() >= MAX_PACKET_SIZE) {
-					send(socket, addrs, packet.toString());
-					packet.setLength(0);
+				if (baos.size() + row.length() + 10 > maxPacketSize) {
+					dos.close();
+					send(socket, addrs, baos.toByteArray());
+					baos.reset();
+					dos = new DeflaterOutputStream(baos, true);
 				}
-				packet.append(row).append('\n');
+				dos.write(row.toString().getBytes());
+				dos.write((byte) '\n');
+				dos.flush();
 			}
-			send(socket, addrs, packet.toString());
+			dos.close();
+			send(socket, addrs, baos.toByteArray());
 		} catch (IOException e) {
 			System.err.println(e.getMessage());
 		}
