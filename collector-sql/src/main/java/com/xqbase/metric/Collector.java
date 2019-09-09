@@ -1,4 +1,4 @@
-package com.xqbase.metric.collector;
+package com.xqbase.metric;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
