@@ -1,7 +1,9 @@
 package com.xqbase.metric;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -372,11 +374,43 @@ public class Collector {
 		Runnable minutely = null;
 		try (DatagramSocket socket = new DatagramSocket(new
 				InetSocketAddress(host, port))) {
+
+			boolean createTable = false;
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
-			DB = new ConnectionPool(driver, p.getProperty("url", ""),
+			String url = p.getProperty("url", "");
+			int sqliteColon = url.indexOf(":sqlite:");
+			if (sqliteColon > 0) {
+				String dataDir = Conf.getAbsolutePath("data");
+				new File(dataDir).mkdir();
+				String dataFile = dataDir + "/metric.db";
+				createTable = !new File(dataFile).exists();
+				url = url.substring(0, sqliteColon + 8) + "file:///" + dataFile;
+			}
+			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
+			if (createTable) {
+				ByteArrayQueue baq = new ByteArrayQueue();
+				try (InputStream in = Collector.class.
+						getResourceAsStream("/sql/metric.sql")) {
+					baq.readFrom(in);
+				}
+				String[] sqls = baq.toString().split(";");
+				for (String s : sqls) {
+					String sql = s.trim();
+					if (!sql.isEmpty()) {
+						// SQLite uses "AUTOINCREMENT"
+						sql = sql.replace("AUTO_INCREMENT", "AUTOINCREMENT");
+						try {
+							DB.update(sql);
+						} catch (SQLException e) {
+							Log.w(sql + ": " + e.getMessage());
+						}
+					}
+				}
+			}
 			Dashboard.startup(DB);
+
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				try {
