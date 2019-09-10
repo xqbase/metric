@@ -14,7 +14,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -75,20 +74,20 @@ class GroupKey {
 
 public class Dashboard {
 	private static final String[] RESOURCES = {
-		"css/bootstrap.min.css",
-		"css/datepicker.css",
-		"js/bootstrap-datepicker.js",
-		"js/bootstrap.min.js",
-		"js/highcharts.js",
-		"js/jquery.min.js",
-		"all.html",
-		"all.js",
-		// "config.js",
-		"dashboard.html",
-		"dashboard.js",
-		"index.css",
-		"index.html",
-		"index.js",
+		"/css/bootstrap.min.css",
+		"/css/datepicker.css",
+		"/js/bootstrap-datepicker.js",
+		"/js/bootstrap.min.js",
+		"/js/highcharts.js",
+		"/js/jquery.min.js",
+		"/all.html",
+		"/all.js",
+		"/config.js",
+		"/dashboard.html",
+		"/dashboard.js",
+		"/index.css",
+		"/index.html",
+		"/index.js",
 	};
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
@@ -117,9 +116,9 @@ public class Dashboard {
 
 	private static ConnectionPool db;
 	private static HttpServer server;
-	private static Resource config;
 	private static HashMap<String, Resource> resources = new HashMap<>();
 	private static String resourcesModified;
+	private static Resource config;
 	private static long configModified = 0;
 	private static int maxTagValues;
 
@@ -133,17 +132,11 @@ public class Dashboard {
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
-	private static void error400(HttpExchange exchange) {
+	private static void response(HttpExchange exchange, int status) {
 		try {
-			exchange.sendResponseHeaders(400, -1);
+			exchange.sendResponseHeaders(status, -1);
 		} catch (IOException e_) {/**/}
-	}
-
-	private static void error500(HttpExchange exchange, Throwable e) {
-		Log.e(e);
-		try {
-			exchange.sendResponseHeaders(500, -1);
-		} catch (IOException e_) {/**/}
+		exchange.close();
 	}
 
 	private static void copyHeader(HttpExchange exchange,
@@ -154,13 +147,12 @@ public class Dashboard {
 		}
 	}
 
-	private static void outputJson(HttpExchange exchange, Object data) {
+	private static void response(HttpExchange exchange, Object data) {
 		exchange.getRequestHeaders().getFirst("UTF-8");
-		ByteArrayQueue body = new ByteArrayQueue();
-		// String callback = exchange.getParameter("_callback");
-		String callback = null;
 		Headers headers = exchange.getResponseHeaders();
+		headers.set("Content-Encoding", "gzip");
 		String out;
+		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
 			copyHeader(exchange, "Access-Control-Request-Methods",
@@ -174,52 +166,73 @@ public class Dashboard {
 			headers.set("Content-Type", "text/javascript; charset=utf-8");
 			out = callback + "(" + JSONObject.wrap(data) + ");";
 		}
-		body.add(out.getBytes(StandardCharsets.UTF_8));
+		ByteArrayQueue body = new ByteArrayQueue();
+		try (GZIPOutputStream gzip = new
+				GZIPOutputStream(body.getOutputStream())) {
+			gzip.write(out.getBytes(StandardCharsets.UTF_8));
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
 		try {
 			exchange.sendResponseHeaders(200, body.length());
 			exchange.getResponseBody().write(body.getBytes());
-		} catch (IOException e) {
-			Log.w(e.getMessage());
+		} catch (IOException e) {/**/}
+		exchange.close();
+	}
+
+	private static HashMap<String, String> getParameters(URI uri) {
+		HashMap<String, String> parameters = new HashMap<>();
+		String query = uri.getRawQuery();
+		if (query == null) {
+			return parameters;
 		}
+		for (String pair : query.split("&")) {
+			int eq = pair.indexOf('=');
+			if (eq >= 0) {
+				parameters.put(Strings.decodeUrl(pair.substring(0, eq)),
+						Strings.decodeUrl(pair.substring(eq + 1)));
+			}
+		}
+		return parameters;
 	}
 
 	private static void doService(HttpExchange exchange) {
 		URI uri = exchange.getRequestURI();
 		String path = uri.getPath();
 		if (path == null) {
-			error400(exchange);
+			response(exchange, 400);
 			return;
 		}
 
+		String lastModified = resourcesModified;
 		Resource resource;
-		String lastModified;
 		if (path.equals("/config.js")) {
-			synchronized (config) {
+			synchronized (Dashboard.class) {
 				long now = System.currentTimeMillis();
-				if (now > configModified + Time.MINUTE) {
+				if (now > configModified + Time.SECOND * 10) {
 					configModified = now;
 					ByteArrayQueue baq = new ByteArrayQueue();
-					try (
-						FileInputStream in = new FileInputStream(Conf.
-								getAbsolutePath("../webapp/config.js"));
-						GZIPOutputStream out = new GZIPOutputStream(baq.
-								getOutputStream());
-					) {
-						Streams.copy(in, out);
+					try (FileInputStream in = new FileInputStream(Conf.
+							getAbsolutePath("webapp/config.js"))) {
+						try (GZIPOutputStream out =
+								new GZIPOutputStream(baq.getOutputStream())) {
+							Streams.copy(in, out);
+						}
+						lastModified = format.get().format(new Date(now));
+						config = new Resource();
+						config.mime = "application/javascript";
+						config.body = baq.getBytes();
 					} catch (IOException e) {
 						if (!(e instanceof FileNotFoundException)) {
 							Log.w(e.getMessage());
 						}
-						return;
+						config = resources.get(path);
 					}
-					config.body = baq.getBytes();
 				}
 				resource = config;
-				lastModified = format.get().format(new Date(now));
 			}
 		} else {
 			resource = resources.get(path);
-			lastModified = resourcesModified;
 		}
 
 		if (resource != null) {
@@ -230,24 +243,25 @@ public class Dashboard {
 			try {
 				exchange.sendResponseHeaders(200, resource.body.length);
 				exchange.getResponseBody().write(resource.body);
-			} catch (IOException e) {
-				Log.w(e.getMessage());
-			}
+			} catch (IOException e) {/**/}
+			exchange.close();
 			return;
 		}
 
-		while (!path.isEmpty() && path.charAt(0) == '/') {
-			path = path.substring(1);
+		if (!path.startsWith("/api/")) {
+			response(exchange, 404);
+			return;
 		}
+		path = path.substring(5);
 		int slash = path.indexOf('/');
 		if (slash < 0) {
-			error400(exchange);
+			response(exchange, 400);
 			return;
 		}
 		ToDoubleFunction<MetricValue> method =
 				methodMap.get(path.substring(slash + 1));
 		if (method == null) {
-			error400(exchange);
+			response(exchange, 400);
 			return;
 		}
 		String metricName = path.substring(0, slash);
@@ -256,23 +270,24 @@ public class Dashboard {
 			try {
 				row = db.queryEx(QUERY_TAGS, metricName);
 			} catch (SQLException e) {
-				error500(exchange, e);
+				Log.e(e);
+				response(exchange, 500);
 				return;
 			}
 			if (row == null) {
-				outputJson(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap());
 				return;
 			}
 			byte[] b = row.getBytes("tags");
 			if (b == null) {
-				outputJson(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap());
 				return;
 			}
 			@SuppressWarnings("unchecked")
 			HashMap<String, HashMap<String, MetricValue>> tags =
 					Kryos.deserialize(b, HashMap.class);
 			if (tags == null) {
-				outputJson(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap());
 				return;
 			}
 			JSONObject json = new JSONObject();
@@ -301,7 +316,7 @@ public class Dashboard {
 				}
 				json.put(tagKey, arr);
 			});
-			outputJson(exchange, json);
+			response(exchange, json);
 			return;
 		}
 
@@ -313,33 +328,30 @@ public class Dashboard {
 		try {
 			Row row = db.queryEx(QUERY_ID, metricName);
 			if (row == null) {
-				outputJson(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap());
 				return;
 			}
 			id = row.getInt("id");
 		} catch (SQLException e) {
-			error500(exchange, e);
+			Log.e(e);
+			response(exchange, 500);
 			return;
 		}
 
 		// Query Condition
-		HashMap<String, String> query = new HashMap<>();
-		Enumeration<String> names = req.getParameterNames();
-		while (names.hasMoreElements()) {
-			String name = names.nextElement();
-			if (!name.isEmpty() && name.charAt(0) != '_') {
-				query.put(name, req.getParameter(name));
-			}
-		}
+		HashMap<String, String> query = getParameters(uri);
+		String end_ = query.remove("_end");
+		String interval_ = query.remove("_interval");
+		String length_ = query.remove("_length");
+		String groupBy_ = query.remove("_group_by");
+		query.remove("_r");
 		// Other Query Parameters
-		int end = Numbers.parseInt(req.getParameter("_end"),
-				(int) (System.currentTimeMillis() /
+		int end = Numbers.parseInt(end_, (int) (System.currentTimeMillis() /
 				(quarter ? Time.MINUTE / 15 : Time.MINUTE)));
-		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
-		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
+		int interval = Numbers.parseInt(interval_, 1, 1440);
+		int length = Numbers.parseInt(length_, 1, 1024);
 		int begin = end - interval * length + 1;
 
-		String groupBy_ = req.getParameter("_group_by");
 		Function<HashMap<String, String>, String> groupBy = groupBy_ == null ?
 				tags -> "_" : tags -> {
 			String value = tags.get(groupBy_);
@@ -386,7 +398,8 @@ public class Dashboard {
 				}
 			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
 		} catch (SQLException e) {
-			error500(exchange, e);
+			Log.e(e);
+			response(exchange, 500);
 			return;
 		}
 		// Generate Data
@@ -405,12 +418,12 @@ public class Dashboard {
 			values[key.index] = method.applyAsDouble(value);
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
-			outputJson(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
+			response(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
 					Comparator.comparingDouble(entry ->
 					DoubleStream.of((double[]) entry.getValue()).sum()),
 					maxTagValues)));
 		} else {
-			outputJson(exchange, data);
+			response(exchange, data);
 		}
 	}
 
@@ -425,24 +438,10 @@ public class Dashboard {
 			return;
 		}
 		
-		try {
-			server = HttpServer.create(new InetSocketAddress(host, port), 50);
-			server.createContext("/", Dashboard::doService);
-			server.start();
-			Log.i("Metric Dashboard Started on " + host + ":" + port);
-		} catch (IOException e) {
-			Log.w("Unable to start HttpServer (" +
-					host + ":" + port + "): " + e.getMessage());
-			server = null;
-			return;
-		}
-
-		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
-		for (String file : RESOURCES) {
-			String path = "/webapps/" + file;
+		for (String path : RESOURCES) {
 			ByteArrayQueue baq = new ByteArrayQueue();
 			try (
-				InputStream in = Dashboard.class.getResourceAsStream(path);
+				InputStream in = Dashboard.class.getResourceAsStream("/webapp" + path);
 				GZIPOutputStream out = new GZIPOutputStream(baq.getOutputStream());
 			) {
 				Streams.copy(in, out);
@@ -455,9 +454,28 @@ public class Dashboard {
 					path.endsWith(".html") ? "text/html" :
 					path.endsWith(".js") ? "application/javascript" :
 					"application/octet-stream";
+			resource.body = baq.getBytes();
 			resources.put(path, resource);
 		}
+		Resource index = resources.get("/index.html");
+		if (index != null) {
+			resources.put("/", index);
+		}
 		resourcesModified = format.get().format(new Date());
+		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
+
+		try {
+			server = HttpServer.create(new InetSocketAddress(host, port), 50);
+			server.createContext("/", Dashboard::doService);
+			server.start();
+		} catch (IOException e) {
+			Log.w("Unable to start HttpServer (" +
+					host + ":" + port + "): " + e.getMessage());
+			server = null;
+			return;
+		}
+
+		Log.i("Metric Dashboard Started on " + host + ":" + port);
 	}
 
 	public static void shutdown() {

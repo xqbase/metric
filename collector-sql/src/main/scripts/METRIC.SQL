@@ -8,6 +8,7 @@ CREATE TABLE metric_name (
 	UNIQUE (name));
 
 CREATE TABLE metric_minute (
+	pk BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
@@ -19,6 +20,7 @@ CREATE TABLE metric_minute (
 	KEY (id, time));
 
 CREATE TABLE metric_quarter (
+	pk BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,

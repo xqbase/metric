@@ -376,6 +376,7 @@ public class Collector {
 					getProperty("driver")).newInstance();
 			DB = new ConnectionPool(driver, p.getProperty("url", ""),
 					p.getProperty("user"), p.getProperty("password"));
+			Dashboard.startup(DB);
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				try {
@@ -515,6 +516,7 @@ public class Collector {
 			executor.execute(minutely);
 		}
 		Runnables.shutdown(executor);
+		Dashboard.shutdown();
 		if (DB != null) {
 			DB.close();
 		}
