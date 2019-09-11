@@ -80,17 +80,17 @@
 		<dependency>
 			<groupId>com.esotericsoftware</groupId>
 			<artifactId>kryo</artifactId>
-			<version>3.0.3</version>
+			<version>4.0.2</version>
 		</dependency>
 		<dependency>
 			<groupId>org.json</groupId>
 			<artifactId>json</artifactId>
-			<version>20180813</version>
+			<version>20190722</version>
 		</dependency>
 		<dependency>
 			<groupId>p6spy</groupId>
 			<artifactId>p6spy</artifactId>
-			<version>3.0.0</version>
+			<version>3.8.5</version>
 		</dependency>
 
 		<dependency>

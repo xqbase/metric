@@ -399,8 +399,6 @@ public class Collector {
 				for (String s : sqls) {
 					String sql = s.trim();
 					if (!sql.isEmpty()) {
-						// SQLite uses "AUTOINCREMENT"
-						sql = sql.replace("AUTO_INCREMENT", "AUTOINCREMENT");
 						try {
 							DB.update(sql);
 						} catch (SQLException e) {

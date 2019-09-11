@@ -1,5 +1,5 @@
 CREATE TABLE metric_name (
-	id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	name VARCHAR(64) NOT NULL,
 	minute_size INTEGER NOT NULL DEFAULT 0,
 	quarter_size INTEGER NOT NULL DEFAULT 0,
@@ -8,6 +8,7 @@ CREATE TABLE metric_name (
 	UNIQUE (name));
 
 CREATE TABLE metric_minute (
+	pk BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
@@ -15,11 +16,11 @@ CREATE TABLE metric_minute (
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
-	tags LONGBLOB NOT NULL);
-
-CREATE INDEX metric_minute_id_time ON metric_minute (id, time);
+	tags LONGBLOB NOT NULL,
+	KEY (id, time));
 
 CREATE TABLE metric_quarter (
+	pk BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
@@ -27,14 +28,12 @@ CREATE TABLE metric_quarter (
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
-	tags LONGBLOB NOT NULL);
-
-CREATE INDEX metric_quarter_id_time ON metric_quarter (id, time);
+	tags LONGBLOB NOT NULL,
+	KEY (id, time));
 
 CREATE TABLE metric_tags_quarter (
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	tags LONGBLOB NOT NULL,
-	PRIMARY KEY (id, time));
-
-CREATE INDEX metric_tags_quarter_time ON metric_tags_quarter (time);
+	PRIMARY KEY (id, time),
+	KEY (time));
