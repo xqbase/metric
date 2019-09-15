@@ -92,10 +92,10 @@ public class Dashboard {
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+			"SELECT time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_QUARTER =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
+			"SELECT time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
 			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private static ThreadLocal<SimpleDateFormat> format =

@@ -62,9 +62,9 @@ public class Collector {
 	private static final String QUERY_NAME =
 			"SELECT id, name, minute_size, quarter_size, aggregated_time FROM metric_name";
 	private static final String INSERT_MINUTE = "INSERT INTO metric_minute " +
-			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
+			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags) VALUES ";
 	private static final String INSERT_QUARTER = "INSERT INTO metric_quarter " +
-			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
+			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min,\" \"_sqr\", tags) VALUES ";
 	private static final String INCREMENT_MINUTE =
 			"UPDATE metric_name SET minute_size = minute_size + ? WHERE id = ?";
 	private static final String INCREMENT_QUARTER =
@@ -81,7 +81,7 @@ public class Collector {
 	private static final String DELETE_QUARTER =
 			"DELETE FROM metric_quarter WHERE id = ? AND time <= ?";
 	private static final String AGGREGATE_FROM =
-			"SELECT _count, _sum, _max, _min, _sqr, tags " +
+			"SELECT \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_TO =
 			"INSERT INTO metric_tags_quarter (id, time, tags) VALUES (?, ?, ?)";
@@ -379,13 +379,13 @@ public class Collector {
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
-			int sqliteColon = url.indexOf(":sqlite:");
+			int sqliteColon = url.indexOf(":derby:");
 			if (sqliteColon > 0) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
-				String dataFile = dataDir + "/metric.db";
+				String dataFile = dataDir + "/metric";
 				createTable = !new File(dataFile).exists();
-				url = url.substring(0, sqliteColon + 8) + "file:///" + dataFile;
+				url = url.substring(0, sqliteColon + 7) + dataFile.replace('\\', '/') + (createTable ? ";create=true" : "");
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
