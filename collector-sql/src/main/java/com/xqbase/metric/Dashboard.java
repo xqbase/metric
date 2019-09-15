@@ -37,7 +37,6 @@ import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
-import com.xqbase.util.Streams;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 import com.xqbase.util.db.ConnectionPool;
@@ -45,7 +44,7 @@ import com.xqbase.util.db.Row;
 
 class Resource {
 	String mime;
-	byte[] body;
+	byte[] body, gzip;
 }
 
 class GroupKey {
@@ -147,10 +146,9 @@ public class Dashboard {
 		}
 	}
 
-	private static void response(HttpExchange exchange, Object data) {
-		exchange.getRequestHeaders().getFirst("UTF-8");
+	private static void response(HttpExchange exchange,
+			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		headers.set("Content-Encoding", "gzip");
 		String out;
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
@@ -166,17 +164,26 @@ public class Dashboard {
 			headers.set("Content-Type", "text/javascript; charset=utf-8");
 			out = callback + "(" + JSONObject.wrap(data) + ");";
 		}
-		ByteArrayQueue body = new ByteArrayQueue();
-		try (GZIPOutputStream gzip = new
-				GZIPOutputStream(body.getOutputStream())) {
-			gzip.write(out.getBytes(StandardCharsets.UTF_8));
-		} catch (IOException e) {
-			throw new RuntimeException(e);
+		byte[] body = out.getBytes(StandardCharsets.UTF_8);
+		if (acceptGzip && body.length > 1024) {
+			headers.set("Content-Encoding", "gzip");
+			ByteArrayQueue gzipBody = new ByteArrayQueue();
+			try (GZIPOutputStream gzip = new
+					GZIPOutputStream(gzipBody.getOutputStream())) {
+				gzip.write(body);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+			try {
+				exchange.sendResponseHeaders(200, gzipBody.length());
+				gzipBody.writeTo(exchange.getResponseBody());
+			} catch (IOException e) {/**/}
+		} else {
+			try {
+				exchange.sendResponseHeaders(200, body.length);
+				exchange.getResponseBody().write(body);
+			} catch (IOException e) {/**/}
 		}
-		try {
-			exchange.sendResponseHeaders(200, body.length());
-			exchange.getResponseBody().write(body.getBytes());
-		} catch (IOException e) {/**/}
 		exchange.close();
 	}
 
@@ -204,6 +211,17 @@ public class Dashboard {
 			return;
 		}
 
+		boolean acceptGzip = false;
+		String encodings = exchange.getRequestHeaders().getFirst("Accept-Encoding");
+		if (encodings != null) {
+			for (String encoding : encodings.split(",")) {
+				if (encoding.trim().toLowerCase().equals("gzip")) {
+					acceptGzip = true;
+					break;
+				}
+			}
+		}
+
 		String lastModified = resourcesModified;
 		Resource resource;
 		if (path.equals("/config.js")) {
@@ -211,17 +229,20 @@ public class Dashboard {
 				long now = System.currentTimeMillis();
 				if (now > configModified + Time.SECOND * 10) {
 					configModified = now;
-					ByteArrayQueue baq = new ByteArrayQueue();
+					config = new Resource();
+					config.mime = "application/javascript";
+					ByteArrayQueue body = new ByteArrayQueue();
+					ByteArrayQueue gzip = new ByteArrayQueue();
 					try (FileInputStream in = new FileInputStream(Conf.
 							getAbsolutePath("webapp/config.js"))) {
+						body.readFrom(in);
+						config.body = body.getBytes();
 						try (GZIPOutputStream out =
-								new GZIPOutputStream(baq.getOutputStream())) {
-							Streams.copy(in, out);
+								new GZIPOutputStream(gzip.getOutputStream())) {
+							body.writeTo(out);
 						}
+						config.gzip = gzip.getBytes();
 						lastModified = format.get().format(new Date(now));
-						config = new Resource();
-						config.mime = "application/javascript";
-						config.body = baq.getBytes();
 					} catch (IOException e) {
 						if (!(e instanceof FileNotFoundException)) {
 							Log.w(e.getMessage());
@@ -229,20 +250,26 @@ public class Dashboard {
 						config = resources.get(path);
 					}
 				}
-				resource = config;
 			}
+			resource = config;
 		} else {
 			resource = resources.get(path);
 		}
 
 		if (resource != null) {
 			Headers headers = exchange.getResponseHeaders();
-			headers.set("Content-Encoding", "gzip");
+			byte[] body;
+			if (acceptGzip) {
+				headers.set("Content-Encoding", "gzip");
+				body = resource.gzip;
+			} else {
+				body = resource.body;
+			}
 			headers.set("Content-Type", resource.mime);
 			headers.set("Last-Modified", lastModified);
 			try {
-				exchange.sendResponseHeaders(200, resource.body.length);
-				exchange.getResponseBody().write(resource.body);
+				exchange.sendResponseHeaders(200, body.length);
+				exchange.getResponseBody().write(body);
 			} catch (IOException e) {/**/}
 			exchange.close();
 			return;
@@ -275,19 +302,19 @@ public class Dashboard {
 				return;
 			}
 			if (row == null) {
-				response(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
 			byte[] b = row.getBytes("tags");
 			if (b == null) {
-				response(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
 			@SuppressWarnings("unchecked")
 			HashMap<String, HashMap<String, MetricValue>> tags =
 					Kryos.deserialize(b, HashMap.class);
 			if (tags == null) {
-				response(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
 			JSONObject json = new JSONObject();
@@ -316,7 +343,7 @@ public class Dashboard {
 				}
 				json.put(tagKey, arr);
 			});
-			response(exchange, json);
+			response(exchange, json, acceptGzip);
 			return;
 		}
 
@@ -328,7 +355,7 @@ public class Dashboard {
 		try {
 			Row row = db.queryEx(QUERY_ID, metricName);
 			if (row == null) {
-				response(exchange, Collections.emptyMap());
+				response(exchange, Collections.emptyMap(), acceptGzip);
 				return;
 			}
 			id = row.getInt("id");
@@ -421,9 +448,9 @@ public class Dashboard {
 			response(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
 					Comparator.comparingDouble(entry ->
 					DoubleStream.of((double[]) entry.getValue()).sum()),
-					maxTagValues)));
+					maxTagValues)), acceptGzip);
 		} else {
-			response(exchange, data);
+			response(exchange, data, acceptGzip);
 		}
 	}
 
@@ -439,23 +466,27 @@ public class Dashboard {
 		}
 		
 		for (String path : RESOURCES) {
-			ByteArrayQueue baq = new ByteArrayQueue();
-			try (
-				InputStream in = Dashboard.class.getResourceAsStream("/webapp" + path);
-				GZIPOutputStream out = new GZIPOutputStream(baq.getOutputStream());
-			) {
-				Streams.copy(in, out);
-			} catch (IOException e) {
-				Log.w(e.getMessage());
-				continue;
-			}
 			Resource resource = new Resource();
 			resource.mime = path.endsWith(".css") ? "text/css" :
 					path.endsWith(".html") ? "text/html" :
 					path.endsWith(".js") ? "application/javascript" :
 					"application/octet-stream";
-			resource.body = baq.getBytes();
-			resources.put(path, resource);
+			ByteArrayQueue body = new ByteArrayQueue();
+			ByteArrayQueue gzip = new ByteArrayQueue();
+			try (InputStream in = Dashboard.class.
+					getResourceAsStream("/webapp" + path)) {
+				body.readFrom(in);
+				resource.body = body.getBytes();
+				try (GZIPOutputStream out = new
+						GZIPOutputStream(gzip.getOutputStream())) {
+					body.writeTo(out);
+				}
+				resource.gzip = gzip.getBytes();
+				resources.put(path, resource);
+			} catch (IOException e) {
+				Log.w(e.getMessage());
+				continue;
+			}
 		}
 		Resource index = resources.get("/index.html");
 		if (index != null) {

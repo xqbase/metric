@@ -64,7 +64,7 @@ public class Collector {
 	private static final String INSERT_MINUTE = "INSERT INTO metric_minute " +
 			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags) VALUES ";
 	private static final String INSERT_QUARTER = "INSERT INTO metric_quarter " +
-			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min,\" \"_sqr\", tags) VALUES ";
+			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags) VALUES ";
 	private static final String INCREMENT_MINUTE =
 			"UPDATE metric_name SET minute_size = minute_size + ? WHERE id = ?";
 	private static final String INCREMENT_QUARTER =
