@@ -8,9 +8,9 @@ var DASHBOARD_API = "api/";
 
 var INDEX_NAV = [
 	// [Title, Metric Name, Method, Group By, Query, Interval, Until Midnight, Active],
-	["Size", "metric.size", "max", "name", "", 15, false, true],
-	["Rows", "metric.rows", "sum", "name", "", 15],
-	["Throughput", "metric.throughput", "sum", "remote_addr", "", 15],
-	["Tag Values", "metric.tags.values", "sum", "name", "", 15],
-	["Tag Combinations", "metric.tags.combinations", "sum", "name", "", 15],
+	["Size", "metric.size", "max", "name", "", 1],
+	["Rows", "metric.rows", "sum", "name", "", 1],
+	["Throughput", "metric.throughput", "sum", "remote_addr", "", 1],
+	["Tag Values", "metric.tags.values", "sum", "name", "", 1],
+	["Tag Combinations", "metric.tags.combinations", "sum", "name", "", 1],
 ];
