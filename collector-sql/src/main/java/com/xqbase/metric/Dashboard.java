@@ -210,6 +210,10 @@ public class Dashboard {
 			response(exchange, 400);
 			return;
 		}
+		if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+			response(exchange, 405);
+			return;
+		}
 
 		boolean acceptGzip = false;
 		String encodings = exchange.getRequestHeaders().getFirst("Accept-Encoding");

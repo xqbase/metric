@@ -379,13 +379,14 @@ public class Collector {
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
-			int sqliteColon = url.indexOf(":derby:");
-			if (sqliteColon > 0) {
+			int colon = url.indexOf(":derby:");
+			if (colon > 0) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
 				String dataFile = dataDir + "/metric";
 				createTable = !new File(dataFile).exists();
-				url = url.substring(0, sqliteColon + 7) + dataFile.replace('\\', '/') + (createTable ? ";create=true" : "");
+				url = url.substring(0, colon + 7) + dataFile.replace('\\', '/') +
+						(createTable ? ";create=true" : "");
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
