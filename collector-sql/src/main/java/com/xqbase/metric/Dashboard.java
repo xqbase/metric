@@ -113,6 +113,7 @@ public class Dashboard {
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
+	private static String aggregateMinuteSql, aggregateQuarterSql;
 	private static ConnectionPool db;
 	private static HttpServer server;
 	private static HashMap<String, Resource> resources = new HashMap<>();
@@ -427,7 +428,7 @@ public class Dashboard {
 				} else {
 					value.add(newValue);
 				}
-			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
+			}, quarter ? aggregateQuarterSql : aggregateMinuteSql, id, begin, end);
 		} catch (SQLException e) {
 			Log.e(e);
 			response(exchange, 500);
@@ -458,8 +459,16 @@ public class Dashboard {
 		}
 	}
 
-	public static void startup(ConnectionPool db_) {
+	public static void startup(ConnectionPool db_, boolean derby) {
 		db = db_;
+		if (derby) {
+			aggregateMinuteSql = AGGREGATE_MINUTE;
+			aggregateQuarterSql = AGGREGATE_QUARTER;
+		} else {
+			aggregateMinuteSql = AGGREGATE_MINUTE.replace("\"", "");
+			aggregateQuarterSql = AGGREGATE_QUARTER.replace("\"", "");
+		}
+
 		Properties p = Conf.load("Dashboard");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		String host = p.getProperty("host");

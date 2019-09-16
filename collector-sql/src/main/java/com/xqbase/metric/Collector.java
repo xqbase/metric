@@ -125,7 +125,8 @@ public class Collector {
 		}
 		Integer id_ = Integer.valueOf(id);
 		ArrayList<Object> ins = new ArrayList<>();
-		StringBuilder sb = new StringBuilder(quarter ? INSERT_QUARTER : INSERT_MINUTE);
+		StringBuilder sb = new StringBuilder(quarter ?
+				insertQuarterSql : insertMinuteSql);
 		for (MetricRow row : rows) {
 			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
 			ins.add(id_);
@@ -141,7 +142,8 @@ public class Collector {
 		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, rows.size(), id);
 	}
 
-	private static void insert(HashMap<String, ArrayList<MetricRow>> rowsMap) throws SQLException {
+	private static void insert(HashMap<String, ArrayList<MetricRow>>
+			rowsMap) throws SQLException {
 		for (Map.Entry<String, ArrayList<MetricRow>> entry : rowsMap.entrySet()) {
 			insert(entry.getKey(), entry.getValue(), false);
 		}
@@ -149,6 +151,7 @@ public class Collector {
 
 	private static Service service = new Service();
 	private static ConnectionPool DB = null;
+	private static String insertMinuteSql, insertQuarterSql, aggregateFromSql;
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
@@ -283,7 +286,7 @@ public class Collector {
 					} else {
 						value.add(newValue);
 					}
-				}, AGGREGATE_FROM, name.id, i * 15 - 14, i * 15);
+				}, aggregateFromSql, name.id, i * 15 - 14, i * 15);
 				if (result.isEmpty()) {
 					continue;
 				}
@@ -380,13 +383,20 @@ public class Collector {
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
 			int colon = url.indexOf(":derby:");
-			if (colon > 0) {
+			if (colon >= 0) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
 				String dataFile = dataDir + "/metric";
 				createTable = !new File(dataFile).exists();
 				url = url.substring(0, colon + 7) + dataFile.replace('\\', '/') +
 						(createTable ? ";create=true" : "");
+				insertMinuteSql = INSERT_MINUTE;
+				insertQuarterSql = INSERT_QUARTER;
+				aggregateFromSql = AGGREGATE_FROM;
+			} else {
+				insertMinuteSql = INSERT_MINUTE.replace("\"", "");
+				insertQuarterSql = INSERT_QUARTER.replace("\"", "");
+				aggregateFromSql = AGGREGATE_FROM.replace("\"", "");
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
@@ -408,7 +418,7 @@ public class Collector {
 					}
 				}
 			}
-			Dashboard.startup(DB);
+			Dashboard.startup(DB, colon >= 0);
 
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
