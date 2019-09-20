@@ -11,6 +11,6 @@ var INDEX_NAV = [
 	["Size", "metric.size", "max", "name", "", 1],
 	["Rows", "metric.rows", "sum", "name", "", 1],
 	["Throughput", "metric.throughput", "sum", "remote_addr", "", 1],
-	["Tag Values", "metric.tags.values", "sum", "name", "", 1],
-	["Tag Combinations", "metric.tags.combinations", "sum", "name", "", 1],
+	["Tag Values", "metric.tags.values", "sum", "name", "", 15],
+	["Tag Combinations", "metric.tags.combinations", "sum", "name", "", 15],
 ];
