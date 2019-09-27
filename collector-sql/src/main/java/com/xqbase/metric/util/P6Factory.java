@@ -7,7 +7,6 @@ import com.p6spy.engine.common.PreparedStatementInformation;
 import com.p6spy.engine.common.StatementInformation;
 import com.p6spy.engine.event.JdbcEventListener;
 import com.p6spy.engine.event.SimpleJdbcEventListener;
-import com.p6spy.engine.logging.P6LogOptions;
 import com.p6spy.engine.spy.P6LoadableOptions;
 import com.p6spy.engine.spy.P6SpyFactory;
 import com.p6spy.engine.spy.option.P6OptionsRepository;
@@ -15,18 +14,6 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.util.Log;
 
 public class P6Factory extends P6SpyFactory {
-	public static class P6LogFactory implements com.p6spy.engine.spy.P6Factory {
-		@Override
-		public P6LoadableOptions getOptions(P6OptionsRepository optionsRepository) {
-			return new P6LogOptions(optionsRepository);
-		}
-
-		@Override
-		public JdbcEventListener getJdbcEventListener() {
-			return new SimpleJdbcEventListener() {/**/};
-		}
-	}
-
 	private static final int SLOW_THRESHOLD = 200;
 
 	private static String removeQuote(String s) {
