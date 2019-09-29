@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -106,6 +107,27 @@ public class Collector {
 		rows.add(row);
 	}
 
+	private static int MAX_PARAMS = 256;
+
+	private static void insert(Integer id, List<MetricRow> rows,
+			boolean quarter) throws SQLException {
+		ArrayList<Object> ins = new ArrayList<>();
+		StringBuilder sb = new StringBuilder(quarter ?
+				insertQuarterSql : insertMinuteSql);
+		for (MetricRow row : rows) {
+			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
+			ins.add(id);
+			ins.add(Integer.valueOf(row.time));
+			ins.add(Long.valueOf(row.count));
+			ins.add(Double.valueOf(row.sum));
+			ins.add(Double.valueOf(row.max));
+			ins.add(Double.valueOf(row.min));
+			ins.add(Double.valueOf(row.sqr));
+			ins.add(Kryos.serialize(row.tags));
+		}
+		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
+	}
+
 	private static void insert(String name, ArrayList<MetricRow> rows,
 			boolean quarter) throws SQLException {
 		if (rows.isEmpty()) {
@@ -124,21 +146,14 @@ public class Collector {
 			id = idRow.getInt("id");
 		}
 		Integer id_ = Integer.valueOf(id);
-		ArrayList<Object> ins = new ArrayList<>();
-		StringBuilder sb = new StringBuilder(quarter ?
-				insertQuarterSql : insertMinuteSql);
-		for (MetricRow row : rows) {
-			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
-			ins.add(id_);
-			ins.add(Integer.valueOf(row.time));
-			ins.add(Long.valueOf(row.count));
-			ins.add(Double.valueOf(row.sum));
-			ins.add(Double.valueOf(row.max));
-			ins.add(Double.valueOf(row.min));
-			ins.add(Double.valueOf(row.sqr));
-			ins.add(Kryos.serialize(row.tags));
+		int len1 = rows.size();
+		int len0 = len1 / MAX_PARAMS * MAX_PARAMS;
+		for (int off = 0; off < len0; off += MAX_PARAMS) {
+			insert(id_, rows.subList(off, off + MAX_PARAMS), quarter);
 		}
-		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
+		if (len0 < len1) {
+			insert(id_, rows.subList(len0, len1), quarter);
+		}
 		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, rows.size(), id);
 	}
 

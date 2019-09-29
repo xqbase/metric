@@ -14,7 +14,7 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.util.Log;
 
 public class P6Factory extends P6SpyFactory {
-	private static final int SLOW_THRESHOLD = 200;
+	private static final int SLOW_THRESHOLD = 1000;
 
 	private static String removeQuote(String s) {
 		int len = s.length();
