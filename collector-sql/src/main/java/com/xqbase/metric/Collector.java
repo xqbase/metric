@@ -397,24 +397,20 @@ public class Collector {
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
-			int colon = url.indexOf(":derby:");
+			int colon = url.indexOf(":h2:");
 			if (colon >= 0) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
-				String dataFile = dataDir + "/metric";
-				createTable = !new File(dataFile).exists();
-				url = url.substring(0, colon + 7) + dataFile.replace('\\', '/') +
-						(createTable ? ";create=true" : "");
-				insertMinuteSql = INSERT_MINUTE;
-				insertQuarterSql = INSERT_QUARTER;
-				aggregateFromSql = AGGREGATE_FROM;
-			} else {
-				insertMinuteSql = INSERT_MINUTE.replace("\"", "");
-				insertQuarterSql = INSERT_QUARTER.replace("\"", "");
-				aggregateFromSql = AGGREGATE_FROM.replace("\"", "");
+				createTable = !new File(dataDir + "/metric.h2.db").exists();
+				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
+						"/metric;mode=mysql;mv_store=false;cache_size=0";
 			}
+			insertMinuteSql = INSERT_MINUTE.replace("\"", "");
+			insertQuarterSql = INSERT_QUARTER.replace("\"", "");
+			aggregateFromSql = AGGREGATE_FROM.replace("\"", "");
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
+			DB.setFetchSize(256);
 			if (createTable) {
 				ByteArrayQueue baq = new ByteArrayQueue();
 				try (InputStream in = Collector.class.
@@ -433,7 +429,7 @@ public class Collector {
 					}
 				}
 			}
-			Dashboard.startup(DB, colon >= 0);
+			Dashboard.startup(DB, false);
 
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
