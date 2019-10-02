@@ -401,16 +401,15 @@ public class Collector {
 			if (colon >= 0) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
-				createTable = !new File(dataDir + "/metric.h2.db").exists();
+				createTable = !new File(dataDir + "/metric.mv.db").exists();
 				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
-						"/metric;mode=mysql;mv_store=false;cache_size=0";
+						"/metric;mode=mysql;cache_size=0";
 			}
 			insertMinuteSql = INSERT_MINUTE.replace("\"", "");
 			insertQuarterSql = INSERT_QUARTER.replace("\"", "");
 			aggregateFromSql = AGGREGATE_FROM.replace("\"", "");
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
-			DB.setFetchSize(256);
 			if (createTable) {
 				ByteArrayQueue baq = new ByteArrayQueue();
 				try (InputStream in = Collector.class.
