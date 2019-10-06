@@ -64,7 +64,7 @@ public class P6Factory extends P6SpyFactory {
 			space = into < 0 ? space + 1 : into + 6;
 			break;
 		default:
-			Log.w("Unknown Command " + cmd + ": " + sql);
+			Log.i("DDL or DCL: " + sql);
 			return;
 		}
 
