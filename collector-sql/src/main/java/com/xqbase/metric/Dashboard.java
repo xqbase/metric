@@ -91,10 +91,10 @@ public class Dashboard {
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
-			"SELECT time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
+			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_QUARTER =
-			"SELECT time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
+			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
 			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private static ThreadLocal<SimpleDateFormat> format =
@@ -113,7 +113,6 @@ public class Dashboard {
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
-	private static String aggregateMinuteSql, aggregateQuarterSql;
 	private static ConnectionPool db;
 	private static HttpServer server;
 	private static HashMap<String, Resource> resources = new HashMap<>();
@@ -428,7 +427,7 @@ public class Dashboard {
 				} else {
 					value.add(newValue);
 				}
-			}, quarter ? aggregateQuarterSql : aggregateMinuteSql, id, begin, end);
+			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
 		} catch (SQLException e) {
 			Log.e(e);
 			response(exchange, 500);
@@ -459,15 +458,8 @@ public class Dashboard {
 		}
 	}
 
-	public static void startup(ConnectionPool db_, boolean derby) {
+	public static void startup(ConnectionPool db_) {
 		db = db_;
-		if (derby) {
-			aggregateMinuteSql = AGGREGATE_MINUTE;
-			aggregateQuarterSql = AGGREGATE_QUARTER;
-		} else {
-			aggregateMinuteSql = AGGREGATE_MINUTE.replace("\"", "");
-			aggregateQuarterSql = AGGREGATE_QUARTER.replace("\"", "");
-		}
 
 		Properties p = Conf.load("Dashboard");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);

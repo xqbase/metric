@@ -63,9 +63,9 @@ public class Collector {
 	private static final String QUERY_NAME =
 			"SELECT id, name, minute_size, quarter_size, aggregated_time FROM metric_name";
 	private static final String INSERT_MINUTE = "INSERT INTO metric_minute " +
-			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags) VALUES ";
+			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
 	private static final String INSERT_QUARTER = "INSERT INTO metric_quarter " +
-			"(id, time, \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags) VALUES ";
+			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
 	private static final String INCREMENT_MINUTE =
 			"UPDATE metric_name SET minute_size = minute_size + ? WHERE id = ?";
 	private static final String INCREMENT_QUARTER =
@@ -82,7 +82,7 @@ public class Collector {
 	private static final String DELETE_QUARTER =
 			"DELETE FROM metric_quarter WHERE id = ? AND time <= ?";
 	private static final String AGGREGATE_FROM =
-			"SELECT \"_count\", \"_sum\", \"_max\", \"_min\", \"_sqr\", tags " +
+			"SELECT _count, _sum, _max, _min, _sqr, tags " +
 			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_TO =
 			"INSERT INTO metric_tags_quarter (id, time, tags) VALUES (?, ?, ?)";
@@ -113,7 +113,7 @@ public class Collector {
 			boolean quarter) throws SQLException {
 		ArrayList<Object> ins = new ArrayList<>();
 		StringBuilder sb = new StringBuilder(quarter ?
-				insertQuarterSql : insertMinuteSql);
+				INSERT_QUARTER : INSERT_MINUTE);
 		for (MetricRow row : rows) {
 			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
 			ins.add(id);
@@ -166,7 +166,6 @@ public class Collector {
 
 	private static Service service = new Service();
 	private static ConnectionPool DB = null;
-	private static String insertMinuteSql, insertQuarterSql, aggregateFromSql;
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
@@ -301,7 +300,7 @@ public class Collector {
 					} else {
 						value.add(newValue);
 					}
-				}, aggregateFromSql, name.id, i * 15 - 14, i * 15);
+				}, AGGREGATE_FROM, name.id, i * 15 - 14, i * 15);
 				if (result.isEmpty()) {
 					continue;
 				}
@@ -390,6 +389,7 @@ public class Collector {
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("jdbc");
 		Runnable minutely = null;
+		boolean h2 = false;
 		try (DatagramSocket socket = new DatagramSocket(new
 				InetSocketAddress(host, port))) {
 
@@ -399,15 +399,13 @@ public class Collector {
 			String url = p.getProperty("url", "");
 			int colon = url.indexOf(":h2:");
 			if (colon >= 0) {
+				h2 = true;
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
 				createTable = !new File(dataDir + "/metric.mv.db").exists();
 				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
-						"/metric;mode=mysql;cache_size=0";
+						"/metric;mode=mysql;cache_size=0;db_close_on_exit=false";
 			}
-			insertMinuteSql = INSERT_MINUTE.replace("\"", "");
-			insertQuarterSql = INSERT_QUARTER.replace("\"", "");
-			aggregateFromSql = AGGREGATE_FROM.replace("\"", "");
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
 			if (createTable) {
@@ -428,7 +426,7 @@ public class Collector {
 					}
 				}
 			}
-			Dashboard.startup(DB, false);
+			Dashboard.startup(DB);
 
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
@@ -571,6 +569,13 @@ public class Collector {
 		Runnables.shutdown(executor);
 		Dashboard.shutdown();
 		if (DB != null) {
+			if (h2) {
+				try {
+					DB.update("SHUTDOWN");
+				} catch (SQLException e) {
+					Log.w(e.getMessage());
+				}
+			}
 			DB.close();
 		}
 

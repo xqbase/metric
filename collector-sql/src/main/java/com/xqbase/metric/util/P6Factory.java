@@ -40,7 +40,7 @@ public class P6Factory extends P6SpyFactory {
 		}
 		int space = sql.indexOf(' ');
 		if (space < 0) {
-			Log.w("Invalid SQL: " + sql);
+			Log.i("DDL or DCL: " + sql);
 			return;
 		}
 		if (elapsed > SLOW_THRESHOLD) {

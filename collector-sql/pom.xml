@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-collector-sql</artifactId>
-	<version>0.2.10</version>
+	<version>0.2.12</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Collector</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - collector part</description>
