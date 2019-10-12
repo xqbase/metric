@@ -404,7 +404,7 @@ public class Collector {
 				new File(dataDir).mkdir();
 				createTable = !new File(dataDir + "/metric.mv.db").exists();
 				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
-						"/metric;mode=mysql;cache_size=0;db_close_on_exit=false";
+						"/metric;mode=mysql;db_close_on_exit=false";
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
