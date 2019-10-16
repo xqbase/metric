@@ -7,9 +7,7 @@ import com.p6spy.engine.common.PreparedStatementInformation;
 import com.p6spy.engine.common.StatementInformation;
 import com.p6spy.engine.event.JdbcEventListener;
 import com.p6spy.engine.event.SimpleJdbcEventListener;
-import com.p6spy.engine.spy.P6LoadableOptions;
 import com.p6spy.engine.spy.P6SpyFactory;
-import com.p6spy.engine.spy.option.P6OptionsRepository;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.util.Log;
 
@@ -125,11 +123,5 @@ public class P6Factory extends P6SpyFactory {
 						si.getSql(), MILLIS(timeElapsedNanos), 0, e);
 			}
 		};
-	}
-
-	@Override
-	public P6LoadableOptions getOptions(P6OptionsRepository optionsRepository) {
-		// TODO Auto-generated method stub
-		return super.getOptions(optionsRepository);
 	}
 }
