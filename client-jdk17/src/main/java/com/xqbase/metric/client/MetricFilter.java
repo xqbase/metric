@@ -46,6 +46,10 @@ public class MetricFilter implements Filter {
 		return conf.getInitParameter("tags");
 	}
 
+	protected boolean isFrag() {
+		return "true".equals(conf.getInitParameter("frag"));
+	}
+
 	protected String truncatePath(String path) {
 		int slash = path.indexOf('/', 1);
 		return slash < 0 ? path : path.substring(0, slash);
@@ -89,6 +93,8 @@ public class MetricFilter implements Filter {
 				}
 			}
 		}
+		MetricClient.setMaxPacketSize(isFrag() ?
+				MetricClient.MAX_PACKET_SIZE_FRAG : MetricClient.MAX_PACKET_SIZE);
 		MetricClient.startup(addrs.toArray(new InetSocketAddress[0]));
 		monitor = new ManagementMonitor(prefix + ".server", tagMap);
 		timer = new ScheduledThreadPoolExecutor(1);
