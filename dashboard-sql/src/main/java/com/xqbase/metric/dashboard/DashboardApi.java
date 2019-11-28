@@ -50,7 +50,7 @@ class GroupKey {
 			return false;
 		}
 		GroupKey key = (GroupKey) obj;
-		return tag.equals(key.tag) && index == key.index;
+		return index == key.index && tag.equals(key.tag);
 	}
 
 	@Override
