@@ -119,8 +119,7 @@ public class P6Factory extends P6SpyFactory {
 			@Override
 			public void onAfterAnyExecute(StatementInformation si,
 					long timeElapsedNanos, SQLException e) {
-				log(si instanceof PreparedStatementInformation ? si.getSqlWithValues() :
-						si.getSql(), MILLIS(timeElapsedNanos), 0, e);
+				log(si.getSqlWithValues(), MILLIS(timeElapsedNanos), 0, e);
 			}
 		};
 	}
