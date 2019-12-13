@@ -1,5 +1,6 @@
 package com.xqbase.metric.client;
 
+import java.lang.management.BufferPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
@@ -41,6 +42,8 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 	private MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
 	private List<MemoryPoolMXBean> memoryPools =
 			ManagementFactory.getMemoryPoolMXBeans();
+	private List<BufferPoolMXBean> bufferPools =
+			ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
 	private OperatingSystemMXBean os = null;
 	private Map<NotificationBroadcaster, NotificationListener>
 			gcListeners = new HashMap<>();
@@ -125,6 +128,16 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 			long poolUsed = pool.getUsed();
 			put(memoryPoolMB, MB(poolUsed), "type", "used", "name", poolName);
 			long poolMax = pool.getMax();
+			if (poolMax > 0) {
+				put(memoryPoolMB, MB(poolMax), "type", "max", "name", poolName);
+				put(memoryPoolPercent, PERCENT(poolUsed, poolMax), "name", poolName);
+			}
+		}
+		for (BufferPoolMXBean pool : bufferPools) {
+			String poolName = "buffer_" + pool.getName();
+			long poolUsed = pool.getMemoryUsed();
+			put(memoryPoolMB, MB(poolUsed), "type", "used", "name", poolName);
+			long poolMax = pool.getTotalCapacity();
 			if (poolMax > 0) {
 				put(memoryPoolMB, MB(poolMax), "type", "max", "name", poolName);
 				put(memoryPoolPercent, PERCENT(poolUsed, poolMax), "name", poolName);
