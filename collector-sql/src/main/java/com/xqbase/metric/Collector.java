@@ -406,7 +406,7 @@ public class Collector {
 				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
 						"/metric;mode=mysql;lazy_query_execution=1;" +
 						"db_close_delay=-1;db_close_on_exit=false;" +
-						"max_compact_count=40";
+						"max_compact_time=0;max_compact_count=40";
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
