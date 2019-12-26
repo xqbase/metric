@@ -502,7 +502,14 @@ public class Dashboard {
 
 		try {
 			server = HttpServer.create(new InetSocketAddress(host, port), 50);
-			server.createContext("/", Dashboard::doService);
+			server.createContext("/", exchange -> {
+				try {
+					doService(exchange);
+				} catch (Error | RuntimeException e) {
+					Log.e(e);
+					response(exchange, 500);
+				}
+			});
 			server.start();
 		} catch (IOException e) {
 			Log.w("Unable to start HttpServer (" +
