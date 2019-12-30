@@ -1,12 +1,14 @@
 package com.xqbase.metric.common;
 
 public class MetricValue implements Cloneable {
+	private static double __(double d) {
+		return Double.isNaN(d) ? 0 : d;
+	}
+
 	private long count;
 	private double sum, max, min, sqr;
 
-	MetricValue() { /* for Kryo Deserialization */ }
-
-	public MetricValue(long count, double sum, double max, double min, double sqr) {
+	private void set(long count, double sum, double max, double min, double sqr) {
 		this.count = count;
 		this.sum = sum;
 		this.max = max;
@@ -14,18 +16,28 @@ public class MetricValue implements Cloneable {
 		this.sqr = sqr;
 	}
 
+	MetricValue() { /* for Kryo Deserialization */ }
+
+	public MetricValue(long count, double sum, double max, double min, double sqr) {
+		set(count, __(sum), __(max), __(min), __(sqr));
+	}
+
 	public MetricValue(double value) {
-		this(1, value, value, value, value * value);
+		double d = __(value);
+		set(1, d, d, d, d * d);
 	}
 
 	public MetricValue(MetricValue old, double value) {
-		this(old.count + 1, old.sum + value, Math.max(old.max, value),
-				Math.min(old.min, value), old.sqr + value * value);
+		double d = __(value);
+		set(old.count + 1, old.sum + d, Math.max(old.max, d),
+				Math.min(old.min, d), old.sqr + d * d);
 	}
 
 	@Override
 	public MetricValue clone() {
-		return new MetricValue(count, sum, max, min, sqr);
+		MetricValue another = new MetricValue();
+		another.set(count, sum, max, min, sqr);
+		return another;
 	}
 
 	public void add(MetricValue value) {
@@ -57,7 +69,7 @@ public class MetricValue implements Cloneable {
 	}
 
 	public double getAvg() {
-		return sum / count;
+		return count == 0 ? 0 : sum / count;
 	}
 
 	public double getStd() {

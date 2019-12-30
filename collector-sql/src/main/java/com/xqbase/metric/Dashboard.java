@@ -109,6 +109,10 @@ public class Dashboard {
 		}
 	};
 
+	private static double __(double d) {
+		return Double.isFinite(d) ? d : 0;
+	}
+
 	private static HashMap<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
@@ -339,10 +343,10 @@ public class Dashboard {
 					JSONObject obj = new JSONObject();
 					obj.put("_value", tagValue.getKey());
 					obj.put("_count", metric.getCount());
-					obj.put("_sum", metric.getSum());
-					obj.put("_max", metric.getMax());
-					obj.put("_min", metric.getMin());
-					obj.put("_sqr", metric.getSqr());
+					obj.put("_sum", __(metric.getSum()));
+					obj.put("_max", __(metric.getMax()));
+					obj.put("_min", __(metric.getMin()));
+					obj.put("_sqr", __(metric.getSqr()));
 					arr.put(obj);
 				}
 				json.put(tagKey, arr);
@@ -446,7 +450,7 @@ public class Dashboard {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = method.applyAsDouble(value);
+			values[key.index] = __(method.applyAsDouble(value));
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			response(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),

@@ -25,8 +25,6 @@ import java.util.zip.InflaterInputStream;
 
 import org.bson.Document;
 
-import com.mongodb.BasicDBObject;
-import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 import com.mongodb.client.MongoCollection;
@@ -48,14 +46,18 @@ import com.xqbase.util.Time;
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
+	private static double __(double d) {
+		return Double.isNaN(d) ? 0 : d;
+	}
+
 	private static String decode(String s, int limit) {
 		String result = Strings.decodeUrl(s);
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
-	private static void put(HashMap<String, ArrayList<DBObject>> rowsMap,
-			String name, DBObject row) {
-		ArrayList<DBObject> rows = rowsMap.get(name);
+	private static void put(HashMap<String, ArrayList<Document>> rowsMap,
+			String name, Document row) {
+		ArrayList<Document> rows = rowsMap.get(name);
 		if (rows == null) {
 			rows = new ArrayList<>();
 			rowsMap.put(name, rows);
@@ -64,46 +66,45 @@ public class Collector {
 	}
 
 	private static void insert(MongoDatabase db,
-			HashMap<String, ArrayList<DBObject>> rowsMap) {
-		rowsMap.forEach((name, rows) ->
-			db.getCollection(name, DBObject.class).insertMany(rows));
+			HashMap<String, ArrayList<Document>> rowsMap) {
+		rowsMap.forEach((name, rows) -> db.getCollection(name).insertMany(rows));
 	}
 
 	private static boolean isTag(String key) {
 		return !key.isEmpty() && key.charAt(0) != '_';
 	}
 
-	private static int getInt(DBObject row, String key) {
+	private static int getInt(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof Number ? ((Number) value).intValue() : 0;
 	}
 
-	private static long getLong(DBObject row, String key) {
+	private static long getLong(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof Number ? ((Number) value).longValue() : 0;
 	}
 
-	private static double getDouble(DBObject row, String key) {
+	private static double getDouble(Document row, String key) {
 		Object value = row.get(key);
 		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
 		return Double.isFinite(d) ? d : 0;
 	}
 
-	private static String getString(DBObject row, String key) {
+	private static String getString(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof String ? (String) value : "_";
 	}
 
-	private static List<?> getList(DBObject row, String key) {
+	private static List<?> getList(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof List ? (List<?>) value : Collections.emptyList();
 	}
 
-	private static BasicDBObject __(String key, Object value) {
-		return new BasicDBObject(key, value);
+	private static Document __(String key, Object value) {
+		return new Document(key, value);
 	}
 
-	private static final BasicDBObject
+	private static final Document
 			INDEX_MINUTE = __("_minute", Integer.valueOf(1)),
 			INDEX_QUARTER = __("_quarter", Integer.valueOf(1)),
 			INDEX_NAME = __("_name", Integer.valueOf(1));
@@ -114,15 +115,14 @@ public class Collector {
 			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
-	private static BasicDBObject row(Map<String, String> tagMap, String type,
+	private static Document row(Map<String, String> tagMap, String type,
 			int now, long count, double sum, double max, double min, double sqr) {
-		BasicDBObject row;
+		Document row = new Document();
 		if (maxTags > 0 && tagMap.size() > maxTags) {
-			row = new BasicDBObject();
 			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
 					Comparator.comparing(Map.Entry::getKey), maxTags), row::put);
 		} else {
-			row = new BasicDBObject(tagMap);
+			row.putAll(tagMap);
 		}
 		if (type != null) {
 			row.put(type, Integer.valueOf(now));
@@ -137,9 +137,9 @@ public class Collector {
 
 	private static void minutely(MongoDatabase db, int minute) {
 		// Insert aggregation-during-collection metrics
-		HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+		HashMap<String, ArrayList<Document>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
-			BasicDBObject row = row(entry.getTagMap(), "_minute", minute, entry.getCount(),
+			Document row = row(entry.getTagMap(), "_minute", minute, entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 			put(rowsMap, entry.getName(), row);
 		}
@@ -154,14 +154,14 @@ public class Collector {
 			if (name.startsWith("system.") || name.startsWith("_meta.")) {
 				continue;
 			}
-			MongoCollection<DBObject> collection = db.getCollection(name, DBObject.class);
+			MongoCollection<Document> collection = db.getCollection(name);
 			long count = collection.countDocuments();
 			if (count == 0) {
 				// Remove disappeared metric collections
 				collection.drop();
 				if (name.startsWith("_quarter.")) {
 					// Remove disappeared quarterly metric from meta collections
-					BasicDBObject query = __("name", name.substring(9));
+					Document query = __("name", name.substring(9));
 					db.getCollection("_meta.aggregated").deleteMany(query);
 					db.getCollection("_meta.tags_quarter").deleteMany(query);
 				}
@@ -194,10 +194,10 @@ public class Collector {
 		}
 	}
 
-	private static BasicDBObject getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
-		BasicDBObject row = new BasicDBObject();
+	private static Document getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+		Document row = new Document();
 		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
-			ArrayList<BasicDBObject> tagValues = new ArrayList<>();
+			ArrayList<Document> tagValues = new ArrayList<>();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
 				tagValues.add(row(Collections.singletonMap("_value", tagValue),
 						null, 0, value.getCount(), value.getSum(),
@@ -222,18 +222,18 @@ public class Collector {
 	}
 
 	private static void quarterly(MongoDatabase db, int quarter) {
-		BasicDBObject removeBefore = __("_minute", __("$lte",
+		Document removeBefore = __("_minute", __("$lte",
 				Integer.valueOf(quarter * 15 - expire)));
-		BasicDBObject removeAfter = __("_minute", __("$gte",
+		Document removeAfter = __("_minute", __("$gte",
 				Integer.valueOf(quarter * 15 + expire)));
-		BasicDBObject removeBeforeQuarter = __("_quarter", __("$lte",
+		Document removeBeforeQuarter = __("_quarter", __("$lte",
 				Integer.valueOf(quarter - expire)));
-		BasicDBObject removeAfterQuarter = __("_quarter", __("$gte",
+		Document removeAfterQuarter = __("_quarter", __("$gte",
 				Integer.valueOf(quarter + expire)));
 		// Ensure index on meta collections
-		MongoCollection<DBObject> aggregated = db.getCollection("_meta.aggregated", DBObject.class);
+		MongoCollection<Document> aggregated = db.getCollection("_meta.aggregated");
 		aggregated.createIndex(INDEX_NAME);
-		MongoCollection<DBObject> tagsQuarter = db.getCollection("_meta.tags_quarter", DBObject.class);
+		MongoCollection<Document> tagsQuarter = db.getCollection("_meta.tags_quarter");
 		tagsQuarter.createIndex(INDEX_NAME);
 		tagsQuarter.createIndex(INDEX_QUARTER);
 		tagsQuarter.deleteMany(__("_quarter", __("$lte",
@@ -246,22 +246,22 @@ public class Collector {
 					name.startsWith("_quarter.")) {
 				continue;
 			}
-			MongoCollection<DBObject> collection = db.getCollection(name, DBObject.class);
-			MongoCollection<DBObject> quarterCollection = db.getCollection("_quarter." + name, DBObject.class);
+			MongoCollection<Document> collection = db.getCollection(name);
+			MongoCollection<Document> quarterCollection = db.getCollection("_quarter." + name);
 			// Remove stale
 			collection.deleteMany(removeBefore);
 			collection.deleteMany(removeAfter);
 			// Aggregate to quarter
-			BasicDBObject query = __("_name", name);
-			DBObject aggregatedRow = aggregated.find(query).first();
+			Document query = __("_name", name);
+			Document aggregatedRow = aggregated.find(query).first();
 			int start = aggregatedRow == null ? quarter - aggrExpire :
 					getInt(aggregatedRow, "_quarter");
 			for (int i = start + 1; i <= quarter; i ++) {
-				ArrayList<DBObject> rows = new ArrayList<>();
+				ArrayList<Document> rows = new ArrayList<>();
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
-				BasicDBObject range = __("$gte", Integer.valueOf(i * 15 - 14));
+				Document range = __("$gte", Integer.valueOf(i * 15 - 14));
 				range.put("$lte", Integer.valueOf(i * 15));
-				for (DBObject row : collection.find(__("_minute", range))) {
+				for (Document row : collection.find(__("_minute", range))) {
 					HashMap<String, String> tags = new HashMap<>();
 					for (String tagKey : row.keySet()) {
 						if (isTag(tagKey)) {
@@ -306,13 +306,13 @@ public class Collector {
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(), "name", name, "key", tagKey);
 				});
-				BasicDBObject row = getTagRow(tagMap);
+				Document row = getTagRow(tagMap);
 				row.put("_name", name);
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				row.put("_quarter", Integer.valueOf(i));
 				tagsQuarter.insertOne(row);
 			}
-			BasicDBObject update = __("$set", __("_quarter", Integer.valueOf(quarter)));
+			Document update = __("$set", __("_quarter", Integer.valueOf(quarter)));
 			aggregated.updateOne(query, update, UPSERT);
 		}
 		// Scan quarterly collections
@@ -328,18 +328,18 @@ public class Collector {
 			collection.deleteMany(removeAfterQuarter);
 			// Aggregate "_meta.tags_quarter" to "_meta.aggregated";
 			String minuteName = name.substring(9);
-			BasicDBObject query = __("_name", minuteName);
+			Document query = __("_name", minuteName);
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
-			for (DBObject row : tagsQuarter.find(query)) {
+			for (Document row : tagsQuarter.find(query)) {
 				for (String tagKey : row.keySet()) {
 					if (!isTag(tagKey)) {
 						continue;
 					}
 					for (Object o : getList(row, tagKey)) {
-						if (!(o instanceof DBObject)) {
+						if (!(o instanceof Document)) {
 							continue;
 						}
-						DBObject oo = (DBObject) o;
+						Document oo = (Document) o;
 						putTagValue(tagMap, tagKey, getString(oo, "_value"),
 								new MetricValue(getLong(oo, "_count"),
 								getDouble(oo, "_sum"), getDouble(oo, "_max"),
@@ -443,7 +443,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				HashMap<String, ArrayList<DBObject>> rowsMap = new HashMap<>();
+				HashMap<String, ArrayList<Document>> rowsMap = new HashMap<>();
 				HashMap<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
@@ -489,11 +489,13 @@ public class Collector {
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
 						long count = Numbers.parseLong(paths[2]);
-						double sum = Numbers.parseDouble(paths[3]);
+						double sum = __(Numbers.parseDouble(paths[3]));
+						double max = __(Numbers.parseDouble(paths[4]));
+						double min = __(Numbers.parseDouble(paths[5]));
+						double sqr = __(Numbers.parseDouble(paths[6]));
 						put(rowsMap, name, row(tagMap, "_minute",
-								Numbers.parseInt(paths[1], currentMinute.get()), count, sum,
-								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
-								Numbers.parseDouble(paths[6])));
+								Numbers.parseInt(paths[1], currentMinute.get()),
+								count, sum, max, min, sqr));
 					} else {
 						// For aggregation-during-collection metric, aggregate first
 						Metric.put(name, Numbers.parseDouble(paths[1]), tagMap);

@@ -92,6 +92,10 @@ public class Collector {
 			"UPDATE metric_name SET minute_size = minute_size - ?, " +
 			"quarter_size = quarter_size - ?, aggregated_time = ?, tags = ? WHERE id = ?";
 
+	private static double __(double d) {
+		return Double.isNaN(d) ? 0 : d;
+	}
+
 	private static String decode(String s, int limit) {
 		String result = Strings.decodeUrl(s);
 		return limit > 0 ? Strings.truncate(result, limit) : result;
@@ -529,14 +533,16 @@ public class Collector {
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
 						long count = Numbers.parseLong(paths[2]);
-						double sum = Numbers.parseDouble(paths[3]);
+						double sum = __(Numbers.parseDouble(paths[3]));
+						double max = __(Numbers.parseDouble(paths[4]));
+						double min = __(Numbers.parseDouble(paths[5]));
+						double sqr = __(Numbers.parseDouble(paths[6]));
 						put(rowsMap, name, row(tagMap,
-								Numbers.parseInt(paths[1], currentMinute.get()), count, sum,
-								Numbers.parseDouble(paths[4]), Numbers.parseDouble(paths[5]),
-								Numbers.parseDouble(paths[6])));
+								Numbers.parseInt(paths[1], currentMinute.get()),
+								count, sum, max, min, sqr));
 					} else {
 						// For aggregation-during-collection metric, aggregate first
-						Metric.put(name, Numbers.parseDouble(paths[1]), tagMap);
+						Metric.put(name, __(Numbers.parseDouble(paths[1])), tagMap);
 					}
 					if (verbose) {
 						Integer count = countMap.get(name);

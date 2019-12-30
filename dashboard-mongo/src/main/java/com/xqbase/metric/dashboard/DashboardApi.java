@@ -21,10 +21,9 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.bson.BSONObject;
+import org.bson.Document;
 import org.json.JSONObject;
 
-import com.mongodb.BasicDBObject;
-import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 import com.mongodb.MongoException;
@@ -86,6 +85,19 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
+	private static double __(double d) {
+		return Double.isFinite(d) ? d : 0;
+	}
+
+	private static String __(Object data) {
+		return data instanceof Document ? ((Document) data).toJson() :
+				JSONObject.wrap(data).toString();
+	}
+
+	private static Document __(String key, Object value) {
+		return new Document(key, value);
+	}
+
 	private static HashMap<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
@@ -113,23 +125,23 @@ public class DashboardApi extends HttpServlet {
 		} catch (IOException e_) {/**/}
 	}
 
-	private static int getInt(DBObject row, String key) {
+	private static int getInt(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof Number ? ((Number) value).intValue() : 0;
 	}
 
-	private static long getLong(DBObject row, String key) {
+	private static long getLong(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof Number ? ((Number) value).longValue() : 0;
 	}
 
-	private static double getDouble(DBObject row, String key) {
+	private static double getDouble(Document row, String key) {
 		Object value = row.get(key);
 		double d = value instanceof Number ? ((Number) value).doubleValue() : 0;
 		return Double.isFinite(d) ? d : 0;
 	}
 
-	private static String getString(DBObject row, String key) {
+	private static String getString(Document row, String key) {
 		Object value = row.get(key);
 		return value instanceof String ? (String) value : "_";
 	}
@@ -161,10 +173,10 @@ public class DashboardApi extends HttpServlet {
 					"Access-Control-Allow-Headers");
 			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
-			out.print(JSONObject.wrap(data));
+			out.print(__(data));
 		} else {
 			resp.setContentType("text/javascript");
-			out.print(callback + "(" + JSONObject.wrap(data) + ");");
+			out.print(callback + "(" + __(data) + ");");
 		}
 	}
 
@@ -192,10 +204,10 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			DBObject tagsRow;
+			Document tagsRow;
 			try {
-				tagsRow = db.getCollection("_meta.aggregated", DBObject.class).
-						find(new BasicDBObject("_name", metricName)).first();
+				tagsRow = db.getCollection("_meta.aggregated").
+						find(__("_name", metricName)).first();
 			} catch (MongoException e) {
 				error500(resp, e);
 				return;
@@ -204,7 +216,7 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			tagsRow = (DBObject) tagsRow.get("_tags");
+			tagsRow = (Document) tagsRow.get("_tags");
 			if (tagsRow == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
@@ -234,7 +246,7 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Query Condition
-		BasicDBObject query = new BasicDBObject();
+		Document query = new Document();
 		Enumeration<String> names = req.getParameterNames();
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
@@ -257,16 +269,16 @@ public class DashboardApi extends HttpServlet {
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length + 1;
-		BasicDBObject range = new BasicDBObject("$gte", Integer.valueOf(begin));
+		Document range = __("$gte", Integer.valueOf(begin));
 		range.put("$lte", Integer.valueOf(end));
 		query.put(rangeColumn, range);
 		String groupBy_ = req.getParameter("_group_by");
-		Function<DBObject, String> groupBy = groupBy_ == null ?
+		Function<Document, String> groupBy = groupBy_ == null ?
 				row -> "_" : row -> getString(row, groupBy_);
 		// Query by MongoDB and Group by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			for (DBObject row : db.getCollection(metricName, DBObject.class).find(query)) {
+			for (Document row : db.getCollection(metricName).find(query)) {
 				int index = (getInt(row, rangeColumn) - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
@@ -299,7 +311,7 @@ public class DashboardApi extends HttpServlet {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = method.applyAsDouble(value);
+			values[key.index] = __(method.applyAsDouble(value));
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			outputJson(req, resp, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
