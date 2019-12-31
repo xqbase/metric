@@ -11,6 +11,9 @@ public class TestMetric {
 		Random random = new Random();
 		while (true) {
 			Metric.put("test", random.nextInt(100), "r", "" + random.nextInt(100));
+			Metric.put("test", Double.POSITIVE_INFINITY, "r", "+Infinity");
+			Metric.put("test", Double.NEGATIVE_INFINITY, "r", "-Infinity");
+			Metric.put("test", Double.NaN, "r", "NaN");
 			try {
 				Thread.sleep(10);
 			} catch (InterruptedException e) {
