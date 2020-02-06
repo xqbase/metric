@@ -4,12 +4,14 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Driver;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
@@ -21,12 +23,11 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.Kryos;
+import com.xqbase.metric.util.JSONs;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
@@ -101,7 +102,11 @@ public class DashboardApi extends HttpServlet {
 		return Double.isFinite(d) ? d : 0;
 	}
 
-	private static HashMap<String, ToDoubleFunction<MetricValue>>
+	private static Double ___(double d) {
+		return Double.valueOf(__(d));
+	}
+
+	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
@@ -136,6 +141,8 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
+	private static ObjectMapper writer = new ObjectMapper();
+
 	private static void outputJson(HttpServletRequest req,
 			HttpServletResponse resp, Object data) {
 		resp.setCharacterEncoding("UTF-8");
@@ -146,6 +153,12 @@ public class DashboardApi extends HttpServlet {
 			Log.d(e.getMessage());
 			return;
 		}
+		String json;
+		try {
+			json = writer.writeValueAsString(data);
+		} catch (JsonProcessingException e) {
+			throw new RuntimeException(e);
+		}
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
 			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
@@ -155,10 +168,10 @@ public class DashboardApi extends HttpServlet {
 					"Access-Control-Allow-Headers");
 			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
-			out.print(JSONObject.wrap(data));
+			out.print(json);
 		} else {
 			resp.setContentType("text/javascript");
-			out.print(callback + "(" + JSONObject.wrap(data) + ");");
+			out.print(callback + "(" + json + ");");
 		}
 	}
 
@@ -197,19 +210,17 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
+			String s = row.getString("tags");
+			if (s == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			@SuppressWarnings("unchecked")
-			HashMap<String, HashMap<String, MetricValue>> tags =
-					Kryos.deserialize(b, HashMap.class);
+			Map<String, Map<String, MetricValue>> tags = JSONs.deserializeEx(s);
 			if (tags == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			JSONObject json = new JSONObject();
+			Map<String, List<Map<String, Object>>> json = new HashMap<>();
 			tags.forEach((tagKey, tagValues) -> {
 				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
 					return;
@@ -221,17 +232,17 @@ public class DashboardApi extends HttpServlet {
 							Comparator.comparingLong(o -> o.getValue().getCount()),
 							maxTagValues);
 				}
-				JSONArray arr = new JSONArray();
+				List<Map<String, Object>> arr = new ArrayList<>();
 				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
 					MetricValue metric = tagValue.getValue();
-					JSONObject obj = new JSONObject();
+					Map<String, Object> obj = new HashMap<>();
 					obj.put("_value", tagValue.getKey());
-					obj.put("_count", metric.getCount());
-					obj.put("_sum", __(metric.getSum()));
-					obj.put("_max", __(metric.getMax()));
-					obj.put("_min", __(metric.getMin()));
-					obj.put("_sqr", __(metric.getSqr()));
-					arr.put(obj);
+					obj.put("_count", Long.valueOf(metric.getCount()));
+					obj.put("_sum", ___(metric.getSum()));
+					obj.put("_max", ___(metric.getMax()));
+					obj.put("_min", ___(metric.getMin()));
+					obj.put("_sqr", ___(metric.getSqr()));
+					arr.add(obj);
 				}
 				json.put(tagKey, arr);
 			});
@@ -257,7 +268,7 @@ public class DashboardApi extends HttpServlet {
 		}
 
 		// Query Condition
-		HashMap<String, String> query = new HashMap<>();
+		Map<String, String> query = new HashMap<>();
 		Enumeration<String> names = req.getParameterNames();
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
@@ -274,22 +285,20 @@ public class DashboardApi extends HttpServlet {
 		int begin = end - interval * length + 1;
 
 		String groupBy_ = req.getParameter("_group_by");
-		Function<HashMap<String, String>, String> groupBy = groupBy_ == null ?
+		Function<Map<String, String>, String> groupBy = groupBy_ == null ?
 				tags -> "_" : tags -> {
 			String value = tags.get(groupBy_);
 			return Strings.isEmpty(value) ? "_" : value;
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
-		HashMap<GroupKey, MetricValue> result = new HashMap<>();
+		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			db.query(row -> {
 				int index = (row.getInt("time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					return;
 				}
-				@SuppressWarnings("unchecked")
-				HashMap<String, String> tags = Kryos.
-						deserialize(row.getBytes("tags"), HashMap.class);
+				Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
 				if (tags == null) {
 					tags = new HashMap<>();
 				}
@@ -324,7 +333,7 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Generate Data
-		HashMap<String, double[]> data = new HashMap<>();
+		Map<String, double[]> data = new HashMap<>();
 		result.forEach((key, value) -> {
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {

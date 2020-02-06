@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -30,7 +31,7 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.Kryos;
+import com.xqbase.metric.util.JSONs;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -101,9 +102,9 @@ public class Collector {
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
-	private static void put(HashMap<String, ArrayList<MetricRow>> rowsMap,
+	private static void put(Map<String, List<MetricRow>> rowsMap,
 			String name, MetricRow row) {
-		ArrayList<MetricRow> rows = rowsMap.get(name);
+		List<MetricRow> rows = rowsMap.get(name);
 		if (rows == null) {
 			rows = new ArrayList<>();
 			rowsMap.put(name, rows);
@@ -115,7 +116,7 @@ public class Collector {
 
 	private static void insert(Integer id, List<MetricRow> rows,
 			boolean quarter) throws SQLException {
-		ArrayList<Object> ins = new ArrayList<>();
+		List<Object> ins = new ArrayList<>();
 		StringBuilder sb = new StringBuilder(quarter ?
 				INSERT_QUARTER : INSERT_MINUTE);
 		for (MetricRow row : rows) {
@@ -127,12 +128,12 @@ public class Collector {
 			ins.add(Double.valueOf(row.max));
 			ins.add(Double.valueOf(row.min));
 			ins.add(Double.valueOf(row.sqr));
-			ins.add(Kryos.serialize(row.tags));
+			ins.add(JSONs.serialize(row.tags));
 		}
 		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
 	}
 
-	private static void insert(String name, ArrayList<MetricRow> rows,
+	private static void insert(String name, List<MetricRow> rows,
 			boolean quarter) throws SQLException {
 		if (rows.isEmpty()) {
 			return;
@@ -161,9 +162,9 @@ public class Collector {
 		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, rows.size(), id);
 	}
 
-	private static void insert(HashMap<String, ArrayList<MetricRow>>
+	private static void insert(Map<String, List<MetricRow>>
 			rowsMap) throws SQLException {
-		for (Map.Entry<String, ArrayList<MetricRow>> entry : rowsMap.entrySet()) {
+		for (Map.Entry<String, List<MetricRow>> entry : rowsMap.entrySet()) {
 			insert(entry.getKey(), entry.getValue(), false);
 		}
 	}
@@ -193,8 +194,8 @@ public class Collector {
 		return row;
 	}
 
-	private static ArrayList<MetricName> getNames() throws SQLException {
-		ArrayList<MetricName> names = new ArrayList<>();
+	private static List<MetricName> getNames() throws SQLException {
+		List<MetricName> names = new ArrayList<>();
 		DB.query(row -> {
 			MetricName name = new MetricName();
 			name.id = row.getInt("id");
@@ -209,7 +210,7 @@ public class Collector {
 
 	private static void minutely(int minute) throws SQLException {
 		// Insert aggregation-during-collection metrics
-		HashMap<String, ArrayList<MetricRow>> rowsMap = new HashMap<>();
+		Map<String, List<MetricRow>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
 			MetricRow row = row(entry.getTagMap(), minute, entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
@@ -228,9 +229,9 @@ public class Collector {
 		}
 	}
 
-	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
+	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
 			String tagKey, String tagValue, MetricValue value) {
-		HashMap<String, MetricValue> tagValues = tagMap.get(tagKey);
+		Map<String, MetricValue> tagValues = tagMap.get(tagKey);
 		if (tagValues == null) {
 			tagValues = new HashMap<>();
 			tagMap.put(tagKey, tagValues);
@@ -247,11 +248,11 @@ public class Collector {
 		}
 	}
 
-	private static HashMap<String, HashMap<String, MetricValue>>
-			limit(HashMap<String, HashMap<String, MetricValue>> tagMap) {
-		HashMap<String, HashMap<String, MetricValue>> tags = new HashMap<>();
-		BiConsumer<String, HashMap<String, MetricValue>> action = (tagName, valueMap) -> {
-			HashMap<String, MetricValue> tagValues = new HashMap<>();
+	private static Map<String, Map<String, MetricValue>>
+			limit(Map<String, Map<String, MetricValue>> tagMap) {
+		Map<String, Map<String, MetricValue>> tags = new HashMap<>();
+		BiConsumer<String, Map<String, MetricValue>> action = (tagName, valueMap) -> {
+			Map<String, MetricValue> tagValues = new HashMap<>();
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
 				CollectionsEx.forEach(CollectionsEx.max(valueMap.entrySet(),
 						Comparator.comparingLong(metricValue ->
@@ -283,12 +284,10 @@ public class Collector {
 			int deletedQuarter = DB.update(DELETE_QUARTER, name.id, quarter - expire);
 			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
 			for (int i = start + 1; i <= quarter; i ++) {
-				ArrayList<MetricRow> rows = new ArrayList<>();
-				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
+				List<MetricRow> rows = new ArrayList<>();
+				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				DB.query(row -> {
-					@SuppressWarnings("unchecked")
-					HashMap<String, String> tags =
-							Kryos.deserialize(row.getBytes("tags"), HashMap.class);
+					Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
 					if (tags == null) {
 						tags = new HashMap<>();
 					}
@@ -310,9 +309,9 @@ public class Collector {
 				}
 				int combinations = result.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name.name);
-				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
+				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
-				BiConsumer<HashMap<String, String>, MetricValue> action = (tags, value) -> {
+				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
 					// {"_quarter": i}, but not {"_quarter": quarter} !
 					rows.add(row(tags, i_, value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
@@ -334,15 +333,14 @@ public class Collector {
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
-						Integer.valueOf(i), Kryos.serialize(limit(tagMap)));
+						Integer.valueOf(i), JSONs.serializeEx(limit(tagMap)));
 			}
 
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
-			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
+			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 			DB.query(row -> {
-				@SuppressWarnings("unchecked")
-				HashMap<String, HashMap<String, MetricValue>> tags =
-						Kryos.deserialize(row.getBytes("tags"), HashMap.class);
+				Map<String, Map<String, MetricValue>> tags =
+						JSONs.deserializeEx(row.getString("tags"));
 				if (tags == null) {
 					return;
 				}
@@ -355,7 +353,7 @@ public class Collector {
 
 			DB.updateEx(UPDATE_NAME, Integer.valueOf(deletedMinute),
 					Integer.valueOf(deletedQuarter), Integer.valueOf(quarter),
-					Kryos.serialize(limit(tagMap)), Integer.valueOf(name.id));
+					JSONs.serializeEx(limit(tagMap)), Integer.valueOf(name.id));
 		}
 	}
 
@@ -384,7 +382,7 @@ public class Collector {
 		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 2);
 		boolean enableRemoteAddr = Conf.getBoolean(p.getProperty("remote_addr"), true);
 		String allowedRemote = p.getProperty("allowed_remote");
-		HashSet<String> allowedRemotes = null;
+		Set<String> allowedRemotes = null;
 		if (allowedRemote != null) {
 			allowedRemotes = new HashSet<>(Arrays.asList(allowedRemote.split("[,;]")));
 		}
@@ -487,8 +485,8 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				HashMap<String, ArrayList<MetricRow>> rowsMap = new HashMap<>();
-				HashMap<String, Integer> countMap = new HashMap<>();
+				Map<String, List<MetricRow>> rowsMap = new HashMap<>();
+				Map<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
 					int length = line.length();
@@ -498,7 +496,7 @@ public class Collector {
 					// Parse name, aggregation, value and tags
 					// <name>/<aggregation>/<value>[?<tag>=<value>[&...]]
 					String[] paths;
-					HashMap<String, String> tagMap = new HashMap<>();
+					Map<String, String> tagMap = new HashMap<>();
 					int index = line.indexOf('?');
 					if (index < 0) {
 						paths = line.split("/");

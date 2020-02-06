@@ -9,12 +9,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -24,15 +26,14 @@ import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
 import java.util.zip.GZIPOutputStream;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.Kryos;
+import com.xqbase.metric.util.JSONs;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -113,13 +114,17 @@ public class Dashboard {
 		return Double.isFinite(d) ? d : 0;
 	}
 
-	private static HashMap<String, ToDoubleFunction<MetricValue>>
+	private static Double ___(double d) {
+		return Double.valueOf(__(d));
+	}
+
+	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
 	private static ConnectionPool db;
 	private static HttpServer server;
-	private static HashMap<String, Resource> resources = new HashMap<>();
+	private static Map<String, Resource> resources = new HashMap<>();
 	private static String resourcesModified;
 	private static Resource config;
 	private static long configModified = 0;
@@ -150,10 +155,17 @@ public class Dashboard {
 		}
 	}
 
+	private static ObjectMapper writer = new ObjectMapper();
+
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
 		String out;
+		try {
+			out = writer.writeValueAsString(data);
+		} catch (JsonProcessingException e) {
+			throw new RuntimeException(e);
+		}
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -163,10 +175,9 @@ public class Dashboard {
 					"Access-Control-Allow-Headers");
 			headers.set("Access-Control-Allow-Credentials", "true");
 			headers.set("Content-Type", "application/json; charset=utf-8");
-			out = JSONObject.wrap(data).toString();
 		} else {
 			headers.set("Content-Type", "text/javascript; charset=utf-8");
-			out = callback + "(" + JSONObject.wrap(data) + ");";
+			out = callback + "(" + out + ");";
 		}
 		byte[] body = out.getBytes(StandardCharsets.UTF_8);
 		if (acceptGzip && body.length > 1024) {
@@ -191,8 +202,8 @@ public class Dashboard {
 		exchange.close();
 	}
 
-	private static HashMap<String, String> getParameters(URI uri) {
-		HashMap<String, String> parameters = new HashMap<>();
+	private static Map<String, String> getParameters(URI uri) {
+		Map<String, String> parameters = new HashMap<>();
 		String query = uri.getRawQuery();
 		if (query == null) {
 			return parameters;
@@ -313,19 +324,17 @@ public class Dashboard {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
+			String s = row.getString("tags");
+			if (s == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			@SuppressWarnings("unchecked")
-			HashMap<String, HashMap<String, MetricValue>> tags =
-					Kryos.deserialize(b, HashMap.class);
+			Map<String, Map<String, MetricValue>> tags = JSONs.deserializeEx(s);
 			if (tags == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			JSONObject json = new JSONObject();
+			Map<String, List<Map<String, Object>>> json = new HashMap<>();
 			tags.forEach((tagKey, tagValues) -> {
 				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
 					return;
@@ -337,17 +346,17 @@ public class Dashboard {
 							Comparator.comparingLong(o -> o.getValue().getCount()),
 							maxTagValues);
 				}
-				JSONArray arr = new JSONArray();
+				List<Map<String, Object>> arr = new ArrayList<>();
 				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
 					MetricValue metric = tagValue.getValue();
-					JSONObject obj = new JSONObject();
+					Map<String, Object> obj = new HashMap<>();
 					obj.put("_value", tagValue.getKey());
-					obj.put("_count", metric.getCount());
-					obj.put("_sum", __(metric.getSum()));
-					obj.put("_max", __(metric.getMax()));
-					obj.put("_min", __(metric.getMin()));
-					obj.put("_sqr", __(metric.getSqr()));
-					arr.put(obj);
+					obj.put("_count", Long.valueOf(metric.getCount()));
+					obj.put("_sum", ___(metric.getSum()));
+					obj.put("_max", ___(metric.getMax()));
+					obj.put("_min", ___(metric.getMin()));
+					obj.put("_sqr", ___(metric.getSqr()));
+					arr.add(obj);
 				}
 				json.put(tagKey, arr);
 			});
@@ -374,7 +383,7 @@ public class Dashboard {
 		}
 
 		// Query Condition
-		HashMap<String, String> query = getParameters(uri);
+		Map<String, String> query = getParameters(uri);
 		String end_ = query.remove("_end");
 		String interval_ = query.remove("_interval");
 		String length_ = query.remove("_length");
@@ -387,22 +396,20 @@ public class Dashboard {
 		int length = Numbers.parseInt(length_, 1, 1024);
 		int begin = end - interval * length + 1;
 
-		Function<HashMap<String, String>, String> groupBy = groupBy_ == null ?
+		Function<Map<String, String>, String> groupBy = groupBy_ == null ?
 				tags -> "_" : tags -> {
 			String value = tags.get(groupBy_);
 			return Strings.isEmpty(value) ? "_" : value;
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
-		HashMap<GroupKey, MetricValue> result = new HashMap<>();
+		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			db.query(row -> {
 				int index = (row.getInt("time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					return;
 				}
-				@SuppressWarnings("unchecked")
-				HashMap<String, String> tags = Kryos.
-						deserialize(row.getBytes("tags"), HashMap.class);
+				Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
 				if (tags == null) {
 					tags = new HashMap<>();
 				}
@@ -438,7 +445,7 @@ public class Dashboard {
 			return;
 		}
 		// Generate Data
-		HashMap<String, double[]> data = new HashMap<>();
+		Map<String, double[]> data = new HashMap<>();
 		result.forEach((key, value) -> {
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {

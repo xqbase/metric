@@ -4,7 +4,7 @@ CREATE TABLE metric_name (
 	minute_size INTEGER NOT NULL DEFAULT 0,
 	quarter_size INTEGER NOT NULL DEFAULT 0,
 	aggregated_time INTEGER NOT NULL DEFAULT 0,
-	tags LONGBLOB DEFAULT NULL,
+	tags LONGTEXT DEFAULT NULL,
 	UNIQUE (name));
 
 CREATE TABLE metric_minute (
@@ -16,7 +16,7 @@ CREATE TABLE metric_minute (
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
-	tags LONGBLOB NOT NULL,
+	tags LONGTEXT NOT NULL,
 	KEY (id, time));
 
 CREATE TABLE metric_quarter (
@@ -28,12 +28,12 @@ CREATE TABLE metric_quarter (
 	_max FLOAT NOT NULL,
 	_min FLOAT NOT NULL,
 	_sqr FLOAT NOT NULL,
-	tags LONGBLOB NOT NULL,
+	tags LONGTEXT NOT NULL,
 	KEY (id, time));
 
 CREATE TABLE metric_tags_quarter (
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
-	tags LONGBLOB NOT NULL,
+	tags LONGTEXT NOT NULL,
 	PRIMARY KEY (id, time),
 	KEY (time));

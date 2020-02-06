@@ -1,5 +1,3 @@
-import javax.servlet.ServletException;
-
 import org.apache.catalina.Context;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.Server;
@@ -40,7 +38,7 @@ public class Startup {
 			server.setPort(8005);
 			server.await();
 			server.stop();
-		} catch (ServletException | LifecycleException e) {
+		} catch (LifecycleException e) {
 			Log.e(e);
 		}
 	}
