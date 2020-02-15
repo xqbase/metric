@@ -27,6 +27,7 @@ import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
+import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -365,7 +366,7 @@ public class Collector {
 				"%1$tY-%1$tm-%1$td %1$tk:%1$tM:%1$tS.%1$tL %2$s%n%4$s: %5$s%6$s%n");
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
 		ExecutorService executor = Executors.newCachedThreadPool();
-		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
+		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
@@ -392,8 +393,12 @@ public class Collector {
 		p = Conf.load("jdbc");
 		Runnable minutely = null;
 		boolean h2 = false;
-		try (DatagramSocket socket = new DatagramSocket(new
-				InetSocketAddress(host, port))) {
+		try (
+			DatagramSocket socket = new DatagramSocket(new
+					InetSocketAddress(host, port));
+			ManagementMonitor monitor = new ManagementMonitor("metric.server",
+					"server_id", "" + serverId);
+		) {
 
 			boolean createTable = false;
 			Driver driver = (Driver) Class.forName(p.
@@ -446,6 +451,7 @@ public class Collector {
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
+			timer.scheduleAtFixedRate(monitor, 5, 5, TimeUnit.SECONDS);
 			service.register(socket);
 
 			Log.i("Metric Collector Started on UDP " + host + ":" + port);
