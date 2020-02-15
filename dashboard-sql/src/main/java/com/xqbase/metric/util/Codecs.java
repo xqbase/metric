@@ -1,11 +1,11 @@
 package com.xqbase.metric.util;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,10 +15,13 @@ import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.util.Log;
 
-public class JSONs {
-	private static ObjectMapper tagsWriter = new ObjectMapper();
-	private static ObjectMapper tagsWriterEx = new ObjectMapper();
-	private static ObjectMapper tagsReader = new ObjectMapper();
+import de.undercouch.bson4jackson.BsonFactory;
+
+public class Codecs {
+	private static final BsonFactory bf = new BsonFactory();
+	private static ObjectMapper tagsWriter = new ObjectMapper(bf);
+	private static ObjectMapper tagsWriterEx = new ObjectMapper(bf);
+	private static ObjectMapper tagsReader = new ObjectMapper(bf);
 	private static JavaType type, typeEx;
 
 	static {
@@ -36,37 +39,37 @@ public class JSONs {
 		typeEx = tf.constructType(new TypeReference<Map<String, Map<String, MetricValue>>>() {/**/});
 	}
 
-	public static String serialize(Map<String, String> tags) {
+	public static byte[] encode(Map<String, String> tags) {
 		try {
-			return tagsWriter.writeValueAsString(tags);
-		} catch (JsonProcessingException e) {
+			return tagsWriter.writeValueAsBytes(tags);
+		} catch (IOException e) {
 			Log.w(e.getMessage());
 			return null;
 		}
 	}
 
-	public static String serializeEx(Map<String, Map<String, MetricValue>> tags) {
+	public static byte[] encodeEx(Map<String, Map<String, MetricValue>> tags) {
 		try {
-			return tagsWriterEx.writeValueAsString(tags);
-		} catch (JsonProcessingException e) {
+			return tagsWriterEx.writeValueAsBytes(tags);
+		} catch (IOException e) {
 			Log.w(e.getMessage());
 			return null;
 		}
 	}
 
-	public static Map<String, String> deserialize(String json) {
+	public static Map<String, String> decode(byte[] data) {
 		try {
-			return tagsReader.readValue(json, type);
-		} catch (JsonProcessingException e) {
+			return tagsReader.readValue(data, type);
+		} catch (IOException e) {
 			Log.w(e.getMessage());
 			return null;
 		}
 	}
 
-	public static Map<String, Map<String, MetricValue>> deserializeEx(String json) {
+	public static Map<String, Map<String, MetricValue>> decodeEx(byte[] data) {
 		try {
-			return tagsReader.readValue(json, typeEx);
-		} catch (JsonProcessingException e) {
+			return tagsReader.readValue(data, typeEx);
+		} catch (IOException e) {
 			Log.w(e.getMessage());
 			return null;
 		}

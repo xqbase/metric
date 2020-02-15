@@ -27,7 +27,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.JSONs;
+import com.xqbase.metric.util.Codecs;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
@@ -210,12 +210,12 @@ public class DashboardApi extends HttpServlet {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			String s = row.getString("tags");
-			if (s == null) {
+			byte[] b = row.getBytes("tags");
+			if (b == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Map<String, Map<String, MetricValue>> tags = JSONs.deserializeEx(s);
+			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
 			if (tags == null) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
@@ -298,7 +298,7 @@ public class DashboardApi extends HttpServlet {
 				if (index < 0 || index >= length) {
 					return;
 				}
-				Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
+				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
 				if (tags == null) {
 					tags = new HashMap<>();
 				}

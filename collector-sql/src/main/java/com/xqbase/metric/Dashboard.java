@@ -33,7 +33,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.JSONs;
+import com.xqbase.metric.util.Codecs;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -324,12 +324,12 @@ public class Dashboard {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			String s = row.getString("tags");
-			if (s == null) {
+			byte[] b = row.getBytes("tags");
+			if (b == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			Map<String, Map<String, MetricValue>> tags = JSONs.deserializeEx(s);
+			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
 			if (tags == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
@@ -409,7 +409,7 @@ public class Dashboard {
 				if (index < 0 || index >= length) {
 					return;
 				}
-				Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
+				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
 				if (tags == null) {
 					tags = new HashMap<>();
 				}

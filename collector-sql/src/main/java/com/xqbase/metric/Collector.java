@@ -32,7 +32,7 @@ import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.JSONs;
+import com.xqbase.metric.util.Codecs;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -129,7 +129,7 @@ public class Collector {
 			ins.add(Double.valueOf(row.max));
 			ins.add(Double.valueOf(row.min));
 			ins.add(Double.valueOf(row.sqr));
-			ins.add(JSONs.serialize(row.tags));
+			ins.add(Codecs.encode(row.tags));
 		}
 		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
 	}
@@ -288,7 +288,7 @@ public class Collector {
 				List<MetricRow> rows = new ArrayList<>();
 				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				DB.query(row -> {
-					Map<String, String> tags = JSONs.deserialize(row.getString("tags"));
+					Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
 					if (tags == null) {
 						tags = new HashMap<>();
 					}
@@ -334,14 +334,14 @@ public class Collector {
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
-						Integer.valueOf(i), JSONs.serializeEx(limit(tagMap)));
+						Integer.valueOf(i), Codecs.encodeEx(limit(tagMap)));
 			}
 
 			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
 			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 			DB.query(row -> {
 				Map<String, Map<String, MetricValue>> tags =
-						JSONs.deserializeEx(row.getString("tags"));
+						Codecs.decodeEx(row.getBytes("tags"));
 				if (tags == null) {
 					return;
 				}
@@ -354,7 +354,7 @@ public class Collector {
 
 			DB.updateEx(UPDATE_NAME, Integer.valueOf(deletedMinute),
 					Integer.valueOf(deletedQuarter), Integer.valueOf(quarter),
-					JSONs.serializeEx(limit(tagMap)), Integer.valueOf(name.id));
+					Codecs.encodeEx(limit(tagMap)), Integer.valueOf(name.id));
 		}
 	}
 
