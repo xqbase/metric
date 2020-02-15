@@ -412,6 +412,7 @@ public class Collector {
 				createTable = !new File(dataDir + "/metric.mv.db").exists();
 				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
 						"/metric;mode=mysql;lazy_query_execution=1;" +
+						"compress=true;cache_size=0;" +
 						"db_close_delay=-1;db_close_on_exit=false;" +
 						"max_compact_time=0;max_compact_count=40";
 			}
