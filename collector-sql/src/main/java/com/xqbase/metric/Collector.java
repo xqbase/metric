@@ -31,8 +31,8 @@ import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Codecs;
+import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -330,7 +330,8 @@ public class Collector {
 				insert(name.name, rows, true);
 				// Aggregate to "_meta.tags_quarter"
 				tagMap.forEach((tagKey, tagValue) -> {
-					Metric.put("metric.tags.values", tagValue.size(), "name", name.name, "key", tagKey);
+					Metric.put("metric.tags.values", tagValue.size(),
+							"name", name.name, "key", tagKey);
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
@@ -392,7 +393,8 @@ public class Collector {
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		p = Conf.load("jdbc");
 		Runnable minutely = null;
-		boolean h2 = false;
+		String h2DataDir = null;
+		ConnectionPool.Entry h2PoolEntry = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
@@ -406,34 +408,39 @@ public class Collector {
 			String url = p.getProperty("url", "");
 			int colon = url.indexOf(":h2:");
 			if (colon >= 0) {
-				h2 = true;
-				String dataDir = Conf.getAbsolutePath("data");
-				new File(dataDir).mkdir();
-				createTable = !new File(dataDir + "/metric.mv.db").exists();
-				url = url.substring(0, colon + 4) + dataDir.replace('\\', '/') +
-						"/metric;mode=mysql;lazy_query_execution=1;" +
-						"cache_size=0;" +
-						"db_close_delay=-1;db_close_on_exit=false;" +
+				h2DataDir = Conf.getAbsolutePath("data");
+				new File(h2DataDir).mkdir();
+				createTable = !new File(h2DataDir + "/metric.mv.db").exists();
+				h2DataDir = h2DataDir.replace('\\', '/');
+				url = url.substring(0, colon + 4) + h2DataDir +
+						"/metric;mode=mysql;" +
+						"cache_size=0;lazy_query_execution=1;" +
+						"db_close_on_exit=false;" +
 						"max_compact_time=0;max_compact_count=40";
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
-			if (createTable) {
-				ByteArrayQueue baq = new ByteArrayQueue();
-				try (InputStream in = Collector.class.
-						getResourceAsStream("/sql/metric.sql")) {
-					baq.readFrom(in);
-				}
-				String[] sqls = baq.toString().split(";");
-				for (String s : sqls) {
-					String sql = s.trim();
-					if (!sql.isEmpty()) {
-						try {
-							DB.update(sql);
-						} catch (SQLException e) {
-							Log.w(sql + ": " + e.getMessage());
+			if (h2DataDir != null) {
+				try {
+					// An embedded connection must be created first, see:
+					// https://github.com/h2database/h2database/issues/2294
+					h2PoolEntry = DB.borrow();
+					if (createTable) {
+						ByteArrayQueue baq = new ByteArrayQueue();
+						try (InputStream in = Collector.class.
+									getResourceAsStream("/sql/metric.sql")) {
+							baq.readFrom(in);
+							String[] sqls = baq.toString().split(";");
+							for (String s : sqls) {
+								String sql = s.trim();
+								if (!sql.isEmpty()) {
+									DB.update(sql);
+								}
+							}
 						}
 					}
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
 				}
 			}
 			Dashboard.startup(DB);
@@ -582,13 +589,13 @@ public class Collector {
 		Runnables.shutdown(executor);
 		Dashboard.shutdown();
 		if (DB != null) {
-			if (h2) {
-				try {
-					DB.update("SHUTDOWN");
-				} catch (SQLException e) {
-					Log.w(e.getMessage());
+			if (h2DataDir != null) {
+				if (h2PoolEntry != null) {
+					h2PoolEntry.close();
 				}
 			}
+			// H2DB shutdown here, see:
+			// http://www.h2database.com/html/features.html#closing_a_database
 			DB.close();
 		}
 
