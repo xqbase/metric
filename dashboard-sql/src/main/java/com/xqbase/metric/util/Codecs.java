@@ -1,7 +1,6 @@
 package com.xqbase.metric.util;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Map;
 
 import org.apache.avro.Schema;
@@ -9,9 +8,11 @@ import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.reflect.ReflectData;
 import org.apache.avro.reflect.ReflectDatumReader;
 import org.apache.avro.reflect.ReflectDatumWriter;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Log;
@@ -23,17 +24,10 @@ public class Codecs {
 	private static ReflectDatumReader<Map<String, Map<String, MetricValue>>> tagsReaderEx;
 
 	static {
-		Schema tagsSchema = Schema.createMap(Schema.create(Schema.Type.STRING));
-		Schema doubleSchema = Schema.create(Schema.Type.DOUBLE);
-		Class<MetricValue> cls = MetricValue.class;
-		Schema tagsSchemaEx = Schema.createMap(Schema.createMap(Schema.
-				createRecord(cls.getSimpleName(), null,
-				cls.getPackage().getName(), false, Arrays.asList(
-				new Schema.Field("count", Schema.create(Schema.Type.LONG)),
-				new Schema.Field("sum", doubleSchema),
-				new Schema.Field("max", doubleSchema),
-				new Schema.Field("min", doubleSchema),
-				new Schema.Field("sqr", doubleSchema)))));
+		Schema tagsSchema = ReflectData.get().getSchema(new
+				TypeReference<Map<String, String>>() {/**/}.getType());
+		Schema tagsSchemaEx = ReflectData.get().getSchema(new
+				TypeReference<Map<String, Map<String, MetricValue>>>() {/**/}.getType());
 		tagsWriter = new ReflectDatumWriter<>(tagsSchema);
 		tagsReader = new ReflectDatumReader<>(tagsSchema);
 		tagsWriterEx = new ReflectDatumWriter<>(tagsSchemaEx);
