@@ -1,22 +1,21 @@
 package com.xqbase.metric;
 
+import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.sql.SQLException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -24,24 +23,22 @@ import java.util.TimeZone;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.json.JSONObject;
+
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
-import com.xqbase.util.db.ConnectionPool;
-import com.xqbase.util.db.Row;
 
 class Resource {
 	String mime;
@@ -89,14 +86,6 @@ public class Dashboard {
 		"/index.html",
 		"/index.js",
 	};
-	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
-	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
-	private static final String AGGREGATE_MINUTE =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
-	private static final String AGGREGATE_QUARTER =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private static ThreadLocal<SimpleDateFormat> format =
 			new ThreadLocal<SimpleDateFormat>() {
@@ -114,15 +103,16 @@ public class Dashboard {
 		return Double.isFinite(d) ? d : 0;
 	}
 
-	private static Double ___(double d) {
-		return Double.valueOf(__(d));
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isNaN(d) ? 0 : d;
 	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
-	private static ConnectionPool db;
+	private static String dataDir;
 	private static HttpServer server;
 	private static Map<String, Resource> resources = new HashMap<>();
 	private static String resourcesModified;
@@ -155,17 +145,10 @@ public class Dashboard {
 		}
 	}
 
-	private static ObjectMapper writer = new ObjectMapper();
-
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		String out;
-		try {
-			out = writer.writeValueAsString(data);
-		} catch (JsonProcessingException e) {
-			throw new RuntimeException(e);
-		}
+		String out = (data instanceof String ? (String) data : JSONObject.valueToString(data));
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -312,76 +295,22 @@ public class Dashboard {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			Row row;
-			try {
-				row = db.queryEx(QUERY_TAGS, metricName);
-			} catch (SQLException e) {
+			Properties p = new Properties();
+			try (FileInputStream in = new FileInputStream(dataDir + "Tags")) {
+				p.load(in);
+			} catch (IOException e) {
 				Log.e(e);
-				response(exchange, 500);
-				return;
 			}
-			if (row == null) {
+			String json = p.getProperty(metricName);
+			if (json == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			if (tags == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			Map<String, List<Map<String, Object>>> json = new HashMap<>();
-			tags.forEach((tagKey, tagValues) -> {
-				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
-					return;
-				}
-				Collection<Map.Entry<String, MetricValue>> tagValues_ =
-						tagValues.entrySet();
-				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
-					tagValues_ = CollectionsEx.max(tagValues_,
-							Comparator.comparingLong(o -> o.getValue().getCount()),
-							maxTagValues);
-				}
-				List<Map<String, Object>> arr = new ArrayList<>();
-				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
-					MetricValue metric = tagValue.getValue();
-					Map<String, Object> obj = new HashMap<>();
-					obj.put("_value", tagValue.getKey());
-					obj.put("_count", Long.valueOf(metric.getCount()));
-					obj.put("_sum", ___(metric.getSum()));
-					obj.put("_max", ___(metric.getMax()));
-					obj.put("_min", ___(metric.getMin()));
-					obj.put("_sqr", ___(metric.getSqr()));
-					arr.add(obj);
-				}
-				json.put(tagKey, arr);
-			});
 			response(exchange, json, acceptGzip);
 			return;
 		}
 
 		boolean quarter = metricName.startsWith("_quarter.");
-		if (quarter) {
-			metricName = metricName.substring(9);
-		}
-		int id;
-		try {
-			Row row = db.queryEx(QUERY_ID, metricName);
-			if (row == null) {
-				response(exchange, Collections.emptyMap(), acceptGzip);
-				return;
-			}
-			id = row.getInt("id");
-		} catch (SQLException e) {
-			Log.e(e);
-			response(exchange, 500);
-			return;
-		}
-
 		// Query Condition
 		Map<String, String> query = getParameters(uri);
 		String end_ = query.remove("_end");
@@ -403,46 +332,63 @@ public class Dashboard {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		try {
-			db.query(row -> {
-				int index = (row.getInt("time") - begin) / interval;
-				if (index < 0 || index >= length) {
-					return;
-				}
-				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
-				if (tags == null) {
-					tags = new HashMap<>();
-				}
-				// Query Tags
-				boolean skip = false;
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String value = tags.get(entry.getKey());
-					if (!entry.getValue().equals(value)) {
-						skip = true;
-						break;
+		for (String filename : new File(dataDir + metricName).list()) {
+			boolean gzip = filename.endsWith(".gz");
+			int time = Numbers.parseInt(gzip ?
+					filename.substring(0, filename.length() - 3) : filename);
+			int index = (time - begin) / interval;
+			if (index < 0 || index >= length) {
+				continue;
+			}
+			try (
+				FileInputStream fis = new FileInputStream(filename);
+				BufferedReader in = new BufferedReader(new
+						InputStreamReader(gzip ? new GZIPInputStream(fis) : fis));
+			) {
+				String line;
+				while ((line = in.readLine()) != null) {
+					String[] paths;
+					Map<String, String> tags = new HashMap<>();
+					int i = line.indexOf('?');
+					if (i < 0) {
+						paths = line.split("/");
+					} else {
+						paths = line.substring(0, i).split("/");
+						String q = line.substring(i + 1);
+						for (String tag : q.split("&")) {
+							i = tag.indexOf('=');
+							if (i > 0) {
+								tags.put(Strings.decodeUrl(tag.substring(0, i)),
+										Strings.decodeUrl(tag.substring(i + 1)));
+							}
+						}
+					}
+					// Query Tags
+					boolean skip = false;
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String value = tags.get(entry.getKey());
+						if (!entry.getValue().equals(value)) {
+							skip = true;
+							break;
+						}
+					}
+					if (skip || paths.length <= 4) {
+						continue;
+					}
+					// Group Tags
+					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+					MetricValue value = result.get(key);
+					if (value == null) {
+						result.put(key, newValue);
+					} else {
+						value.add(newValue);
 					}
 				}
-				if (skip) {
-					return;
-				}
-				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue newValue = new MetricValue(row.getLong("_count"),
-						((Number) row.get("_sum")).doubleValue(),
-						((Number) row.get("_max")).doubleValue(),
-						((Number) row.get("_min")).doubleValue(),
-						((Number) row.get("_sqr")).doubleValue());
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
-				}
-			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
-		} catch (SQLException e) {
-			Log.e(e);
-			response(exchange, 500);
-			return;
+			} catch (IOException e) {
+				Log.e(e);
+			}
 		}
 		// Generate Data
 		Map<String, double[]> data = new HashMap<>();
@@ -469,8 +415,8 @@ public class Dashboard {
 		}
 	}
 
-	public static void startup(ConnectionPool db_) {
-		db = db_;
+	public static void startup(String dataDir_) {
+		dataDir = dataDir_;
 
 		Properties p = Conf.load("Dashboard");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);

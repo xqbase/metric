@@ -19,9 +19,11 @@ hs_err_pid*
 # Maven Files #
 /client/target
 /client-jdk17/target
+/collector-file/target
 /collector-mongo/target
 /collector-sql/target
 /common/target
 /common-jdk17/target
+/dashboard-file/target
 /dashboard-mongo/target
 /dashboard-sql/target
