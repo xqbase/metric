@@ -105,7 +105,7 @@ public class Collector {
 	private static String getOrCreate(String name, int time) {
 		String dirName = dataDir + name;
 		new File(dirName).mkdirs();
-		return dirName + "/" + String.format("%08d", Integer.valueOf(time));
+		return dirName + "/" + time;
 	}
 
 	private static void insert(PrintStream out, List<MetricRow> rows) {
@@ -154,21 +154,54 @@ public class Collector {
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
+	private static int getSize(String name) {
+		File[] files = new File(dataDir + name).listFiles();
+		if (files == null) {
+			return 0;
+		}
+		int size = 0;
+		for (File file : files) {
+			size += file.length();
+		}
+		return size;
+	}
+
 	private static Map<String, int[]> getNames(boolean aggregated) {
 		Map<String, int[]> names = new HashMap<>();
 		for (String filename : new File(dataDir).list()) {
+			if (filename.startsWith("_tags_quarter.")) {
+				continue;
+			}
 			if (filename.startsWith("_quarter.")) {
-				// TODO
+				String name = filename.substring(9);
+				names.computeIfAbsent(name, k -> new int[3])[1] =
+						getSize(filename);
 				continue;
 			}
 			if (filename.equals("Aggregated.properties")) {
 				if (!aggregated) {
 					continue;
 				}
-				// TODO
-			} else if (!filename.equals("Tags.properties")) {
-				// TODO
+				Properties p = new Properties();
+				try (FileInputStream in = new FileInputStream(dataDir +
+						"Aggregated.properties")) {
+					p.load(in);
+				} catch (IOException e) {
+					Log.e(e);
+				}
+				p.forEach((k, v) -> {
+					int[] value = names.get(k);
+					if (value != null) {
+						value[2] = Numbers.parseInt((String) v);
+					}
+				});
+				continue;
 			}
+			if (filename.equals("Tags.properties")) {
+				continue;
+			}
+			names.computeIfAbsent(filename,
+					k -> new int[3])[0] = getSize(filename);
 		}
 		return names;
 	}
@@ -232,11 +265,16 @@ public class Collector {
 
 	private static void delete(String name, int time) {
 		String prefix = dataDir + name + "/";
-		for (String filename : new File(dataDir + name).list()) {
-			if (filename.endsWith(".gz")) {
-				filename = filename.substring(0, filename.length() - 3);
+		String[] filenames = new File(dataDir + name).list();
+		if (filenames == null) {
+			return;
+		}
+		for (String filename : filenames) {
+			String f = filename;
+			if (f.endsWith(".gz")) {
+				f = f.substring(0, f.length() - 3);
 			}
-			if (Numbers.parseInt(filename) <= time) {
+			if (Numbers.parseInt(f) <= time) {
 				new File(prefix + filename).delete();
 			}
 		}
@@ -256,11 +294,12 @@ public class Collector {
 				// 2.1 Delete folder if metric data does not exist
 				new File(dataDir + name).delete();
 				new File(dataDir + "_quarter." + name).delete();
+				new File(dataDir + "_tags_quarter." + name).delete();
 				return;
 			}
 			int aggregated = sizeAndAggregated[2];
 			delete(name, quarter * 15 - expire);
-			delete("_quarter." + name, quarter * 15 - expire);
+			delete("_quarter." + name, quarter - expire);
 			// 3. Aggregate minute to quarter
 			int start = aggregated == 0 ? quarter - expire : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
@@ -268,16 +307,15 @@ public class Collector {
 				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				int i15 = i * 15;
 				for (int j = i * 15 - 14; j <= i15; j ++) {
-					String filename = dataDir + name + "/" +
-							String.format("%08d", Integer.valueOf(j));
-					if (!new File(filename).exists()) {
+					String filename = dataDir + name + "/" + j;
+					File file = new File(filename);
+					if (!file.exists()) {
 						continue;
 					}
 					try (
-						BufferedReader in = new BufferedReader(new
-								FileReader(filename));
-						GZIPOutputStream out = new GZIPOutputStream(new
-								FileOutputStream(filename + ".gz"));
+						BufferedReader in = new BufferedReader(new FileReader(file));
+						PrintStream out = new PrintStream(new GZIPOutputStream(new
+								FileOutputStream(filename + ".gz")));
 					) {
 						String line;
 						while ((line = in.readLine()) != null) {
@@ -309,7 +347,7 @@ public class Collector {
 								value.add(newValue);
 							}
 							// 4. Compress minute data
-							out.write(line.getBytes());
+							out.println(line);
 						}
 					} catch (IOException e) {
 						Log.e(e);
@@ -344,7 +382,7 @@ public class Collector {
 				}
 				// 3'. Aggregate to "_quarter.*"
 				try (PrintStream out = new PrintStream(new GZIPOutputStream(new
-						FileOutputStream(getOrCreate(name, i) + ".gz")))) {
+						FileOutputStream(getOrCreate("_quarter." + name, i) + ".gz")))) {
 					insert(out, rows);
 				} catch (IOException e) {
 					Log.e(e);
@@ -363,9 +401,15 @@ public class Collector {
 					Log.e(e);
 				}
 			}
-			// 6. Aggregate "_tags_quarter" to "Tags.properties";
+			// 6. Set "aggreagted"
+			aggregatedProp.setProperty(name, "" + quarter);
+			// 7. Aggregate "_tags_quarter" to "Tags.properties";
+			File[] files = new File(dataDir + "_tags_quarter." + name).listFiles();
+			if (files == null) {
+				return;
+			}
 			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
-			for (File file : new File(dataDir + "_tags_quarter." + name).listFiles()) {
+			for (File file : files) {
 				byte[] b;
 				try (FileInputStream in = new FileInputStream(file)) {
 					b = new byte[in.available()];
@@ -386,13 +430,11 @@ public class Collector {
 							continue;
 						}
 						putTagValue(tagMap, tagKey, tagValue,
-								new MetricValue(j.optLong("_count"), j.optDouble("_sum"),
-								j.optDouble("_max"), j.optDouble("_min"), j.optDouble("_sqr")));
+								new MetricValue(j.optLong("count"), j.optDouble("sum"),
+								j.optDouble("max"), j.optDouble("min"), j.optDouble("sqr")));
 					}
 				}
 			}
-			// 7. Set "aggreagted" and "tags"
-			aggregatedProp.setProperty(name, "" + quarter);
 			tagsProp.setProperty(name, new JSONObject(limit(tagMap)).toString());
 		});
 

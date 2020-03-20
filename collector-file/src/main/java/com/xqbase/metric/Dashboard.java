@@ -99,13 +99,9 @@ public class Dashboard {
 		}
 	};
 
-	private static double __(double d) {
-		return Double.isFinite(d) ? d : 0;
-	}
-
 	private static double __(String s) {
 		double d = Numbers.parseDouble(s);
-		return Double.isNaN(d) ? 0 : d;
+		return Double.isFinite(d) ? d : 0;
 	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
@@ -148,7 +144,8 @@ public class Dashboard {
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		String out = (data instanceof String ? (String) data : JSONObject.valueToString(data));
+		String out = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -295,8 +292,13 @@ public class Dashboard {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
+			File file = new File(dataDir + "Tags.properties");
+			if (!file.exists()) {
+				response(exchange, Collections.emptyMap(), false);
+				return;
+			}
 			Properties p = new Properties();
-			try (FileInputStream in = new FileInputStream(dataDir + "Tags")) {
+			try (FileInputStream in = new FileInputStream(file)) {
 				p.load(in);
 			} catch (IOException e) {
 				Log.e(e);
@@ -332,7 +334,12 @@ public class Dashboard {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		for (String filename : new File(dataDir + metricName).list()) {
+		String[] filenames = new File(dataDir + metricName).list();
+		if (filenames == null) {
+			response(exchange, Collections.emptyMap(), acceptGzip);
+			return;
+		}
+		for (String filename : filenames) {
 			boolean gzip = filename.endsWith(".gz");
 			int time = Numbers.parseInt(gzip ?
 					filename.substring(0, filename.length() - 3) : filename);
@@ -340,8 +347,12 @@ public class Dashboard {
 			if (index < 0 || index >= length) {
 				continue;
 			}
+			File file = new File(dataDir + metricName + "/" + filename);
+			if (!file.exists()) {
+				continue;
+			}
 			try (
-				FileInputStream fis = new FileInputStream(filename);
+				FileInputStream fis = new FileInputStream(file);
 				BufferedReader in = new BufferedReader(new
 						InputStreamReader(gzip ? new GZIPInputStream(fis) : fis));
 			) {
@@ -403,7 +414,8 @@ public class Dashboard {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = __(method.applyAsDouble(value));
+			double d = method.applyAsDouble(value);
+			values[key.index] = Double.isFinite(d) ? d : 0;
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			response(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
