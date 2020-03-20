@@ -7,11 +7,9 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -46,7 +44,10 @@ import com.xqbase.util.Time;
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
-	private static double __(double d) {
+	private static Document aggregatedProj = __("quarter", Boolean.TRUE);
+
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
 		return Double.isNaN(d) ? 0 : d;
 	}
 
@@ -57,21 +58,12 @@ public class Collector {
 
 	private static void put(HashMap<String, ArrayList<Document>> rowsMap,
 			String name, Document row) {
-		ArrayList<Document> rows = rowsMap.get(name);
-		if (rows == null) {
-			rows = new ArrayList<>();
-			rowsMap.put(name, rows);
-		}
-		rows.add(row);
+		rowsMap.computeIfAbsent(name, k -> new ArrayList<>()).add(row);
 	}
 
 	private static void insert(MongoDatabase db,
 			HashMap<String, ArrayList<Document>> rowsMap) {
 		rowsMap.forEach((name, rows) -> db.getCollection(name).insertMany(rows));
-	}
-
-	private static boolean isTag(String key) {
-		return !key.isEmpty() && key.charAt(0) != '_';
 	}
 
 	private static int getInt(Document row, String key) {
@@ -89,14 +81,13 @@ public class Collector {
 		return value instanceof Number ? ((Number) value).doubleValue() : 0;
 	}
 
-	private static String getString(Document row, String key) {
+	private static Document getDocument(Document row, String key) {
 		Object value = row.get(key);
-		return value instanceof String ? (String) value : "_";
+		return value instanceof Document ? (Document) value : new Document();
 	}
 
-	private static List<?> getList(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof List ? (List<?>) value : Collections.emptyList();
+	private static void put(Document row, String key, double d) {
+		row.put(key, Double.valueOf(d));
 	}
 
 	private static Document __(String key, Object value) {
@@ -104,9 +95,9 @@ public class Collector {
 	}
 
 	private static final Document
-			INDEX_MINUTE = __("_minute", Integer.valueOf(1)),
-			INDEX_QUARTER = __("_quarter", Integer.valueOf(1)),
-			INDEX_NAME = __("_name", Integer.valueOf(1));
+			INDEX_MINUTE = __("minute", Integer.valueOf(1)),
+			INDEX_QUARTER = __("quarter", Integer.valueOf(1)),
+			INDEX_NAME = __("name", Integer.valueOf(1));
 	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
@@ -117,20 +108,24 @@ public class Collector {
 	private static Document row(Map<String, String> tagMap, String type,
 			int now, long count, double sum, double max, double min, double sqr) {
 		Document row = new Document();
-		if (maxTags > 0 && tagMap.size() > maxTags) {
-			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
-					Comparator.comparing(Map.Entry::getKey), maxTags), row::put);
-		} else {
-			row.putAll(tagMap);
+		if (tagMap != null) {
+			if (maxTags > 0 && tagMap.size() > maxTags) {
+				HashMap<String, String> tags = new HashMap<>();
+				CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
+						Comparator.comparing(Map.Entry::getKey), maxTags), tags::put);
+				row.put("tags", tags);
+			} else {
+				row.put("tags", tagMap);
+			}
 		}
 		if (type != null) {
 			row.put(type, Integer.valueOf(now));
 		}
-		row.put("_count", Long.valueOf(count));
-		row.put("_sum", Double.valueOf(sum));
-		row.put("_max", Double.valueOf(max));
-		row.put("_min", Double.valueOf(min));
-		row.put("_sqr", Double.valueOf(sqr));
+		row.put("count", Long.valueOf(count));
+		put(row, "sum", sum);
+		put(row, "max", max);
+		put(row, "min", min);
+		put(row, "sqr", sqr);
 		return row;
 	}
 
@@ -138,7 +133,7 @@ public class Collector {
 		// Insert aggregation-during-collection metrics
 		HashMap<String, ArrayList<Document>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
-			Document row = row(entry.getTagMap(), "_minute", minute, entry.getCount(),
+			Document row = row(entry.getTagMap(), "minute", minute, entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 			put(rowsMap, entry.getName(), row);
 		}
@@ -193,14 +188,13 @@ public class Collector {
 		}
 	}
 
-	private static Document getTagRow(HashMap<String, HashMap<String, MetricValue>> tagMap) {
-		Document row = new Document();
+	private static Document getTags(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+		Document tags = new Document();
 		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
-			ArrayList<Document> tagValues = new ArrayList<>();
+			Document tagValues = new Document();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
-				tagValues.add(row(Collections.singletonMap("_value", tagValue),
-						null, 0, value.getCount(), value.getSum(),
-						value.getMax(), value.getMin(), value.getSqr()));
+				tagValues.put(tagValue, row(null, null, 0, value.getCount(),
+						value.getSum(), value.getMax(), value.getMin(), value.getSqr()));
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
 				CollectionsEx.forEach(CollectionsEx.max(valueMap.entrySet(),
@@ -209,7 +203,7 @@ public class Collector {
 			} else {
 				valueMap.forEach(action);
 			}
-			row.put(tagName, tagValues);
+			tags.put(tagName, tagValues);
 		};
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
@@ -217,17 +211,17 @@ public class Collector {
 		} else {
 			tagMap.forEach(mainAction);
 		}
-		return row;
+		return tags;
 	}
 
 	private static void quarterly(MongoDatabase db, int quarter) {
-		Document removeBefore = __("_minute", __("$lte",
+		Document removeBefore = __("minute", __("$lte",
 				Integer.valueOf(quarter * 15 - expire)));
-		Document removeAfter = __("_minute", __("$gte",
+		Document removeAfter = __("minute", __("$gte",
 				Integer.valueOf(quarter * 15 + expire)));
-		Document removeBeforeQuarter = __("_quarter", __("$lte",
+		Document removeBeforeQuarter = __("quarter", __("$lte",
 				Integer.valueOf(quarter - expire)));
-		Document removeAfterQuarter = __("_quarter", __("$gte",
+		Document removeAfterQuarter = __("quarter", __("$gte",
 				Integer.valueOf(quarter + expire)));
 		// Ensure index on meta collections
 		MongoCollection<Document> aggregated = db.getCollection("_meta.aggregated");
@@ -235,9 +229,9 @@ public class Collector {
 		MongoCollection<Document> tagsQuarter = db.getCollection("_meta.tags_quarter");
 		tagsQuarter.createIndex(INDEX_NAME);
 		tagsQuarter.createIndex(INDEX_QUARTER);
-		tagsQuarter.deleteMany(__("_quarter", __("$lte",
+		tagsQuarter.deleteMany(__("quarter", __("$lte",
 				Integer.valueOf(quarter - tagsExpire))));
-		tagsQuarter.deleteMany(__("_quarter", __("$gte",
+		tagsQuarter.deleteMany(__("quarter", __("$gte",
 				Integer.valueOf(quarter + tagsExpire))));
 		// Scan minutely collections
 		for (String name : db.listCollectionNames()) {
@@ -251,26 +245,22 @@ public class Collector {
 			collection.deleteMany(removeBefore);
 			collection.deleteMany(removeAfter);
 			// Aggregate to quarter
-			Document query = __("_name", name);
-			Document aggregatedRow = aggregated.find(query).first();
+			Document query = __("name", name);
+			Document aggregatedRow = aggregated.find(query).projection(aggregatedProj).first();
 			int start = aggregatedRow == null ? quarter - aggrExpire :
-					getInt(aggregatedRow, "_quarter");
+					getInt(aggregatedRow, "quarter");
 			for (int i = start + 1; i <= quarter; i ++) {
 				ArrayList<Document> rows = new ArrayList<>();
 				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
 				Document range = __("$gte", Integer.valueOf(i * 15 - 14));
 				range.put("$lte", Integer.valueOf(i * 15));
-				for (Document row : collection.find(__("_minute", range))) {
+				for (Document row : collection.find(__("minute", range))) {
 					HashMap<String, String> tags = new HashMap<>();
-					for (String tagKey : row.keySet()) {
-						if (isTag(tagKey)) {
-							tags.put(tagKey, getString(row, tagKey));
-						}
-					}
+					getDocument(row, "tags").forEach((k, v) -> tags.put(k, String.valueOf(v)));
 					// Aggregate to "_quarter.*"
-					MetricValue newValue = new MetricValue(getLong(row, "_count"),
-							getDouble(row, "_sum"), getDouble(row, "_max"),
-							getDouble(row, "_min"), getDouble(row, "_sqr"));
+					MetricValue newValue = new MetricValue(getLong(row, "count"),
+							getDouble(row, "sum"), getDouble(row, "max"),
+							getDouble(row, "min"), getDouble(row, "sqr"));
 					MetricValue value = result.get(tags);
 					if (value == null) {
 						result.put(tags, newValue);
@@ -285,9 +275,9 @@ public class Collector {
 				Metric.put("metric.tags.combinations", combinations, "name", name);
 				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
-				BiConsumer<HashMap<String, String>, MetricValue> action = (tags, value) -> {
-					// {"_quarter": i}, but not {"_quarter": quarter} !
-					rows.add(row(tags, "_quarter", i_, value.getCount(), value.getSum(),
+				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
+					// {"quarter": i}, but not {"quarter": quarter} !
+					rows.add(row(tags, "quarter", i_, value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
 					tags.forEach((tagKey, tagValue) ->
@@ -305,13 +295,14 @@ public class Collector {
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(), "name", name, "key", tagKey);
 				});
-				Document row = getTagRow(tagMap);
-				row.put("_name", name);
-				// {"_quarter": i}, but not {"_quarter": quarter} !
-				row.put("_quarter", Integer.valueOf(i));
+				Document row = __("name", name);
+				row.put("name", name);
+				// {"quarter": i}, but not {"quarter": quarter} !
+				row.put("quarter", Integer.valueOf(i));
+				row.put("tags", getTags(tagMap));
 				tagsQuarter.insertOne(row);
 			}
-			Document update = __("$set", __("_quarter", Integer.valueOf(quarter)));
+			Document update = __("$set", __("quarter", Integer.valueOf(quarter)));
 			aggregated.updateOne(query, update, UPSERT);
 		}
 		// Scan quarterly collections
@@ -327,27 +318,23 @@ public class Collector {
 			collection.deleteMany(removeAfterQuarter);
 			// Aggregate "_meta.tags_quarter" to "_meta.aggregated";
 			String minuteName = name.substring(9);
-			Document query = __("_name", minuteName);
+			Document query = __("name", minuteName);
 			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
 			for (Document row : tagsQuarter.find(query)) {
-				for (String tagKey : row.keySet()) {
-					if (!isTag(tagKey)) {
-						continue;
-					}
-					for (Object o : getList(row, tagKey)) {
-						if (!(o instanceof Document)) {
-							continue;
-						}
-						Document oo = (Document) o;
-						putTagValue(tagMap, tagKey, getString(oo, "_value"),
-								new MetricValue(getLong(oo, "_count"),
-								getDouble(oo, "_sum"), getDouble(oo, "_max"),
-								getDouble(oo, "_min"), getDouble(oo, "_sqr")));
+				Document tags = getDocument(row, "tags");
+				for (String tagKey : tags.keySet()) {
+					Document tagValues = getDocument(tags, tagKey);
+					for (String tagValue : tagValues.keySet()) {
+						Document v = getDocument(tagValues, tagValue);
+						putTagValue(tagMap, tagKey, tagValue,
+								new MetricValue(getLong(v, "count"),
+								getDouble(v, "sum"), getDouble(v, "max"),
+								getDouble(v, "min"), getDouble(v, "sqr")));
 					}
 				}
 			}
 			aggregated.updateOne(query, __("$set",
-					__("_tags", getTagRow(tagMap))), UPSERT);
+					__("tags", getTags(tagMap))), UPSERT);
 		}
 	}
 
@@ -488,16 +475,16 @@ public class Collector {
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
 						long count = Numbers.parseLong(paths[2]);
-						double sum = __(Numbers.parseDouble(paths[3]));
-						double max = __(Numbers.parseDouble(paths[4]));
-						double min = __(Numbers.parseDouble(paths[5]));
-						double sqr = __(Numbers.parseDouble(paths[6]));
-						put(rowsMap, name, row(tagMap, "_minute",
+						double sum = __(paths[3]);
+						double max = __(paths[4]);
+						double min = __(paths[5]);
+						double sqr = __(paths[6]);
+						put(rowsMap, name, row(tagMap, "minute",
 								Numbers.parseInt(paths[1], currentMinute.get()),
 								count, sum, max, min, sqr));
 					} else {
 						// For aggregation-during-collection metric, aggregate first
-						Metric.put(name, Numbers.parseDouble(paths[1]), tagMap);
+						Metric.put(name, __(paths[1]), tagMap);
 					}
 					if (verbose) {
 						Integer count = countMap.get(name);

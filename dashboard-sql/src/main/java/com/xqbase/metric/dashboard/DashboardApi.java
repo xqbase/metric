@@ -4,14 +4,11 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Driver;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
@@ -26,8 +23,8 @@ import javax.servlet.http.HttpServletResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Codecs;
+import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
@@ -96,14 +93,6 @@ public class DashboardApi extends HttpServlet {
 		if (db != null) {
 			db.close();
 		}
-	}
-
-	private static double __(double d) {
-		return Double.isFinite(d) ? d : 0;
-	}
-
-	private static Double ___(double d) {
-		return Double.valueOf(__(d));
 	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
@@ -216,37 +205,7 @@ public class DashboardApi extends HttpServlet {
 				return;
 			}
 			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			if (tags == null) {
-				outputJson(req, resp, Collections.emptyMap());
-				return;
-			}
-			Map<String, List<Map<String, Object>>> json = new HashMap<>();
-			tags.forEach((tagKey, tagValues) -> {
-				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
-					return;
-				}
-				Collection<Map.Entry<String, MetricValue>> tagValues_ =
-						tagValues.entrySet();
-				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
-					tagValues_ = CollectionsEx.max(tagValues_,
-							Comparator.comparingLong(o -> o.getValue().getCount()),
-							maxTagValues);
-				}
-				List<Map<String, Object>> arr = new ArrayList<>();
-				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
-					MetricValue metric = tagValue.getValue();
-					Map<String, Object> obj = new HashMap<>();
-					obj.put("_value", tagValue.getKey());
-					obj.put("_count", Long.valueOf(metric.getCount()));
-					obj.put("_sum", ___(metric.getSum()));
-					obj.put("_max", ___(metric.getMax()));
-					obj.put("_min", ___(metric.getMin()));
-					obj.put("_sqr", ___(metric.getSqr()));
-					arr.add(obj);
-				}
-				json.put(tagKey, arr);
-			});
-			outputJson(req, resp, json);
+			outputJson(req, resp, tags == null ? Collections.emptyMap() : tags);
 			return;
 		}
 
@@ -345,7 +304,8 @@ public class DashboardApi extends HttpServlet {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = __(method.applyAsDouble(value));
+			double d = method.applyAsDouble(value);
+			values[key.index] = Double.isFinite(d) ? d : 0;
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			outputJson(req, resp, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),

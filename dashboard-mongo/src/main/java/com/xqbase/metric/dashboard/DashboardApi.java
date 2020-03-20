@@ -7,9 +7,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -20,7 +17,6 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.bson.BSONObject;
 import org.bson.Document;
 import org.json.JSONObject;
 
@@ -145,6 +141,11 @@ public class DashboardApi extends HttpServlet {
 		return value instanceof String ? (String) value : "_";
 	}
 
+	private static Document getDocument(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof Document ? (Document) value : new Document();
+	}
+
 	private static void copyHeader(HttpServletRequest req,
 			HttpServletResponse resp, String reqHeader, String respHeader) {
 		String value = req.getHeader(reqHeader);
@@ -206,42 +207,13 @@ public class DashboardApi extends HttpServlet {
 			Document tagsRow;
 			try {
 				tagsRow = db.getCollection("_meta.aggregated").
-						find(__("_name", metricName)).first();
+						find(__("name", metricName)).first();
 			} catch (MongoException e) {
 				error500(resp, e);
 				return;
 			}
-			if (tagsRow == null) {
-				outputJson(req, resp, Collections.emptyMap());
-				return;
-			}
-			tagsRow = (Document) tagsRow.get("_tags");
-			if (tagsRow == null) {
-				outputJson(req, resp, Collections.emptyMap());
-				return;
-			}
-			Iterator<String> it = tagsRow.keySet().iterator();
-			while (it.hasNext()) {
-				String tag = it.next();
-				if (tag.isEmpty() || tag.charAt(0) == '_') {
-					it.remove();
-					continue;
-				}
-				if (maxTagValues <= 0) {
-					continue;
-				}
-				List<?> values = (List<?>) tagsRow.get(tag);
-				if (values.size() <= maxTagValues) {
-					continue;
-				}
-				PriorityQueue<?> countQueue = CollectionsEx.max(values,
-						Comparator.comparingLong(o -> {
-					Object count = ((BSONObject) o).get("_count");
-					return (count instanceof Number ? ((Number) count).longValue() : 0);
-				}), maxTagValues);
-				tagsRow.put(tag, countQueue);
-			}
-			outputJson(req, resp, tagsRow);
+			outputJson(req, resp, tagsRow == null ?
+					Collections.emptyMap() : getDocument(tagsRow, "tags"));
 			return;
 		}
 		// Query Condition
@@ -250,7 +222,7 @@ public class DashboardApi extends HttpServlet {
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
 			if (!name.isEmpty() && name.charAt(0) != '_') {
-				query.put(name, req.getParameter(name));
+				query.put("tags." + name, req.getParameter(name));
 			}
 		}
 		// Other Query Parameters
@@ -259,11 +231,11 @@ public class DashboardApi extends HttpServlet {
 		if (metricName.startsWith("_quarter.")) {
 			end = Numbers.parseInt(req.getParameter("_end"),
 					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "_quarter";
+			rangeColumn = "quarter";
 		} else {
 			end = Numbers.parseInt(req.getParameter("_end"),
 					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "_minute";
+			rangeColumn = "minute";
 		}
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
@@ -283,9 +255,9 @@ public class DashboardApi extends HttpServlet {
 					continue;
 				}
 				GroupKey key = new GroupKey(groupBy.apply(row), index);
-				MetricValue newValue = new MetricValue(getLong(row, "_count"),
-						getDouble(row, "_sum"), getDouble(row, "_max"),
-						getDouble(row, "_min"), getDouble(row, "_sqr"));
+				MetricValue newValue = new MetricValue(getLong(row, "count"),
+						getDouble(row, "sum"), getDouble(row, "max"),
+						getDouble(row, "min"), getDouble(row, "sqr"));
 				MetricValue value = result.get(key);
 				if (value == null) {
 					result.put(key, newValue);

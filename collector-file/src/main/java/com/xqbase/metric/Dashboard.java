@@ -304,11 +304,8 @@ public class Dashboard {
 				Log.e(e);
 			}
 			String json = p.getProperty(metricName);
-			if (json == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			response(exchange, json, acceptGzip);
+			response(exchange, json == null ?
+					Collections.emptyMap() : json, json != null);
 			return;
 		}
 
@@ -336,7 +333,7 @@ public class Dashboard {
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		String[] filenames = new File(dataDir + metricName).list();
 		if (filenames == null) {
-			response(exchange, Collections.emptyMap(), acceptGzip);
+			response(exchange, Collections.emptyMap(), false);
 			return;
 		}
 		for (String filename : filenames) {

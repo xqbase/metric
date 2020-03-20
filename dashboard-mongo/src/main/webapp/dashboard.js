@@ -2,25 +2,25 @@ var MINUTE = 60000;
 var METHOD_NAME = ["sum", "count", "avg", "max", "min", "std"];
 var METHOD_COMPARATOR = [
 	function(tag1, tag2) {
-		return tag2._sum - tag1._sum;
+		return tag2.sum - tag1.sum;
 	},
 	function(tag1, tag2) {
-		return tag2._count - tag1._count;
+		return tag2.count - tag1.count;
 	},
 	function(tag1, tag2) {
-		return tag2._sum / tag2._count - tag1._sum / tag1._count;
+		return tag2.sum / tag2.count - tag1.sum / tag1.count;
 	},
 	function(tag1, tag2) {
-		return tag2._max - tag1._max;
+		return tag2.max - tag1.max;
 	},
 	function(tag1, tag2) {
-		return tag2._min - tag1._min;
+		return tag2.min - tag1.min;
 	},
 	function(tag1, tag2) {
-		var base1 = tag1._sqr * tag1._count - tag1._sum * tag1._sum;
-		base1 = base1 < 0 ? 0 : Math.sqrt(base1) / tag1._count;
-		var base2 = tag2._sqr * tag2._count - tag2._sum * tag2._sum;
-		base2 = base2 < 0 ? 0 : Math.sqrt(base2) / tag2._count;
+		var base1 = tag1.sqr * tag1.count - tag1.sum * tag1.sum;
+		base1 = base1 < 0 ? 0 : Math.sqrt(base1) / tag1.count;
+		var base2 = tag2.sqr * tag2.count - tag2.sum * tag2.sum;
+		base2 = base2 < 0 ? 0 : Math.sqrt(base2) / tag2.count;
 		return base2 - base1;
 	},
 ];
@@ -218,7 +218,13 @@ function showTags(tagMap) {
 	for (var tagName in tagMap) {
 		selectedTags[tagName] = "_";
 		groupHtml = APPEND_HTML(groupHtml, "<li value=\"" + tagName + "\"><a>" + TAG_NAME_TEXT(tagName) + "</a></li>");
-		var tags = tagMap[tagName];
+		var tagsObj = tagMap[tagName];
+		var tags = [];
+		for (var tagValue in tagsObj) {
+			var tag = tagsObj[tagValue];
+			tag.value = tagValue;
+			tags.push(tag);
+		}
 		tags.sort(methodComparator);
 		tagsHtml +=
 				"<div class=\"btn-group\">" +
@@ -231,7 +237,7 @@ function showTags(tagMap) {
 						"<ul class=\"dropdown-menu\" role=\"menu\" value=\"" + tagName + "\">";
 		var valuesHtml = "<li value=\"_\"><a>===ALL===</a></li>";
 		for (var i = 0; i < tags.length; i ++) {
-			tagValue = tags[i]._value;
+			tagValue = tags[i].value;
 			valuesHtml = APPEND_HTML(valuesHtml, "<li value=\"" + HTML_ENTITIES(tagValue) + "\"><a>" + HTML_ENTITIES(TAG_VALUE_TEXT(tagName, tagValue)) + "</a></li>");
 		}
 		tagsHtml += valuesHtml +

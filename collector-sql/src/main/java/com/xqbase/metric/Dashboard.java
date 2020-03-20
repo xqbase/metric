@@ -9,14 +9,11 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -32,8 +29,8 @@ import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.metric.util.Codecs;
+import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -109,14 +106,6 @@ public class Dashboard {
 			return format_;
 		}
 	};
-
-	private static double __(double d) {
-		return Double.isFinite(d) ? d : 0;
-	}
-
-	private static Double ___(double d) {
-		return Double.valueOf(__(d));
-	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
@@ -330,37 +319,8 @@ public class Dashboard {
 				return;
 			}
 			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			if (tags == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			Map<String, List<Map<String, Object>>> json = new HashMap<>();
-			tags.forEach((tagKey, tagValues) -> {
-				if (tagKey.isEmpty() || tagKey.charAt(0) == '_') {
-					return;
-				}
-				Collection<Map.Entry<String, MetricValue>> tagValues_ =
-						tagValues.entrySet();
-				if (maxTagValues > 0 && tagValues.size() > maxTagValues) {
-					tagValues_ = CollectionsEx.max(tagValues_,
-							Comparator.comparingLong(o -> o.getValue().getCount()),
-							maxTagValues);
-				}
-				List<Map<String, Object>> arr = new ArrayList<>();
-				for (Map.Entry<String, MetricValue> tagValue : tagValues_) {
-					MetricValue metric = tagValue.getValue();
-					Map<String, Object> obj = new HashMap<>();
-					obj.put("_value", tagValue.getKey());
-					obj.put("_count", Long.valueOf(metric.getCount()));
-					obj.put("_sum", ___(metric.getSum()));
-					obj.put("_max", ___(metric.getMax()));
-					obj.put("_min", ___(metric.getMin()));
-					obj.put("_sqr", ___(metric.getSqr()));
-					arr.add(obj);
-				}
-				json.put(tagKey, arr);
-			});
-			response(exchange, json, acceptGzip);
+			response(exchange, tags == null ?
+					Collections.emptyMap() : tags, tags != null);
 			return;
 		}
 
@@ -372,7 +332,7 @@ public class Dashboard {
 		try {
 			Row row = db.queryEx(QUERY_ID, metricName);
 			if (row == null) {
-				response(exchange, Collections.emptyMap(), acceptGzip);
+				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
 			id = row.getInt("id");
@@ -457,7 +417,8 @@ public class Dashboard {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = __(method.applyAsDouble(value));
+			double d = method.applyAsDouble(value);
+			values[key.index] = Double.isFinite(d) ? d : 0;
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			response(exchange, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
