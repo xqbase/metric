@@ -81,13 +81,12 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
-	private static double __(double d) {
-		return Double.isFinite(d) ? d : 0;
+	private static String escape(String s) {
+		return s.replace("\\", "\\\\").replace(".", "\\_");
 	}
 
-	private static String __(Object data) {
-		return data instanceof Document ? ((Document) data).toJson() :
-				JSONObject.wrap(data).toString();
+	private static String unescape(String s) {
+		return s.replace("\\-", "\\").replace("\\_", ".");
 	}
 
 	private static Document __(String key, Object value) {
@@ -164,6 +163,8 @@ public class DashboardApi extends HttpServlet {
 			Log.d(e.getMessage());
 			return;
 		}
+		String json = data instanceof Document ? ((Document) data).toJson() :
+				JSONObject.wrap(data).toString();
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
 			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
@@ -173,10 +174,10 @@ public class DashboardApi extends HttpServlet {
 					"Access-Control-Allow-Headers");
 			resp.setHeader("Access-Control-Allow-Credentials", "true");
 			resp.setContentType("application/json");
-			out.print(__(data));
+			out.print(json);
 		} else {
 			resp.setContentType("text/javascript");
-			out.print(callback + "(" + __(data) + ");");
+			out.print(callback + "(" + json + ");");
 		}
 	}
 
@@ -222,7 +223,7 @@ public class DashboardApi extends HttpServlet {
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
 			if (!name.isEmpty() && name.charAt(0) != '_') {
-				query.put("tags." + name, req.getParameter(name));
+				query.put("tags." + escape(name), req.getParameter(name));
 			}
 		}
 		// Other Query Parameters
@@ -244,8 +245,8 @@ public class DashboardApi extends HttpServlet {
 		range.put("$lte", Integer.valueOf(end));
 		query.put(rangeColumn, range);
 		String groupBy_ = req.getParameter("_group_by");
-		Function<Document, String> groupBy = groupBy_ == null ?
-				row -> "_" : row -> getString(row, groupBy_);
+		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
+				row -> getString(getDocument(row, "tags"), escape(groupBy_));
 		// Query by MongoDB and Group by Java
 		HashMap<GroupKey, MetricValue> result = new HashMap<>();
 		try {
@@ -282,7 +283,8 @@ public class DashboardApi extends HttpServlet {
 				Arrays.fill(values, 0);
 				data.put(key.tag, values);
 			}
-			values[key.index] = __(method.applyAsDouble(value));
+			double d = method.applyAsDouble(value);
+			values[key.index] = Double.isFinite(d) ? d : 0;
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			outputJson(req, resp, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),

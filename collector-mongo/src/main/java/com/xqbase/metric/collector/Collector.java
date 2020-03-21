@@ -28,6 +28,7 @@ import com.mongodb.MongoClientURI;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.UpdateOptions;
+import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
@@ -49,6 +50,14 @@ public class Collector {
 	private static double __(String s) {
 		double d = Numbers.parseDouble(s);
 		return Double.isNaN(d) ? 0 : d;
+	}
+
+	private static String escape(String s) {
+		return s.replace("\\", "\\-").replace(".", "\\_");
+	}
+
+	private static String unescape(String s) {
+		return s.replace("\\-", "\\").replace("\\_", ".");
 	}
 
 	private static String decode(String s, int limit) {
@@ -109,14 +118,15 @@ public class Collector {
 			int now, long count, double sum, double max, double min, double sqr) {
 		Document row = new Document();
 		if (tagMap != null) {
+			Document tags = new Document();
+			BiConsumer<String, String> action = (k, v) -> tags.put(escape(k), v);
 			if (maxTags > 0 && tagMap.size() > maxTags) {
-				HashMap<String, String> tags = new HashMap<>();
 				CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
-						Comparator.comparing(Map.Entry::getKey), maxTags), tags::put);
-				row.put("tags", tags);
+						Comparator.comparing(Map.Entry::getKey), maxTags), action);
 			} else {
-				row.put("tags", tagMap);
+				tagMap.forEach(action);
 			}
+			row.put("tags", tags);
 		}
 		if (type != null) {
 			row.put(type, Integer.valueOf(now));
@@ -193,7 +203,7 @@ public class Collector {
 		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
 			Document tagValues = new Document();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
-				tagValues.put(tagValue, row(null, null, 0, value.getCount(),
+				tagValues.put(escape(tagValue), row(null, null, 0, value.getCount(),
 						value.getSum(), value.getMax(), value.getMin(), value.getSqr()));
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
@@ -203,7 +213,7 @@ public class Collector {
 			} else {
 				valueMap.forEach(action);
 			}
-			tags.put(tagName, tagValues);
+			tags.put(escape(tagName), tagValues);
 		};
 		if (maxTags > 0 && tagMap.size() > maxTags) {
 			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
@@ -256,7 +266,8 @@ public class Collector {
 				range.put("$lte", Integer.valueOf(i * 15));
 				for (Document row : collection.find(__("minute", range))) {
 					HashMap<String, String> tags = new HashMap<>();
-					getDocument(row, "tags").forEach((k, v) -> tags.put(k, String.valueOf(v)));
+					getDocument(row, "tags").forEach((k, v) ->
+							tags.put(unescape(k), String.valueOf(v)));
 					// Aggregate to "_quarter.*"
 					MetricValue newValue = new MetricValue(getLong(row, "count"),
 							getDouble(row, "sum"), getDouble(row, "max"),
@@ -326,7 +337,7 @@ public class Collector {
 					Document tagValues = getDocument(tags, tagKey);
 					for (String tagValue : tagValues.keySet()) {
 						Document v = getDocument(tagValues, tagValue);
-						putTagValue(tagMap, tagKey, tagValue,
+						putTagValue(tagMap, unescape(tagKey), unescape(tagValue),
 								new MetricValue(getLong(v, "count"),
 								getDouble(v, "sum"), getDouble(v, "max"),
 								getDouble(v, "min"), getDouble(v, "sqr")));
@@ -347,7 +358,7 @@ public class Collector {
 				"%1$tY-%1$tm-%1$td %1$tk:%1$tM:%1$tS.%1$tL %2$s%n%4$s: %5$s%6$s%n");
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
 		ExecutorService executor = Executors.newCachedThreadPool();
-		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1);
+		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
@@ -375,8 +386,11 @@ public class Collector {
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		MongoClient mongo = null;
 		Runnable minutely = null;
-		try (DatagramSocket socket = new DatagramSocket(new
-				InetSocketAddress(host, port))) {
+		try (
+			DatagramSocket socket = new DatagramSocket(new
+					InetSocketAddress(host, port));
+			ManagementMonitor monitor = new ManagementMonitor("metric.server");
+		) {
 			p = Conf.load("Mongo");
 			mongo = new MongoClient(new MongoClientURI(p.getProperty("uri")));
 			MongoDatabase db = mongo.getDatabase(p.getProperty("database", "metric"));
@@ -390,6 +404,7 @@ public class Collector {
 			});
 			timer.scheduleAtFixedRate(minutely, Time.MINUTE - start % Time.MINUTE,
 					Time.MINUTE, TimeUnit.MILLISECONDS);
+			timer.scheduleAtFixedRate(monitor, 5, 5, TimeUnit.SECONDS);
 			service.register(socket);
 
 			Log.i("Metric Collector Started on UDP " + host + ":" + port);

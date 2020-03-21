@@ -74,7 +74,7 @@
 		</dependency>
 		<dependency>
 			<groupId>com.xqbase</groupId>
-			<artifactId>xqbase-metric-common</artifactId>
+			<artifactId>xqbase-metric-client</artifactId>
 			<version>0.2.13-SNAPSHOT</version>
 		</dependency>
 		<dependency>
