@@ -58,6 +58,8 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
+	private static final String[] EMPTY_STRINGS = {};
+
 	private int maxTagValues = 0;
 	private MongoClient mongo = null;
 	private MongoDatabase db = null;
@@ -213,8 +215,26 @@ public class DashboardApi extends HttpServlet {
 				error500(resp, e);
 				return;
 			}
-			outputJson(req, resp, tagsRow == null ?
-					Collections.emptyMap() : getDocument(tagsRow, "tags"));
+			if (tagsRow == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
+			Document tags = getDocument(tagsRow, "tags");
+			for (String tagKey : tags.keySet().toArray(EMPTY_STRINGS)) {
+				Document tagValues = getDocument(tags, tagKey);
+				for (String tagValue : tagValues.keySet().toArray(EMPTY_STRINGS)) {
+					if (tagValue.indexOf('\\') >= 0) {
+						tagValues.remove(tagValue);
+						tagValues.put(unescape(tagValue),
+								getDocument(tagValues, tagValue));
+					}
+				}
+				if (tagKey.indexOf('\\') >= 0) {
+					tags.remove(tagKey);
+					tags.put(unescape(tagKey), tagValues);
+				}
+			}
+			outputJson(req, resp, tags);
 			return;
 		}
 		// Query Condition
