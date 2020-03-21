@@ -335,9 +335,10 @@ public class Collector {
 				Document tags = getDocument(row, "tags");
 				for (String tagKey : tags.keySet()) {
 					Document tagValues = getDocument(tags, tagKey);
+					String tagKey_ = unescape(tagKey);
 					for (String tagValue : tagValues.keySet()) {
 						Document v = getDocument(tagValues, tagValue);
-						putTagValue(tagMap, unescape(tagKey), unescape(tagValue),
+						putTagValue(tagMap, tagKey_, unescape(tagValue),
 								new MetricValue(getLong(v, "count"),
 								getDouble(v, "sum"), getDouble(v, "max"),
 								getDouble(v, "min"), getDouble(v, "sqr")));
