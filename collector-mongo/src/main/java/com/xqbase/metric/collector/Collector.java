@@ -159,7 +159,7 @@ public class Collector {
 				continue;
 			}
 			MongoCollection<Document> collection = db.getCollection(name);
-			long count = collection.countDocuments();
+			long count = collection.estimatedDocumentCount();
 			if (count == 0) {
 				// Remove disappeared metric collections
 				collection.drop();
