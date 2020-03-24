@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
@@ -95,7 +96,7 @@ public class DashboardApi extends HttpServlet {
 		return new Document(key, value);
 	}
 
-	private static HashMap<String, ToDoubleFunction<MetricValue>>
+	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
@@ -268,7 +269,7 @@ public class DashboardApi extends HttpServlet {
 		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
 				row -> getString(getDocument(row, "tags"), escape(groupBy_));
 		// Query by MongoDB and Group by Java
-		HashMap<GroupKey, MetricValue> result = new HashMap<>();
+		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			for (Document row : db.getCollection(metricName).find(query)) {
 				int index = (getInt(row, rangeColumn) - begin) / interval;
@@ -291,7 +292,7 @@ public class DashboardApi extends HttpServlet {
 			return;
 		}
 		// Generate Data
-		HashMap<String, double[]> data = new HashMap<>();
+		Map<String, double[]> data = new HashMap<>();
 		result.forEach((key, value) -> {
 			/* Already Filtered during Grouping
 			if (key.index < 0 || key.index >= length) {

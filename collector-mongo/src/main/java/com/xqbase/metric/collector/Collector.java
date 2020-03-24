@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -65,13 +66,13 @@ public class Collector {
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
-	private static void put(HashMap<String, ArrayList<Document>> rowsMap,
+	private static void put(Map<String, List<Document>> rowsMap,
 			String name, Document row) {
 		rowsMap.computeIfAbsent(name, k -> new ArrayList<>()).add(row);
 	}
 
 	private static void insert(MongoDatabase db,
-			HashMap<String, ArrayList<Document>> rowsMap) {
+			Map<String, List<Document>> rowsMap) {
 		rowsMap.forEach((name, rows) -> db.getCollection(name).insertMany(rows));
 	}
 
@@ -141,7 +142,7 @@ public class Collector {
 
 	private static void minutely(MongoDatabase db, int minute) {
 		// Insert aggregation-during-collection metrics
-		HashMap<String, ArrayList<Document>> rowsMap = new HashMap<>();
+		Map<String, List<Document>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
 			Document row = row(entry.getTagMap(), "minute", minute, entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
@@ -179,9 +180,9 @@ public class Collector {
 		}
 	}
 
-	private static void putTagValue(HashMap<String, HashMap<String, MetricValue>> tagMap,
+	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
 			String tagKey, String tagValue, MetricValue value) {
-		HashMap<String, MetricValue> tagValues = tagMap.get(tagKey);
+		Map<String, MetricValue> tagValues = tagMap.get(tagKey);
 		if (tagValues == null) {
 			tagValues = new HashMap<>();
 			tagMap.put(tagKey, tagValues);
@@ -198,9 +199,9 @@ public class Collector {
 		}
 	}
 
-	private static Document getTags(HashMap<String, HashMap<String, MetricValue>> tagMap) {
+	private static Document getTags(Map<String, Map<String, MetricValue>> tagMap) {
 		Document tags = new Document();
-		BiConsumer<String, HashMap<String, MetricValue>> mainAction = (tagName, valueMap) -> {
+		BiConsumer<String, Map<String, MetricValue>> mainAction = (tagName, valueMap) -> {
 			Document tagValues = new Document();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
 				tagValues.put(escape(tagValue), row(null, null, 0, value.getCount(),
@@ -260,12 +261,12 @@ public class Collector {
 			int start = aggregatedRow == null ? quarter - aggrExpire :
 					getInt(aggregatedRow, "quarter");
 			for (int i = start + 1; i <= quarter; i ++) {
-				ArrayList<Document> rows = new ArrayList<>();
-				HashMap<HashMap<String, String>, MetricValue> result = new HashMap<>();
+				List<Document> rows = new ArrayList<>();
+				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				Document range = __("$gte", Integer.valueOf(i * 15 - 14));
 				range.put("$lte", Integer.valueOf(i * 15));
 				for (Document row : collection.find(__("minute", range))) {
-					HashMap<String, String> tags = new HashMap<>();
+					Map<String, String> tags = new HashMap<>();
 					getDocument(row, "tags").forEach((k, v) ->
 							tags.put(unescape(k), String.valueOf(v)));
 					// Aggregate to "_quarter.*"
@@ -284,7 +285,7 @@ public class Collector {
 				}
 				int combinations = result.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name);
-				HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
+				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
 				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
 					// {"quarter": i}, but not {"quarter": quarter} !
@@ -330,7 +331,7 @@ public class Collector {
 			// Aggregate "_meta.tags_quarter" to "_meta.aggregated";
 			String minuteName = name.substring(9);
 			Document query = __("name", minuteName);
-			HashMap<String, HashMap<String, MetricValue>> tagMap = new HashMap<>();
+			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 			for (Document row : tagsQuarter.find(query)) {
 				Document tags = getDocument(row, "tags");
 				for (String tagKey : tags.keySet()) {
@@ -421,12 +422,6 @@ public class Collector {
 					Log.w(remoteAddr + " not allowed");
 					continue;
 				}
-				if (enableRemoteAddr) {
-					Metric.put("metric.throughput", len,
-							"remote_addr", remoteAddr, "server_id", "" + serverId);
-				} else {
-					Metric.put("metric.throughput", len, "server_id", "" + serverId);
-				}
 				// Inflate
 				ByteArrayQueue baq = new ByteArrayQueue();
 				byte[] buf_ = new byte[2048];
@@ -445,8 +440,8 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				HashMap<String, ArrayList<Document>> rowsMap = new HashMap<>();
-				HashMap<String, Integer> countMap = new HashMap<>();
+				Map<String, List<Document>> rowsMap = new HashMap<>();
+				Map<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
 					int length = line.length();
@@ -456,14 +451,14 @@ public class Collector {
 					// Parse name, aggregation, value and tags
 					// <name>/<aggregation>/<value>[?<tag>=<value>[&...]]
 					String[] paths;
-					HashMap<String, String> tagMap = new HashMap<>();
+					Map<String, String> tagMap = new HashMap<>();
 					int index = line.indexOf('?');
 					if (index < 0) {
 						paths = line.split("/");
 					} else {
 						paths = line.substring(0, index).split("/");
-						String tags = line.substring(index + 1);
-						for (String tag : tags.split("&")) {
+						String query = line.substring(index + 1);
+						for (String tag : query.split("&")) {
 							index = tag.indexOf('=');
 							if (index > 0) {
 								tagMap.put(decode(tag.substring(0, index), maxTagNameLen),
@@ -482,34 +477,37 @@ public class Collector {
 					}
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
-						Metric.put("metric.rows", 1, "name", name,
-								"remote_addr", remoteAddr, "server_id", "" + serverId);
-					} else {
-						Metric.put("metric.rows", 1, "name", name,
-								"server_id", "" + serverId);
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
-						long count = Numbers.parseLong(paths[2]);
-						double sum = __(paths[3]);
-						double max = __(paths[4]);
-						double min = __(paths[5]);
-						double sqr = __(paths[6]);
 						put(rowsMap, name, row(tagMap, "minute",
 								Numbers.parseInt(paths[1], currentMinute.get()),
-								count, sum, max, min, sqr));
+								Numbers.parseLong(paths[2]), __(paths[3]),
+								__(paths[4]), __(paths[5]), __(paths[6])));
 					} else {
 						// For aggregation-during-collection metric, aggregate first
 						Metric.put(name, __(paths[1]), tagMap);
 					}
-					if (verbose) {
-						Integer count = countMap.get(name);
-						countMap.put(name, Integer.valueOf(count == null ?
-								1 : count.intValue() + 1));
-					}
+					Integer count = countMap.get(name);
+					countMap.put(name, Integer.valueOf(count == null ?
+							1 : count.intValue() + 1));
 				}
-				if (!countMap.isEmpty()) {
+				if (verbose) {
 					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
+				}
+				if (enableRemoteAddr) {
+					Metric.put("metric.throughput", len,
+							"remote_addr", remoteAddr, "server_id", "" + serverId);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name,
+								"remote_addr", remoteAddr, "server_id", "" + serverId);
+					});
+				} else {
+					Metric.put("metric.throughput", len, "server_id", "" + serverId);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name,
+								"server_id", "" + serverId);
+					});
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {

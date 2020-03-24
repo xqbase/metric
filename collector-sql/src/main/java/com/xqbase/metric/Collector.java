@@ -94,7 +94,8 @@ public class Collector {
 			"UPDATE metric_name SET minute_size = minute_size - ?, " +
 			"quarter_size = quarter_size - ?, aggregated_time = ?, tags = ? WHERE id = ?";
 
-	private static double __(double d) {
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
 		return Double.isNaN(d) ? 0 : d;
 	}
 
@@ -475,12 +476,6 @@ public class Collector {
 					Log.w(remoteAddr + " not allowed");
 					continue;
 				}
-				if (enableRemoteAddr) {
-					Metric.put("metric.throughput", len,
-							"remote_addr", remoteAddr, "server_id", "" + serverId);
-				} else {
-					Metric.put("metric.throughput", len, "server_id", "" + serverId);
-				}
 				// Inflate
 				ByteArrayQueue baq = new ByteArrayQueue();
 				byte[] buf_ = new byte[2048];
@@ -516,8 +511,8 @@ public class Collector {
 						paths = line.split("/");
 					} else {
 						paths = line.substring(0, index).split("/");
-						String tags = line.substring(index + 1);
-						for (String tag : tags.split("&")) {
+						String query = line.substring(index + 1);
+						for (String tag : query.split("&")) {
 							index = tag.indexOf('=');
 							if (index > 0) {
 								tagMap.put(decode(tag.substring(0, index), maxTagNameLen),
@@ -536,34 +531,37 @@ public class Collector {
 					}
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
-						Metric.put("metric.rows", 1, "name", name,
-								"remote_addr", remoteAddr, "server_id", "" + serverId);
-					} else {
-						Metric.put("metric.rows", 1, "name", name,
-								"server_id", "" + serverId);
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
-						long count = Numbers.parseLong(paths[2]);
-						double sum = __(Numbers.parseDouble(paths[3]));
-						double max = __(Numbers.parseDouble(paths[4]));
-						double min = __(Numbers.parseDouble(paths[5]));
-						double sqr = __(Numbers.parseDouble(paths[6]));
 						put(rowsMap, name, row(tagMap,
 								Numbers.parseInt(paths[1], currentMinute.get()),
-								count, sum, max, min, sqr));
+								Numbers.parseLong(paths[2]), __(paths[3]),
+								__(paths[4]), __(paths[5]), __(paths[6])));
 					} else {
 						// For aggregation-during-collection metric, aggregate first
-						Metric.put(name, __(Numbers.parseDouble(paths[1])), tagMap);
+						Metric.put(name, __(paths[1]), tagMap);
 					}
-					if (verbose) {
-						Integer count = countMap.get(name);
-						countMap.put(name, Integer.valueOf(count == null ?
-								1 : count.intValue() + 1));
-					}
+					Integer count = countMap.get(name);
+					countMap.put(name, Integer.valueOf(count == null ?
+							1 : count.intValue() + 1));
 				}
-				if (!countMap.isEmpty()) {
+				if (verbose) {
 					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
+				}
+				if (enableRemoteAddr) {
+					Metric.put("metric.throughput", len,
+							"remote_addr", remoteAddr, "server_id", "" + serverId);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name,
+								"remote_addr", remoteAddr, "server_id", "" + serverId);
+					});
+				} else {
+					Metric.put("metric.throughput", len, "server_id", "" + serverId);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name,
+								"server_id", "" + serverId);
+					});
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {

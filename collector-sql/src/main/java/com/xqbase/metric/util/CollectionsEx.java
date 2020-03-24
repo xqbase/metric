@@ -31,9 +31,9 @@ public class CollectionsEx {
 		entries.forEach(entry -> action.accept(entry.getKey(), entry.getValue()));
 	}
 
-	public static <K, V> HashMap<K, V>
+	public static <K, V> Map<K, V>
 			toMap(Collection<Map.Entry<? extends K, ? extends V>> entries) {
-		HashMap<K, V> map = new HashMap<>();
+		Map<K, V> map = new HashMap<>();
 		forEach(entries, map::put);
 		return map;
 	}

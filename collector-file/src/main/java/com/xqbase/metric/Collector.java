@@ -521,11 +521,6 @@ public class Collector {
 					Log.w(remoteAddr + " not allowed");
 					continue;
 				}
-				if (enableRemoteAddr) {
-					Metric.put("metric.throughput", len, "remote_addr", remoteAddr);
-				} else {
-					Metric.put("metric.throughput", len);
-				}
 				// Inflate
 				ByteArrayQueue baq = new ByteArrayQueue();
 				byte[] buf_ = new byte[2048];
@@ -581,10 +576,6 @@ public class Collector {
 					}
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
-						Metric.put("metric.rows", 1, "name", name,
-								"remote_addr", remoteAddr);
-					} else {
-						Metric.put("metric.rows", 1, "name", name);
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
@@ -595,14 +586,24 @@ public class Collector {
 						// For aggregation-during-collection metric, aggregate first
 						Metric.put(name, __(paths[1]), tagMap);
 					}
-					if (verbose) {
-						Integer count = countMap.get(name);
-						countMap.put(name, Integer.valueOf(count == null ?
-								1 : count.intValue() + 1));
-					}
+					Integer count = countMap.get(name);
+					countMap.put(name, Integer.valueOf(count == null ?
+							1 : count.intValue() + 1));
 				}
-				if (!countMap.isEmpty()) {
+				if (verbose) {
 					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
+				}
+				if (enableRemoteAddr) {
+					Metric.put("metric.throughput", len, "remote_addr", remoteAddr);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name,
+								"remote_addr", remoteAddr);
+					});
+				} else {
+					Metric.put("metric.throughput", len);
+					countMap.forEach((name, value) -> {
+						Metric.put("metric.rows", value.intValue(), "name", name);
+					});
 				}
 				// Insert aggregation-before-collection metrics
 				if (!rowsMap.isEmpty()) {

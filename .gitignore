@@ -27,3 +27,4 @@ hs_err_pid*
 /dashboard-file/target
 /dashboard-mongo/target
 /dashboard-sql/target
+/test/target
