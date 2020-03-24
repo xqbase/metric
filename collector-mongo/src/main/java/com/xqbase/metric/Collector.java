@@ -44,7 +44,8 @@ import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
 public class Collector {
-	private static final int MAX_BUFFER_SIZE = 64000;
+	private static final int MAX_BUFFER_SIZE = 1048576;
+	private static final int MAX_METRIC_LEN = 64;
 
 	private static double __(String s) {
 		double d = Numbers.parseDouble(s);
@@ -110,8 +111,8 @@ public class Collector {
 	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
-	private static int serverId, expire, aggrExpire, tagsExpire, maxTags, maxTagValues,
-			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
+	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
 	private static Document row(Map<String, String> tagMap, int now,
@@ -257,14 +258,14 @@ public class Collector {
 			// Aggregate to quarter
 			Document query = __("name", name);
 			Document aggregatedRow = aggregated.find(query).projection(PROJ_TIME).first();
-			int start = aggregatedRow == null ? quarter - aggrExpire :
+			int start = aggregatedRow == null ? quarter - expire :
 					getInt(aggregatedRow, "time");
 			for (int i = start + 1; i <= quarter; i ++) {
 				List<Document> rows = new ArrayList<>();
 				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				Document range = __("$gte", Integer.valueOf(i * 15 - 14));
 				range.put("$lte", Integer.valueOf(i * 15));
-				for (Document row : collection.find(__("time", range))) {
+				for (Document row : collection.find(__("time", range)).batchSize(1024)) {
 					Map<String, String> tags = new HashMap<>();
 					getDocument(row, "tags").forEach((k, v) ->
 							tags.put(unescape(k), String.valueOf(v)));
@@ -367,12 +368,10 @@ public class Collector {
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
-		aggrExpire = Numbers.parseInt(p.getProperty("aggr_expire"), 60);
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
 		maxTagCombinations = Numbers.parseInt(p.getProperty("max_tag_combinations"));
-		maxMetricLen = Numbers.parseInt(p.getProperty("max_metric_len"));
 		maxTagNameLen = Numbers.parseInt(p.getProperty("max_tag_name_len"));
 		maxTagValueLen = Numbers.parseInt(p.getProperty("max_tag_value_len"));
 		int quarterDelay = Numbers.parseInt(p.getProperty("quarter_delay"), 2);
@@ -471,7 +470,7 @@ public class Collector {
 						Log.w("Incorrect format: [" + line + "]");
 						continue;
 					}
-					String name = decode(paths[0], maxMetricLen);
+					String name = decode(paths[0], MAX_METRIC_LEN);
 					if (name.isEmpty()) {
 						Log.w("Incorrect format: [" + line + "]");
 						continue;

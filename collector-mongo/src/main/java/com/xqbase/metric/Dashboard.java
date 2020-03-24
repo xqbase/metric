@@ -377,7 +377,7 @@ public class Dashboard {
 		// Query by MongoDB and Group by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			for (Document row : db.getCollection(metricName).find(query)) {
+			for (Document row : db.getCollection(metricName).find(query).batchSize(1024)) {
 				int index = (getInt(row, "time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
