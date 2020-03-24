@@ -364,30 +364,21 @@ public class Dashboard {
 		Document query = new Document();
 		params.forEach((k, v) -> query.put("tags." + escape(k), v));
 		// Other Query Parameters
-		int end;
-		String rangeColumn;
-		if (metricName.startsWith("_quarter.")) {
-			end = Numbers.parseInt(end_,
-					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "quarter";
-		} else {
-			end = Numbers.parseInt(end_,
-					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "minute";
-		}
+		int end = Numbers.parseInt(end_, (int) (System.currentTimeMillis() /
+				(metricName.startsWith("_quarter.") ? Time.MINUTE / 15 : Time.MINUTE)));
 		int interval = Numbers.parseInt(interval_, 1, 1440);
 		int length = Numbers.parseInt(length_, 1, 1024);
 		int begin = end - interval * length + 1;
 		Document range = __("$gte", Integer.valueOf(begin));
 		range.put("$lte", Integer.valueOf(end));
-		query.put(rangeColumn, range);
+		query.put("time", range);
 		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
 				row -> getString(getDocument(row, "tags"), escape(groupBy_));
 		// Query by MongoDB and Group by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			for (Document row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, rangeColumn) - begin) / interval;
+				int index = (getInt(row, "time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
 				}

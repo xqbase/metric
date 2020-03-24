@@ -245,23 +245,15 @@ public class DashboardApi extends HttpServlet {
 			}
 		}
 		// Other Query Parameters
-		int end;
-		String rangeColumn;
-		if (metricName.startsWith("_quarter.")) {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "quarter";
-		} else {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "minute";
-		}
+		int end = Numbers.parseInt(req.getParameter("_end"),
+				(int) (System.currentTimeMillis() /
+				(metricName.startsWith("_quarter.") ? Time.MINUTE / 15 : Time.MINUTE)));
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length + 1;
 		Document range = __("$gte", Integer.valueOf(begin));
 		range.put("$lte", Integer.valueOf(end));
-		query.put(rangeColumn, range);
+		query.put("time", range);
 		String groupBy_ = req.getParameter("_group_by");
 		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
 				row -> getString(getDocument(row, "tags"), escape(groupBy_));
@@ -269,7 +261,7 @@ public class DashboardApi extends HttpServlet {
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
 			for (Document row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, rangeColumn) - begin) / interval;
+				int index = (getInt(row, "time") - begin) / interval;
 				if (index < 0 || index >= length) {
 					continue;
 				}

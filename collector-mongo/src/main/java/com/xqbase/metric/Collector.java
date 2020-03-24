@@ -46,8 +46,6 @@ import com.xqbase.util.Time;
 public class Collector {
 	private static final int MAX_BUFFER_SIZE = 64000;
 
-	private static Document aggregatedProj = __("quarter", Boolean.TRUE);
-
 	private static double __(String s) {
 		double d = Numbers.parseDouble(s);
 		return Double.isNaN(d) ? 0 : d;
@@ -105,9 +103,10 @@ public class Collector {
 	}
 
 	private static final Document
-			INDEX_MINUTE = __("minute", Integer.valueOf(1)),
-			INDEX_QUARTER = __("quarter", Integer.valueOf(1)),
-			INDEX_NAME = __("name", Integer.valueOf(1));
+			INDEX_TIME = __("time", Integer.valueOf(1)),
+			INDEX_NAME = __("name", Integer.valueOf(1)),
+			PROJ_TIME = __("time", Boolean.TRUE);
+
 	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
@@ -115,8 +114,8 @@ public class Collector {
 			maxTagCombinations, maxMetricLen, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
-	private static Document row(Map<String, String> tagMap, String type,
-			int now, long count, double sum, double max, double min, double sqr) {
+	private static Document row(Map<String, String> tagMap, int now,
+			long count, double sum, double max, double min, double sqr) {
 		Document row = new Document();
 		if (tagMap != null) {
 			Document tags = new Document();
@@ -129,8 +128,8 @@ public class Collector {
 			}
 			row.put("tags", tags);
 		}
-		if (type != null) {
-			row.put(type, Integer.valueOf(now));
+		if (now > 0) {
+			row.put("time", Integer.valueOf(now));
 		}
 		row.put("count", Long.valueOf(count));
 		put(row, "sum", sum);
@@ -144,7 +143,7 @@ public class Collector {
 		// Insert aggregation-during-collection metrics
 		Map<String, List<Document>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
-			Document row = row(entry.getTagMap(), "minute", minute, entry.getCount(),
+			Document row = row(entry.getTagMap(), minute, entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 			put(rowsMap, entry.getName(), row);
 		}
@@ -172,7 +171,7 @@ public class Collector {
 				}
 			} else {
 				if (!name.startsWith("_quarter.")) {
-					collection.createIndex(INDEX_MINUTE);
+					collection.createIndex(INDEX_TIME);
 				}
 				// Will be inserted next minute
 				Metric.put("metric.size", count, "name", name);
@@ -204,7 +203,7 @@ public class Collector {
 		BiConsumer<String, Map<String, MetricValue>> mainAction = (tagName, valueMap) -> {
 			Document tagValues = new Document();
 			BiConsumer<String, MetricValue> action = (tagValue, value) -> {
-				tagValues.put(escape(tagValue), row(null, null, 0, value.getCount(),
+				tagValues.put(escape(tagValue), row(null, 0, value.getCount(),
 						value.getSum(), value.getMax(), value.getMin(), value.getSqr()));
 			};
 			if (maxTagValues > 0 && valueMap.size() > maxTagValues) {
@@ -226,23 +225,23 @@ public class Collector {
 	}
 
 	private static void quarterly(MongoDatabase db, int quarter) {
-		Document removeBefore = __("minute", __("$lte",
+		Document removeBefore = __("time", __("$lte",
 				Integer.valueOf(quarter * 15 - expire)));
-		Document removeAfter = __("minute", __("$gte",
+		Document removeAfter = __("time", __("$gte",
 				Integer.valueOf(quarter * 15 + expire)));
-		Document removeBeforeQuarter = __("quarter", __("$lte",
+		Document removeBeforeQuarter = __("time", __("$lte",
 				Integer.valueOf(quarter - expire)));
-		Document removeAfterQuarter = __("quarter", __("$gte",
+		Document removeAfterQuarter = __("time", __("$gte",
 				Integer.valueOf(quarter + expire)));
 		// Ensure index on meta collections
 		MongoCollection<Document> aggregated = db.getCollection("_meta.aggregated");
 		aggregated.createIndex(INDEX_NAME);
 		MongoCollection<Document> tagsQuarter = db.getCollection("_meta.tags_quarter");
 		tagsQuarter.createIndex(INDEX_NAME);
-		tagsQuarter.createIndex(INDEX_QUARTER);
-		tagsQuarter.deleteMany(__("quarter", __("$lte",
+		tagsQuarter.createIndex(INDEX_TIME);
+		tagsQuarter.deleteMany(__("time", __("$lte",
 				Integer.valueOf(quarter - tagsExpire))));
-		tagsQuarter.deleteMany(__("quarter", __("$gte",
+		tagsQuarter.deleteMany(__("time", __("$gte",
 				Integer.valueOf(quarter + tagsExpire))));
 		// Scan minutely collections
 		for (String name : db.listCollectionNames()) {
@@ -257,15 +256,15 @@ public class Collector {
 			collection.deleteMany(removeAfter);
 			// Aggregate to quarter
 			Document query = __("name", name);
-			Document aggregatedRow = aggregated.find(query).projection(aggregatedProj).first();
+			Document aggregatedRow = aggregated.find(query).projection(PROJ_TIME).first();
 			int start = aggregatedRow == null ? quarter - aggrExpire :
-					getInt(aggregatedRow, "quarter");
+					getInt(aggregatedRow, "time");
 			for (int i = start + 1; i <= quarter; i ++) {
 				List<Document> rows = new ArrayList<>();
 				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				Document range = __("$gte", Integer.valueOf(i * 15 - 14));
 				range.put("$lte", Integer.valueOf(i * 15));
-				for (Document row : collection.find(__("minute", range))) {
+				for (Document row : collection.find(__("time", range))) {
 					Map<String, String> tags = new HashMap<>();
 					getDocument(row, "tags").forEach((k, v) ->
 							tags.put(unescape(k), String.valueOf(v)));
@@ -288,8 +287,8 @@ public class Collector {
 				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 				int i_ = i;
 				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
-					// {"quarter": i}, but not {"quarter": quarter} !
-					rows.add(row(tags, "quarter", i_, value.getCount(), value.getSum(),
+					// {"time": i}, but not {"time": quarter} !
+					rows.add(row(tags, i_, value.getCount(), value.getSum(),
 							value.getMax(), value.getMin(), value.getSqr()));
 					// Aggregate to "_meta.tags_quarter"
 					tags.forEach((tagKey, tagValue) ->
@@ -309,12 +308,12 @@ public class Collector {
 				});
 				Document row = __("name", name);
 				row.put("name", name);
-				// {"quarter": i}, but not {"quarter": quarter} !
-				row.put("quarter", Integer.valueOf(i));
+				// {"time": i}, but not {"time": quarter} !
+				row.put("time", Integer.valueOf(i));
 				row.put("tags", getTags(tagMap));
 				tagsQuarter.insertOne(row);
 			}
-			Document update = __("$set", __("quarter", Integer.valueOf(quarter)));
+			Document update = __("$set", __("time", Integer.valueOf(quarter)));
 			aggregated.updateOne(query, update, UPSERT);
 		}
 		// Scan quarterly collections
@@ -324,7 +323,7 @@ public class Collector {
 			}
 			MongoCollection<Document> collection = db.getCollection(name);
 			// Ensure index
-			collection.createIndex(INDEX_QUARTER);
+			collection.createIndex(INDEX_TIME);
 			// Remove stale
 			collection.deleteMany(removeBeforeQuarter);
 			collection.deleteMany(removeAfterQuarter);
@@ -482,7 +481,7 @@ public class Collector {
 					}
 					if (paths.length > 6) {
 						// For aggregation-before-collection metric, insert immediately
-						put(rowsMap, name, row(tagMap, "minute",
+						put(rowsMap, name, row(tagMap,
 								Numbers.parseInt(paths[1], currentMinute.get()),
 								Numbers.parseLong(paths[2]), __(paths[3]),
 								__(paths[4]), __(paths[5]), __(paths[6])));
