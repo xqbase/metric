@@ -102,10 +102,10 @@ public class Collector {
 		rowsMap.computeIfAbsent(filename, k -> new ArrayList<>()).add(row);
 	}
 
-	private static String getOrCreate(String name, int time) {
-		String dirName = dataDir + name;
-		new File(dirName).mkdirs();
-		return dirName + "/" + time;
+	private static String dir(String name) {
+		String dir = dataDir + name;
+		new File(dir).mkdirs();
+		return dir + "/";
 	}
 
 	private static void insert(PrintStream out, List<MetricRow> rows) {
@@ -137,7 +137,7 @@ public class Collector {
 			CountLock lock = lockMap.acquire(k);
 			lock.lock();
 			try (PrintStream out = new PrintStream(new
-					FileOutputStream(getOrCreate(k.name, k.time), true))) {
+					FileOutputStream(dir(k.name) + k.time, true))) {
 				insert(out, v);
 			} catch (IOException e) {
 				Log.e(e);
@@ -312,10 +312,11 @@ public class Collector {
 					if (!file.exists()) {
 						continue;
 					}
+					File tmp = new File(dataDir + "tmp.gz");
 					try (
 						BufferedReader in = new BufferedReader(new FileReader(file));
-						PrintStream out = new PrintStream(new GZIPOutputStream(new
-								FileOutputStream(filename + ".gz")));
+						PrintStream out = new PrintStream(new
+								GZIPOutputStream(new FileOutputStream(tmp)));
 					) {
 						String line;
 						while ((line = in.readLine()) != null) {
@@ -352,6 +353,7 @@ public class Collector {
 					} catch (IOException e) {
 						Log.e(e);
 					}
+					tmp.renameTo(new File(filename + ".gz"));
 					// 4'. Remove uncompressed
 					new File(filename).delete();
 				}
@@ -381,12 +383,14 @@ public class Collector {
 					result.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
-				try (PrintStream out = new PrintStream(new GZIPOutputStream(new
-						FileOutputStream(getOrCreate("_quarter." + name, i) + ".gz")))) {
+				File tmp = new File(dataDir + "tmp.gz");
+				try (PrintStream out = new PrintStream(new
+						GZIPOutputStream(new FileOutputStream(tmp)))) {
 					insert(out, rows);
 				} catch (IOException e) {
 					Log.e(e);
 				}
+				tmp.renameTo(new File(dir("_quarter." + name) + i + ".gz"));
 				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
@@ -394,14 +398,14 @@ public class Collector {
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				try (FileOutputStream out = new
-						FileOutputStream(getOrCreate("_tags_quarter." + name, i))) {
+						FileOutputStream(dir("_tags_quarter." + name) + i)) {
 					out.write(new JSONObject(limit(tagMap)).toString().
 							getBytes(StandardCharsets.UTF_8));
 				} catch (IOException e) {
 					Log.e(e);
 				}
 			}
-			// 6. Set "aggreagted"
+			// 6. Set "aggregated"
 			aggregatedProp.setProperty(name, "" + quarter);
 			// 7. Aggregate "_tags_quarter" to "Tags.properties";
 			File[] files = new File(dataDir + "_tags_quarter." + name).listFiles();

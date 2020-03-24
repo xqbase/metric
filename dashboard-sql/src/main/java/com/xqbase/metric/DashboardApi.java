@@ -1,4 +1,4 @@
-package com.xqbase.metric.dashboard;
+package com.xqbase.metric;
 
 import java.io.IOException;
 import java.io.PrintWriter;

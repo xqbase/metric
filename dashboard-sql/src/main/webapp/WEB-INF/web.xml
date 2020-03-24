@@ -5,7 +5,7 @@
 
 	<servlet>
 		<servlet-name>DashboardApi</servlet-name>
-		<servlet-class>com.xqbase.metric.dashboard.DashboardApi</servlet-class>
+		<servlet-class>com.xqbase.metric.DashboardApi</servlet-class>
 	</servlet>
 	<servlet-mapping>
 		<servlet-name>DashboardApi</servlet-name>

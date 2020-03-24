@@ -1,6 +1,10 @@
-package com.xqbase.metric.dashboard;
+package com.xqbase.metric;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Collections;
@@ -12,24 +16,21 @@ import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
+import java.util.zip.GZIPInputStream;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.bson.Document;
 import org.json.JSONObject;
 
-import com.mongodb.MongoClient;
-import com.mongodb.MongoClientURI;
-import com.mongodb.MongoException;
-import com.mongodb.client.MongoDatabase;
 import com.xqbase.metric.common.MetricValue;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
+import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 
 class GroupKey {
@@ -59,41 +60,22 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
-	private static final String[] EMPTY_STRINGS = {};
-
 	private int maxTagValues = 0;
-	private MongoClient mongo = null;
-	private MongoDatabase db = null;
+	private String dataDir = null;
 
 	@Override
 	public void init() throws ServletException {
-		Properties p = Conf.load("Mongo");
-		mongo = new MongoClient(new MongoClientURI(p.getProperty("uri")));
-		db = mongo.getDatabase(p.getProperty("database", "metric"));
-
-		maxTagValues = Numbers.parseInt(Conf.
-				load("Dashboard").getProperty("max_tag_values"));
-	}
-
-	@Override
-	public void destroy() {
-		if (mongo != null) {
-			mongo.close();
-			mongo = null;
-			db = null;
+		Properties p = Conf.load("Dashboard");
+		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
+		dataDir = p.getProperty("data_dir", Conf.getAbsolutePath("data"));
+		if (!dataDir.endsWith(File.separator) && !dataDir.endsWith("\\")) {
+			dataDir = dataDir + "/";
 		}
 	}
 
-	private static String escape(String s) {
-		return s.replace("\\", "\\\\").replace(".", "\\_");
-	}
-
-	private static String unescape(String s) {
-		return s.replace("\\-", "\\").replace("\\_", ".");
-	}
-
-	private static Document __(String key, Object value) {
-		return new Document(key, value);
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isFinite(d) ? d : 0;
 	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
@@ -116,38 +98,6 @@ public class DashboardApi extends HttpServlet {
 		} catch (IOException e) {/**/}
 	}
 
-	private static void error500(HttpServletResponse resp, Throwable e) {
-		Log.e(e);
-		try {
-			resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-		} catch (IOException e_) {/**/}
-	}
-
-	private static int getInt(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).intValue() : 0;
-	}
-
-	private static long getLong(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).longValue() : 0;
-	}
-
-	private static double getDouble(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof Number ? ((Number) value).doubleValue() : 0;
-	}
-
-	private static String getString(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof String ? (String) value : "_";
-	}
-
-	private static Document getDocument(Document row, String key) {
-		Object value = row.get(key);
-		return value instanceof Document ? (Document) value : new Document();
-	}
-
 	private static void copyHeader(HttpServletRequest req,
 			HttpServletResponse resp, String reqHeader, String respHeader) {
 		String value = req.getHeader(reqHeader);
@@ -166,8 +116,8 @@ public class DashboardApi extends HttpServlet {
 			Log.d(e.getMessage());
 			return;
 		}
-		String json = data instanceof Document ? ((Document) data).toJson() :
-				JSONObject.wrap(data).toString();
+		String json = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
 			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
@@ -208,88 +158,118 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			Document tagsRow;
-			try {
-				tagsRow = db.getCollection("_meta.aggregated").
-						find(__("name", metricName)).first();
-			} catch (MongoException e) {
-				error500(resp, e);
-				return;
-			}
-			if (tagsRow == null) {
+			File file = new File(dataDir + "Tags.properties");
+			if (!file.exists()) {
 				outputJson(req, resp, Collections.emptyMap());
 				return;
 			}
-			Document tags = getDocument(tagsRow, "tags");
-			for (String tagKey : tags.keySet().toArray(EMPTY_STRINGS)) {
-				Document tagValues = getDocument(tags, tagKey);
-				for (String tagValue : tagValues.keySet().toArray(EMPTY_STRINGS)) {
-					if (tagValue.indexOf('\\') >= 0) {
-						tagValues.remove(tagValue);
-						tagValues.put(unescape(tagValue),
-								getDocument(tagValues, tagValue));
-					}
-				}
-				if (tagKey.indexOf('\\') >= 0) {
-					tags.remove(tagKey);
-					tags.put(unescape(tagKey), tagValues);
-				}
+			Properties p = new Properties();
+			try (FileInputStream in = new FileInputStream(file)) {
+				p.load(in);
+			} catch (IOException e) {
+				Log.e(e);
 			}
-			outputJson(req, resp, tags);
+			String json = p.getProperty(metricName);
+			if (json == null) {
+				outputJson(req, resp, Collections.emptyMap());
+				return;
+			}
+			outputJson(req, resp, json);
 			return;
 		}
+
+		boolean quarter = metricName.startsWith("_quarter.");
 		// Query Condition
-		Document query = new Document();
+		Map<String, String> query = new HashMap<>();
 		Enumeration<String> names = req.getParameterNames();
 		while (names.hasMoreElements()) {
 			String name = names.nextElement();
 			if (!name.isEmpty() && name.charAt(0) != '_') {
-				query.put("tags." + escape(name), req.getParameter(name));
+				query.put(name, req.getParameter(name));
 			}
 		}
 		// Other Query Parameters
-		int end;
-		String rangeColumn;
-		if (metricName.startsWith("_quarter.")) {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
-			rangeColumn = "quarter";
-		} else {
-			end = Numbers.parseInt(req.getParameter("_end"),
-					(int) (System.currentTimeMillis() / Time.MINUTE));
-			rangeColumn = "minute";
-		}
+		int end = Numbers.parseInt(req.getParameter("_end"),
+				(int) (System.currentTimeMillis() /
+				(quarter ? Time.MINUTE / 15 : Time.MINUTE)));
 		int interval = Numbers.parseInt(req.getParameter("_interval"), 1, 1440);
 		int length = Numbers.parseInt(req.getParameter("_length"), 1, 1024);
 		int begin = end - interval * length + 1;
-		Document range = __("$gte", Integer.valueOf(begin));
-		range.put("$lte", Integer.valueOf(end));
-		query.put(rangeColumn, range);
+
 		String groupBy_ = req.getParameter("_group_by");
-		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
-				row -> getString(getDocument(row, "tags"), escape(groupBy_));
-		// Query by MongoDB and Group by Java
+		Function<Map<String, String>, String> groupBy = groupBy_ == null ?
+				tags -> "_" : tags -> {
+			String value = tags.get(groupBy_);
+			return Strings.isEmpty(value) ? "_" : value;
+		};
+		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		try {
-			for (Document row : db.getCollection(metricName).find(query)) {
-				int index = (getInt(row, rangeColumn) - begin) / interval;
-				if (index < 0 || index >= length) {
-					continue;
-				}
-				GroupKey key = new GroupKey(groupBy.apply(row), index);
-				MetricValue newValue = new MetricValue(getLong(row, "count"),
-						getDouble(row, "sum"), getDouble(row, "max"),
-						getDouble(row, "min"), getDouble(row, "sqr"));
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
-				}
-			}
-		} catch (MongoException e) {
-			error500(resp, e);
+		String[] filenames = new File(dataDir + metricName).list();
+		if (filenames == null) {
+			outputJson(req, resp, Collections.emptyMap());
 			return;
+		}
+		for (String filename : filenames) {
+			boolean gzip = filename.endsWith(".gz");
+			int time = Numbers.parseInt(gzip ?
+					filename.substring(0, filename.length() - 3) : filename);
+			int index = (time - begin) / interval;
+			if (index < 0 || index >= length) {
+				continue;
+			}
+			File file = new File(dataDir + metricName + "/" + filename);
+			if (!file.exists()) {
+				continue;
+			}
+			try (
+				FileInputStream fis = new FileInputStream(file);
+				BufferedReader in = new BufferedReader(new
+						InputStreamReader(gzip ? new GZIPInputStream(fis) : fis));
+			) {
+				String line;
+				while ((line = in.readLine()) != null) {
+					String[] paths;
+					Map<String, String> tags = new HashMap<>();
+					int i = line.indexOf('?');
+					if (i < 0) {
+						paths = line.split("/");
+					} else {
+						paths = line.substring(0, i).split("/");
+						String q = line.substring(i + 1);
+						for (String tag : q.split("&")) {
+							i = tag.indexOf('=');
+							if (i > 0) {
+								tags.put(Strings.decodeUrl(tag.substring(0, i)),
+										Strings.decodeUrl(tag.substring(i + 1)));
+							}
+						}
+					}
+					// Query Tags
+					boolean skip = false;
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String value = tags.get(entry.getKey());
+						if (!entry.getValue().equals(value)) {
+							skip = true;
+							break;
+						}
+					}
+					if (skip || paths.length <= 4) {
+						continue;
+					}
+					// Group Tags
+					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+					MetricValue value = result.get(key);
+					if (value == null) {
+						result.put(key, newValue);
+					} else {
+						value.add(newValue);
+					}
+				}
+			} catch (IOException e) {
+				Log.e(e);
+			}
 		}
 		// Generate Data
 		Map<String, double[]> data = new HashMap<>();
