@@ -43,16 +43,13 @@ class GroupKey {
 
 	@Override
 	public boolean equals(Object obj) {
-		if (!(obj instanceof GroupKey)) {
-			return false;
-		}
 		GroupKey key = (GroupKey) obj;
 		return index == key.index && tag.equals(key.tag);
 	}
 
 	@Override
 	public int hashCode() {
-		return tag.hashCode() + index;
+		return tag.hashCode() * 31 + index;
 	}
 }
 

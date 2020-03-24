@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Collections;
@@ -23,13 +22,15 @@ import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
 import java.util.zip.GZIPOutputStream;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.bson.Document;
+import org.json.JSONObject;
+
+import com.mongodb.MongoException;
+import com.mongodb.client.MongoDatabase;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
@@ -37,8 +38,6 @@ import com.xqbase.util.Log;
 import com.xqbase.util.Numbers;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
-import com.xqbase.util.db.ConnectionPool;
-import com.xqbase.util.db.Row;
 
 class Resource {
 	String mime;
@@ -67,6 +66,8 @@ class GroupKey {
 }
 
 public class Dashboard {
+	private static final String[] EMPTY_STRINGS = {};
+
 	private static final String[] RESOURCES = {
 		"/css/bootstrap.min.css",
 		"/css/datepicker.css",
@@ -83,14 +84,6 @@ public class Dashboard {
 		"/index.html",
 		"/index.js",
 	};
-	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
-	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
-	private static final String AGGREGATE_MINUTE =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
-	private static final String AGGREGATE_QUARTER =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private static ThreadLocal<SimpleDateFormat> format =
 			new ThreadLocal<SimpleDateFormat>() {
@@ -108,7 +101,7 @@ public class Dashboard {
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
 
-	private static ConnectionPool db;
+	private static MongoDatabase db;
 	private static HttpServer server;
 	private static Map<String, Resource> resources = new HashMap<>();
 	private static String resourcesModified;
@@ -126,6 +119,43 @@ public class Dashboard {
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
+	private static String escape(String s) {
+		return s.replace("\\", "\\\\").replace(".", "\\_");
+	}
+
+	private static String unescape(String s) {
+		return s.replace("\\-", "\\").replace("\\_", ".");
+	}
+
+	private static int getInt(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).intValue() : 0;
+	}
+
+	private static long getLong(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).longValue() : 0;
+	}
+
+	private static double getDouble(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof Number ? ((Number) value).doubleValue() : 0;
+	}
+
+	private static String getString(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof String ? (String) value : "_";
+	}
+
+	private static Document getDocument(Document row, String key) {
+		Object value = row.get(key);
+		return value instanceof Document ? (Document) value : new Document();
+	}
+
+	private static Document __(String key, Object value) {
+		return new Document(key, value);
+	}
+
 	private static void response(HttpExchange exchange, int status) {
 		try {
 			exchange.sendResponseHeaders(status, -1);
@@ -141,17 +171,11 @@ public class Dashboard {
 		}
 	}
 
-	private static ObjectMapper writer = new ObjectMapper();
-
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		String out;
-		try {
-			out = writer.writeValueAsString(data);
-		} catch (JsonProcessingException e) {
-			throw new RuntimeException(e);
-		}
+		String out = data instanceof Document ? ((Document) data).toJson() :
+				JSONObject.wrap(data).toString();
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -298,105 +322,87 @@ public class Dashboard {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			Row row;
+			Document tagsRow;
 			try {
-				row = db.queryEx(QUERY_TAGS, metricName);
-			} catch (SQLException e) {
+				tagsRow = db.getCollection("_meta.aggregated").
+						find(__("name", metricName)).first();
+			} catch (MongoException e) {
 				Log.e(e);
 				response(exchange, 500);
 				return;
 			}
-			if (row == null) {
+			if (tagsRow == null) {
 				response(exchange, Collections.emptyMap(), false);
 				return;
 			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
+			Document tags = getDocument(tagsRow, "tags");
+			for (String tagKey : tags.keySet().toArray(EMPTY_STRINGS)) {
+				Document tagValues = getDocument(tags, tagKey);
+				for (String tagValue : tagValues.keySet().toArray(EMPTY_STRINGS)) {
+					if (tagValue.indexOf('\\') >= 0) {
+						tagValues.remove(tagValue);
+						tagValues.put(unescape(tagValue),
+								getDocument(tagValues, tagValue));
+					}
+				}
+				if (tagKey.indexOf('\\') >= 0) {
+					tags.remove(tagKey);
+					tags.put(unescape(tagKey), tagValues);
+				}
 			}
-			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			response(exchange, tags == null ?
-					Collections.emptyMap() : tags, tags != null);
-			return;
-		}
-
-		boolean quarter = metricName.startsWith("_quarter.");
-		if (quarter) {
-			metricName = metricName.substring(9);
-		}
-		int id;
-		try {
-			Row row = db.queryEx(QUERY_ID, metricName);
-			if (row == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			id = row.getInt("id");
-		} catch (SQLException e) {
-			Log.e(e);
-			response(exchange, 500);
+			response(exchange, tags, acceptGzip);
 			return;
 		}
 
 		// Query Condition
-		Map<String, String> query = getParameters(uri);
-		String end_ = query.remove("_end");
-		String interval_ = query.remove("_interval");
-		String length_ = query.remove("_length");
-		String groupBy_ = query.remove("_group_by");
-		query.remove("_r");
+		Map<String, String> params = getParameters(uri);
+		String end_ = params.remove("_end");
+		String interval_ = params.remove("_interval");
+		String length_ = params.remove("_length");
+		String groupBy_ = params.remove("_group_by");
+		params.remove("_r");
+		Document query = new Document();
+		params.forEach((k, v) -> query.put("tags." + escape(k), v));
 		// Other Query Parameters
-		int end = Numbers.parseInt(end_, (int) (System.currentTimeMillis() /
-				(quarter ? Time.MINUTE / 15 : Time.MINUTE)));
+		int end;
+		String rangeColumn;
+		if (metricName.startsWith("_quarter.")) {
+			end = Numbers.parseInt(end_,
+					(int) (System.currentTimeMillis() / Time.MINUTE / 15));
+			rangeColumn = "quarter";
+		} else {
+			end = Numbers.parseInt(end_,
+					(int) (System.currentTimeMillis() / Time.MINUTE));
+			rangeColumn = "minute";
+		}
 		int interval = Numbers.parseInt(interval_, 1, 1440);
 		int length = Numbers.parseInt(length_, 1, 1024);
 		int begin = end - interval * length + 1;
-
-		Function<Map<String, String>, String> groupBy = groupBy_ == null ?
-				tags -> "_" : tags -> {
-			String value = tags.get(groupBy_);
-			return Strings.isEmpty(value) ? "_" : value;
-		};
-		// Query Time Range by SQL, Query and Group Tags by Java
+		Document range = __("$gte", Integer.valueOf(begin));
+		range.put("$lte", Integer.valueOf(end));
+		query.put(rangeColumn, range);
+		Function<Document, String> groupBy = groupBy_ == null ? row -> "_" :
+				row -> getString(getDocument(row, "tags"), escape(groupBy_));
+		// Query by MongoDB and Group by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try {
-			db.query(row -> {
-				int index = (row.getInt("time") - begin) / interval;
+			for (Document row : db.getCollection(metricName).find(query)) {
+				int index = (getInt(row, rangeColumn) - begin) / interval;
 				if (index < 0 || index >= length) {
-					return;
+					continue;
 				}
-				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
-				if (tags == null) {
-					tags = new HashMap<>();
-				}
-				// Query Tags
-				boolean skip = false;
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String value = tags.get(entry.getKey());
-					if (!entry.getValue().equals(value)) {
-						skip = true;
-						break;
-					}
-				}
-				if (skip) {
-					return;
-				}
-				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue newValue = new MetricValue(row.getLong("_count"),
-						((Number) row.get("_sum")).doubleValue(),
-						((Number) row.get("_max")).doubleValue(),
-						((Number) row.get("_min")).doubleValue(),
-						((Number) row.get("_sqr")).doubleValue());
+				GroupKey key = new GroupKey(groupBy.apply(row), index);
+				MetricValue newValue = new MetricValue(getLong(row, "count"),
+						getDouble(row, "sum"), getDouble(row, "max"),
+						getDouble(row, "min"), getDouble(row, "sqr"));
 				MetricValue value = result.get(key);
 				if (value == null) {
 					result.put(key, newValue);
 				} else {
 					value.add(newValue);
 				}
-			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
-		} catch (SQLException e) {
+			}
+		} catch (MongoException e) {
 			Log.e(e);
 			response(exchange, 500);
 			return;
@@ -427,7 +433,7 @@ public class Dashboard {
 		}
 	}
 
-	public static void startup(ConnectionPool db_) {
+	public static void startup(MongoDatabase db_) {
 		db = db_;
 
 		Properties p = Conf.load("Dashboard");

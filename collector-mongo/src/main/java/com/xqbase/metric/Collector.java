@@ -396,6 +396,8 @@ public class Collector {
 			p = Conf.load("Mongo");
 			mongo = new MongoClient(new MongoClientURI(p.getProperty("uri")));
 			MongoDatabase db = mongo.getDatabase(p.getProperty("database", "metric"));
+			Dashboard.startup(db);
+
 			minutely = Runnables.wrap(() -> {
 				int minute = currentMinute.incrementAndGet();
 				minutely(db, minute);
@@ -520,6 +522,7 @@ public class Collector {
 			Log.e(e);
 		}
 		Runnables.shutdown(timer);
+		Dashboard.shutdown();
 		// Do not do Mongo operations in main thread (may be interrupted)
 		if (minutely != null) {
 			executor.execute(minutely);

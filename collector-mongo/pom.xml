@@ -49,7 +49,7 @@
 					</descriptorRefs>
 					<archive>
 						<manifest>
-							<mainClass>com.xqbase.metric.collector.Collector</mainClass>
+							<mainClass>com.xqbase.metric.Collector</mainClass>
 						</manifest>
 					</archive>
 				</configuration>
@@ -80,7 +80,12 @@
 		<dependency>
 			<groupId>org.mongodb</groupId>
 			<artifactId>mongo-java-driver</artifactId>
-			<version>3.10.2</version>
+			<version>3.12.2</version>
+		</dependency>
+		<dependency>
+			<groupId>org.json</groupId>
+			<artifactId>json</artifactId>
+			<version>20190722</version>
 		</dependency>
 	</dependencies>
 </project>
