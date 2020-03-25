@@ -160,9 +160,12 @@ public class Collector {
 			return 0;
 		}
 		int size = 0;
+		long t = System.currentTimeMillis();
 		for (File file : files) {
 			size += file.length();
 		}
+		Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
+				"command", "size", "name", name);
 		return size;
 	}
 
@@ -269,6 +272,7 @@ public class Collector {
 		if (filenames == null) {
 			return;
 		}
+		long t = System.currentTimeMillis();
 		for (String filename : filenames) {
 			String f = filename;
 			if (f.endsWith(".gz")) {
@@ -278,6 +282,8 @@ public class Collector {
 				new File(prefix + filename).delete();
 			}
 		}
+		Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
+				"command", "delete", "name", name);
 	}
 
 	private static void quarterly(int quarter) {
@@ -306,6 +312,7 @@ public class Collector {
 				List<MetricRow> rows = new ArrayList<>();
 				Map<Map<String, String>, MetricValue> result = new HashMap<>();
 				int i15 = i * 15;
+				long t = System.currentTimeMillis();
 				for (int j = i * 15 - 14; j <= i15; j ++) {
 					String filename = dataDir + name + "/" + j;
 					File file = new File(filename);
@@ -357,6 +364,8 @@ public class Collector {
 					// 4'. Remove uncompressed
 					new File(filename).delete();
 				}
+				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
+						"command", "compress", "name", name);
 				// 3'. Aggregate to "_quarter.*"
 				if (result.isEmpty()) {
 					continue;
@@ -383,6 +392,7 @@ public class Collector {
 					result.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
+				t = System.currentTimeMillis();
 				File tmp = new File(dataDir + "tmp.gz");
 				try (PrintStream out = new PrintStream(new
 						GZIPOutputStream(new FileOutputStream(tmp)))) {
@@ -390,7 +400,10 @@ public class Collector {
 				} catch (IOException e) {
 					Log.e(e);
 				}
-				tmp.renameTo(new File(dir("_quarter." + name) + i + ".gz"));
+				String quarterName = "_quarter." + name;
+				tmp.renameTo(new File(dir(quarterName) + i + ".gz"));
+				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
+						"command", "compress", "name", quarterName);
 				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
@@ -490,7 +503,6 @@ public class Collector {
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
 		long start = System.currentTimeMillis();
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
-		p = Conf.load("jdbc");
 		Runnable minutely = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new

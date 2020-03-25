@@ -338,7 +338,7 @@ public class Dashboard {
 			int time = Numbers.parseInt(gzip ?
 					filename.substring(0, filename.length() - 3) : filename);
 			int index = (time - begin) / interval;
-			if (index < 0 || index >= length) {
+			if (time < begin || index >= length) {
 				continue;
 			}
 			File file = new File(dataDir + metricName + "/" + filename);
