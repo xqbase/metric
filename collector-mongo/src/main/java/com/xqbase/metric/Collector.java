@@ -72,7 +72,12 @@ public class Collector {
 
 	private static void insert(MongoDatabase db,
 			Map<String, List<Document>> rowsMap) {
-		rowsMap.forEach((name, rows) -> db.getCollection(name).insertMany(rows));
+		rowsMap.forEach((name, rows) -> {
+			long t = System.currentTimeMillis();
+			db.getCollection(name).insertMany(rows);
+			Metric.put("metric.mongo.elapsed", System.currentTimeMillis() - t,
+					"command", "insert", "name", name);
+		});
 	}
 
 	private static int getInt(Document row, String key) {
@@ -160,7 +165,10 @@ public class Collector {
 				continue;
 			}
 			MongoCollection<Document> collection = db.getCollection(name);
+			long t = System.currentTimeMillis();
 			long count = collection.estimatedDocumentCount();
+			Metric.put("metric.mongo.elapsed", System.currentTimeMillis() - t,
+					"command", "size", "name", name);
 			if (count == 0) {
 				// Remove disappeared metric collections
 				collection.drop();
@@ -253,8 +261,11 @@ public class Collector {
 			MongoCollection<Document> collection = db.getCollection(name);
 			MongoCollection<Document> quarterCollection = db.getCollection("_quarter." + name);
 			// Remove stale
+			long t = System.currentTimeMillis();
 			collection.deleteMany(removeBefore);
 			collection.deleteMany(removeAfter);
+			Metric.put("metric.mongo.elapsed", System.currentTimeMillis() - t,
+					"command", "delete", "name", name);
 			// Aggregate to quarter
 			Document query = __("name", name);
 			Document aggregatedRow = aggregated.find(query).projection(PROJ_TIME).first();
@@ -302,7 +313,10 @@ public class Collector {
 				} else {
 					result.forEach(action);
 				}
+				t = System.currentTimeMillis();
 				quarterCollection.insertMany(rows);
+				Metric.put("metric.mongo.elapsed", System.currentTimeMillis() - t,
+						"command", "insert", "name", "_quarter." + name);
 				// Aggregate to "_meta.tags_quarter"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(), "name", name, "key", tagKey);
@@ -326,8 +340,11 @@ public class Collector {
 			// Ensure index
 			collection.createIndex(INDEX_TIME);
 			// Remove stale
+			long t = System.currentTimeMillis();
 			collection.deleteMany(removeBeforeQuarter);
 			collection.deleteMany(removeAfterQuarter);
+			Metric.put("metric.mongo.elapsed", System.currentTimeMillis() - t,
+					"command", "delete", "name", name);
 			// Aggregate "_meta.tags_quarter" to "_meta.aggregated";
 			String minuteName = name.substring(9);
 			Document query = __("name", minuteName);

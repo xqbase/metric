@@ -14,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -153,6 +154,7 @@ public class Collector {
 	private static int expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
+	private static volatile Map<String, int[]> namesCache = Collections.emptyMap();
 
 	private static int getSize(String name) {
 		File[] files = new File(dataDir + name).listFiles();
@@ -169,7 +171,7 @@ public class Collector {
 		return size;
 	}
 
-	private static Map<String, int[]> getNames(boolean aggregated) {
+	private static Map<String, int[]> getNames() {
 		Map<String, int[]> names = new HashMap<>();
 		for (String filename : new File(dataDir).list()) {
 			if (filename.startsWith("_tags_quarter.")) {
@@ -182,9 +184,6 @@ public class Collector {
 				continue;
 			}
 			if (filename.equals("Aggregated.properties")) {
-				if (!aggregated) {
-					continue;
-				}
 				Properties p = new Properties();
 				try (FileInputStream in = new FileInputStream(dataDir +
 						"Aggregated.properties")) {
@@ -206,6 +205,7 @@ public class Collector {
 			names.computeIfAbsent(filename,
 					k -> new int[3])[0] = getSize(filename);
 		}
+		namesCache = names;
 		return names;
 	}
 
@@ -217,8 +217,8 @@ public class Collector {
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
 		}
 		insert(rowsMap);
-		// Calculate metric size
-		getNames(false).forEach((name, size) -> {
+		// Put metric size
+		namesCache.forEach((name, size) -> {
 			Metric.put("metric.size", size[0], "name", name);
 			Metric.put("metric.size", size[1], "name", "_quarter." + name);
 		});
@@ -290,7 +290,7 @@ public class Collector {
 		Properties aggregatedProp = new Properties();
 		Properties tagsProp = new Properties();
 
-		getNames(true).forEach((name, sizeAndAggregated) -> {
+		getNames().forEach((name, sizeAndAggregated) -> {
 			// 1. Delete _tags_quarter.*
 			delete("_tags_quarter." + name, quarter - tagsExpire);
 			// 2. Delete minute and quarter data
@@ -482,6 +482,8 @@ public class Collector {
 		dataDir = Conf.getAbsolutePath("data");
 		new File(dataDir).mkdirs();
 		dataDir += '/';
+		getNames();
+
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		String host = p.getProperty("host");
@@ -501,6 +503,7 @@ public class Collector {
 			allowedRemotes = new HashSet<>(Arrays.asList(allowedRemote.split("[,;]")));
 		}
 		verbose = Conf.getBoolean(p.getProperty("verbose"), false);
+
 		long start = System.currentTimeMillis();
 		AtomicInteger currentMinute = new AtomicInteger((int) (start / Time.MINUTE));
 		Runnable minutely = null;
