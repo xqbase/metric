@@ -135,6 +135,7 @@ public class Collector {
 			if (v.isEmpty()) {
 				return;
 			}
+			long t = System.currentTimeMillis();
 			CountLock lock = lockMap.acquire(k);
 			lock.lock();
 			try (PrintStream out = new PrintStream(new
@@ -144,6 +145,8 @@ public class Collector {
 				Log.e(e);
 			} finally {
 				lock.unlock();
+				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
+						"command", "insert", "name", k.name);
 			}
 		});
 	}
