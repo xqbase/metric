@@ -12,10 +12,10 @@ CREATE TABLE metric_minute (
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
-	_sum FLOAT NOT NULL,
-	_max FLOAT NOT NULL,
-	_min FLOAT NOT NULL,
-	_sqr FLOAT NOT NULL,
+	_sum DOUBLE NOT NULL,
+	_max DOUBLE NOT NULL,
+	_min DOUBLE NOT NULL,
+	_sqr DOUBLE NOT NULL,
 	tags LONGBLOB NOT NULL,
 	KEY (id, time));
 
@@ -24,10 +24,10 @@ CREATE TABLE metric_quarter (
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	_count BIGINT NOT NULL,
-	_sum FLOAT NOT NULL,
-	_max FLOAT NOT NULL,
-	_min FLOAT NOT NULL,
-	_sqr FLOAT NOT NULL,
+	_sum DOUBLE NOT NULL,
+	_max DOUBLE NOT NULL,
+	_min DOUBLE NOT NULL,
+	_sqr DOUBLE NOT NULL,
 	tags LONGBLOB NOT NULL,
 	KEY (id, time));
 
