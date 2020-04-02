@@ -572,6 +572,7 @@ public class Collector {
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
 		int h2Port = Numbers.parseInt(p.getProperty("h2_port"), 5513);
+		int pgPort = Numbers.parseInt(p.getProperty("pg_port"), 5512);
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
@@ -596,6 +597,7 @@ public class Collector {
 		Runnable minutely = null;
 		String h2DataDir = null;
 		Object h2Server = null;
+		Object pgServer = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
@@ -612,10 +614,10 @@ public class Collector {
 				createTable = !new File(h2DataDir + "/metric.mv.db").exists();
 				h2DataDir = h2DataDir.replace('\\', '/');
 				url = url.substring(0, url.length() - 6) + "file:" + h2DataDir +
-						"/metric;mode=mysql;compress=true;" +
-						"cache_size=32768;lazy_query_execution=1;" +
+						"/metric;mode=postgresql;database_to_lower=true;" +
+						"compress=true;cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
-						"max_compact_time=0;max_compact_count=80";
+						"max_compact_time=0;auto_compact_fill_rate=80";
 			} else if (url.endsWith(":derby:metric")) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
@@ -644,6 +646,9 @@ public class Collector {
 					if (h2Port > 0) {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);
 					}
+					if (pgPort > 0) {
+						pgServer = startServer(pgPort, "Pg", h2DataDir);
+					}
 				}
 				if (createTable) {
 					ByteArrayQueue baq = new ByteArrayQueue();
@@ -661,6 +666,9 @@ public class Collector {
 								} else if (sqlite) {
 									sql = sql.replace(" AUTO_INCREMENT,",
 											" AUTOINCREMENT,");
+								} else { // H2PG
+									sql = sql.replace(" INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,",
+											" SERIAL PRIMARY KEY,");
 								}
 								DB.update(sql);
 							}
@@ -821,6 +829,7 @@ public class Collector {
 		if (DB != null) {
 			if (h2DataDir != null) {
 				stopServer(h2Server);
+				stopServer(pgServer);
 				if (h2PoolEntry != null) {
 					h2PoolEntry.close();
 				}
