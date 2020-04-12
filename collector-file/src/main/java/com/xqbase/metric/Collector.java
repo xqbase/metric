@@ -145,6 +145,7 @@ public class Collector {
 				Log.e(e);
 			} finally {
 				lock.unlock();
+				lockMap.release(k, lock);
 				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
 						"command", "insert", "name", k.name);
 			}

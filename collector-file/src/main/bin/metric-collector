@@ -5,7 +5,7 @@
 PID_FILE=/var/run/metric-collector.pid
 case "$1" in
 	start)
-		/usr/java/default/bin/java -Xms32m -Xmx64m -XX:MaxMetaspaceSize=16m -jar /usr/local/xqbase-metric/lib/metric-collector-file.jar &
+		/usr/java/default/bin/java -Xms12m -Xmx24m -XX:MaxMetaspaceSize=12m -jar /usr/local/xqbase-metric/lib/metric-collector-file.jar &
 		echo $! > $PID_FILE
 		;;
 	stop)
