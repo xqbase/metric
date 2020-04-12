@@ -317,7 +317,7 @@ public class Dashboard {
 			}
 			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
 			response(exchange, tags == null ?
-					Collections.emptyMap() : tags, tags != null);
+					Collections.emptyMap() : tags, acceptGzip);
 			return;
 		}
 

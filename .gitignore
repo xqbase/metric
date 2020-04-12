@@ -21,10 +21,12 @@ hs_err_pid*
 /client-jdk17/target
 /collector-file/target
 /collector-mongo/target
+/collector-mvstore/target
 /collector-sql/target
 /common/target
 /common-jdk17/target
 /dashboard-file/target
 /dashboard-mongo/target
+/dashboard-mvstore/target
 /dashboard-sql/target
 /test/target

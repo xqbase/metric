@@ -302,7 +302,7 @@ public class Dashboard {
 			}
 			String json = p.getProperty(metricName);
 			response(exchange, json == null ?
-					Collections.emptyMap() : json, json != null);
+					Collections.emptyMap() : json, acceptGzip);
 			return;
 		}
 
