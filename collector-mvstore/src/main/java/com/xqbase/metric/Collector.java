@@ -147,31 +147,24 @@ public class Collector {
 
 	private static Map<String, long[]> getNames() {
 		Map<String, long[]> names = new HashMap<>();
-		for (String mapName : mv.getMapNames()) {
-			if (mapName.startsWith("_tags_quarter.")) {
+		for (String name : mv.getMapNames()) {
+			if (name.startsWith("_tags_quarter.") || name.startsWith("_meta")) {
 				continue;
 			}
-			if (mapName.startsWith("_quarter.")) {
-				String name = mapName.substring(9);
+			if (name.startsWith("_quarter.")) {
+				names.computeIfAbsent(name.substring(9),
+						k -> new long[] {0, 0, 0})[1] = getSize(name);
+			} else {
 				names.computeIfAbsent(name,
-						k -> new long[] {0, 0, 0})[1] = getSize(mapName);
-				continue;
+						k -> new long[] {0, 0, 0})[0] = getSize(name);
 			}
-			if (mapName.equals("_meta.aggregated")) {
-				mv.<String, Integer>openMap("_meta.aggregated").forEach((name, time) -> {
-					long[] value = names.get(name);
-					if (value != null) {
-						value[2] = time.intValue();
-					}
-				});
-				continue;
-			}
-			if (mapName.equals("_meta.tags")) {
-				continue;
-			}
-			names.computeIfAbsent(mapName,
-					k -> new long[] {0, 0, 0})[0] = getSize(mapName);
 		}
+		mv.<String, Integer>openMap("_meta.aggregated").forEach((name, time) -> {
+			long[] value = names.get(name);
+			if (value != null) {
+				value[2] = time.intValue();
+			}
+		});
 		namesCache = names;
 		return names;
 	}
@@ -390,7 +383,9 @@ public class Collector {
 		) {
 			String dataDir = Conf.getAbsolutePath("data");
 			new File(dataDir).mkdirs();
-			mv = MVStore.open(dataDir + "/metric.mv");
+			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
+					autoCompactFillRate(40).open();
+			// TODO mv.setAutoCommitDelay(10_000);
 			getNames();
 			Dashboard.startup(mv);
 

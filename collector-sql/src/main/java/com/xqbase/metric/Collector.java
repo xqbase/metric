@@ -417,6 +417,7 @@ public class Collector {
 						"/metric;mode=mysql;" +
 						"cache_size=0;lazy_query_execution=1;" +
 						"db_close_on_exit=false;" +
+						// TODO "write_delay=10000;" +
 						"max_compact_time=0;max_compact_count=40";
 			}
 			DB = new ConnectionPool(driver, url,
