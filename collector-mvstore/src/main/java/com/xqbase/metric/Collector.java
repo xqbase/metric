@@ -8,7 +8,6 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -99,13 +98,33 @@ public class Collector {
 				limitedTags, new MetricValue(count, sum, max, min, sqr));
 	}
 
+	private static void updateSize(String name, long delta) {
+		if (delta == 0) {
+			return;
+		}
+		sizeTable.compute(name, (key, oldSize) -> {
+			long size = (oldSize == null ? 0 : oldSize.longValue()) + delta;
+			if (size > 0) {
+				return Long.valueOf(size);
+			}
+			if (size == 0) {
+				Log.d("Size " + name + " removed");
+			} else {
+				Log.w("Illegal size " + name + ": " +
+						oldSize + " - " + -delta + " < 0");
+			}
+			return null;
+		});
+	}
+
 	private static void putElapsed(long elapsed,
 			String command, String name, String phase) {
 		Metric.put("metric.mvstore.elapsed", elapsed,
 				"command", command, "name", name, "phase", phase);		
 	}
 
-	private static void insert(Map<NameTime, Map<Map<String, String>, MetricValue>> metricMaps) {
+	private static void insert(Map<NameTime,
+			Map<Map<String, String>, MetricValue>> metricMaps) {
 		metricMaps.forEach((key, metricMap) -> {
 			if (metricMap.isEmpty()) {
 				return;
@@ -135,7 +154,8 @@ public class Collector {
 				}
 				b = Codecs.serialize(aggrMetricMap);
 				long t5 = System.currentTimeMillis();
-				metricTable.put(time, b);
+				byte[] oldB = metricTable.put(time, b);
+				updateSize(key.name, b.length - (oldB == null ? 0 : oldB.length));
 				long t6 = System.currentTimeMillis();
 				putElapsed(t1 - t0, command, key.name, "lock");
 				putElapsed(t2 - t1, command, key.name, "read");
@@ -155,45 +175,12 @@ public class Collector {
 	private static Service service = new Service();
 	private static LockMap<NameTime> lockMap = new LockMap<>();
 	private static MVStore mv;
+	private static Map<String, Long> sizeTable;
+	private static Map<String, Integer> aggregatedTable;
+	private static Map<String, byte[]> tagsTable;
 	private static int expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
-	private static volatile Map<String, long[]> namesCache = Collections.emptyMap();
-
-	private static long getSize(String name) {
-		long t = System.currentTimeMillis();
-		MVMap<?, ?> table = mv.openMap(name);
-		// "getDiskSpaceUsed" takes too much time, see
-		// https://github.com/h2database/h2database/issues/2509
-		// long size = table.isEmpty() ? 0 : table.getRootPage().getDiskSpaceUsed();
-		long size = table.size();
-		putElapsed(System.currentTimeMillis() - t, "size", name, "N/A");
-		return size;
-	}
-
-	private static Map<String, long[]> getNames() {
-		Map<String, long[]> names = new HashMap<>();
-		for (String name : mv.getMapNames()) {
-			if (name.startsWith("_tags_quarter.") || name.startsWith("_meta")) {
-				continue;
-			}
-			if (name.startsWith("_quarter.")) {
-				names.computeIfAbsent(name.substring(9),
-						k -> new long[] {0, 0, 0})[1] = getSize(name);
-			} else {
-				names.computeIfAbsent(name,
-						k -> new long[] {0, 0, 0})[0] = getSize(name);
-			}
-		}
-		mv.<String, Integer>openMap("_meta.aggregated").forEach((name, time) -> {
-			long[] value = names.get(name);
-			if (value != null) {
-				value[2] = time.intValue();
-			}
-		});
-		namesCache = names;
-		return names;
-	}
 
 	private static void minutely(int minute) {
 		// Insert aggregation-during-collection metrics
@@ -204,14 +191,8 @@ public class Collector {
 		}
 		insert(metricMaps);
 		// Put metric size
-		namesCache.forEach((name, size) -> {
-			if (size[0] > 0) {
-				Metric.put("metric.size", size[0], "name", name);
-			}
-			if (size[1] > 0) {
-				Metric.put("metric.size", size[1], "name", "_quarter." + name);
-			}
-		});
+		sizeTable.forEach((name, size) ->
+				Metric.put("metric.size", size.longValue(), "name", name));
 		// MVStore fill rate
 		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
 		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
@@ -274,7 +255,7 @@ public class Collector {
 		return tags;
 	}
 
-	private static void delete(MVMap<Integer, ?> table, int time) {
+	private static void delete(MVMap<Integer, byte[]> table, int time) {
 		long t = System.currentTimeMillis();
 		List<Integer> delKeys = new ArrayList<>();
 		Iterator<Integer> it = table.keyIterator(Integer.valueOf(0));
@@ -285,27 +266,49 @@ public class Collector {
 			}
 			delKeys.add(key);
 		}
-		for (Integer key : delKeys) {
-			table.remove(key);
-		}
+		long size = 0;
 		String name = table.getName();
+		for (Integer key : delKeys) {
+			byte[] b = table.remove(key);
+			if (b == null) {
+				Log.w("Unable to remove key " + key + " from table " + name);
+			} else {
+				size += b.length;
+			}
+		}
+		updateSize(name, -size);
 		putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
 		Metric.put("metric.mvstore.keycount", delKeys.size(),
 				"command", "delete", "name", name);
 	}
 
 	private static void quarterly(int quarter) {
-		Map<String, Integer> aggregatedTable = mv.openMap("_meta.aggregated");
-		Map<String, byte[]> tagsTable = mv.openMap("_meta.tags");
-		getNames().forEach((name, sizeAndAggregated) -> {
+		Map<String, long[]> names = new HashMap<>();
+		sizeTable.forEach((name, size) -> {
+			if (name.startsWith("_quarter.")) {
+				names.computeIfAbsent(name.substring(9),
+						k -> new long[] {0, 0, 0})[1] = size.longValue();
+			} else {
+				names.computeIfAbsent(name,
+						k -> new long[] {0, 0, 0})[0] = size.longValue();
+			}
+		});
+		aggregatedTable.forEach((name, time) -> {
+			long[] value = names.get(name);
+			if (value != null) {
+				value[2] = time.intValue();
+			}
+		});
+		names.forEach((name, sizeAndAggregated) -> {
 			// 1. Delete _tags_quarter.*
 			MVMap<Integer, byte[]> tagsQuarter = mv.openMap("_tags_quarter." + name);
 			delete(tagsQuarter, quarter - tagsExpire);
 			// 2. Delete minute and quarter data
-			if (sizeAndAggregated[0] == 0 && sizeAndAggregated[1] == 0) {
+			String quarterName = "_quarter." + name;
+			if (sizeAndAggregated[0] <= 0 && sizeAndAggregated[1] <= 0) {
 				// 2.1 Delete folder if metric data does not exist
 				mv.removeMap(name);
-				mv.removeMap("_quarter." + name);
+				mv.removeMap(quarterName);
 				mv.removeMap("_tags_quarter." + name);
 				aggregatedTable.remove(name);
 				tagsTable.remove(name);
@@ -313,7 +316,7 @@ public class Collector {
 			}
 			int aggregated = (int) sizeAndAggregated[2];
 			MVMap<Integer, byte[]> minuteTable = mv.openMap(name);
-			MVMap<Integer, byte[]> quarterTable = mv.openMap("_quarter." + name);
+			MVMap<Integer, byte[]> quarterTable = mv.openMap(quarterName);
 			delete(minuteTable, quarter * 15 - expire);
 			delete(quarterTable, quarter - expire);
 			// 3. Aggregate minute to quarter
@@ -350,7 +353,11 @@ public class Collector {
 					accMetricMap.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
-				quarterTable.put(Integer.valueOf(i), Codecs.serialize(accMetricMap));
+				byte[] b = Codecs.serialize(accMetricMap);
+				if (quarterTable.put(Integer.valueOf(i), b) != null) {
+					Log.w("Duplicate key " + i + " in table " + quarterName);
+				}
+				updateSize(quarterName, b.length);
 				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
@@ -418,7 +425,9 @@ public class Collector {
 			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
 					autoCompactFillRate(40).open();
 			mv.setAutoCommitDelay(10_000);
-			getNames();
+			sizeTable = mv.openMap("_meta.size");
+			aggregatedTable = mv.openMap("_meta.aggregated");
+			tagsTable = mv.openMap("_meta.tags");
 			Dashboard.startup(mv);
 
 			minutely = Runnables.wrap(() -> {
