@@ -50,7 +50,7 @@ import com.xqbase.util.Time;
 import com.xqbase.util.concurrent.CountLock;
 import com.xqbase.util.concurrent.LockMap;
 
-class FileName {
+class NameTime {
 	String name;
 	int time;
 
@@ -61,7 +61,7 @@ class FileName {
 
 	@Override
 	public boolean equals(Object obj) {
-		FileName o = (FileName) obj;
+		NameTime o = (NameTime) obj;
 		return time == o.time && name.equals(o.name);
 	}
 }
@@ -85,7 +85,7 @@ public class Collector {
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
-	private static void put(Map<FileName, List<MetricRow>> rowsMap,
+	private static void put(Map<NameTime, List<MetricRow>> rowsMap,
 			String name, int time, Map<String, String> tags,
 			long count, double sum, double max, double min, double sqr) {
 		MetricRow row = new MetricRow();
@@ -97,10 +97,10 @@ public class Collector {
 			row.tags = tags;
 		}
 		row.value = new MetricValue(count, sum, max, min, sqr);
-		FileName filename = new FileName();
-		filename.name = name;
-		filename.time = time;
-		rowsMap.computeIfAbsent(filename, k -> new ArrayList<>()).add(row);
+		NameTime nameTime = new NameTime();
+		nameTime.name = name;
+		nameTime.time = time;
+		rowsMap.computeIfAbsent(nameTime, k -> new ArrayList<>()).add(row);
 	}
 
 	private static String dir(String name) {
@@ -130,42 +130,42 @@ public class Collector {
 		}
 	}
 
-	private static void insert(Map<FileName, List<MetricRow>> rowsMap) {
-		rowsMap.forEach((k, v) -> {
-			if (v.isEmpty()) {
+	private static void insert(Map<NameTime, List<MetricRow>> rowsMap) {
+		rowsMap.forEach((key, rows) -> {
+			if (rows.isEmpty()) {
 				return;
 			}
 			long t = System.currentTimeMillis();
-			CountLock lock = lockMap.acquire(k);
+			CountLock lock = lockMap.acquire(key);
 			lock.lock();
 			try (PrintStream out = new PrintStream(new
-					FileOutputStream(dir(k.name) + k.time, true))) {
-				insert(out, v);
+					FileOutputStream(dir(key.name) + key.time, true))) {
+				insert(out, rows);
 			} catch (IOException e) {
 				Log.e(e);
 			} finally {
 				lock.unlock();
-				lockMap.release(k, lock);
+				lockMap.release(key, lock);
 				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
-						"command", "insert", "name", k.name);
+						"command", "insert", "name", key.name);
 			}
 		});
 	}
 
 	private static Service service = new Service();
-	private static LockMap<FileName> lockMap = new LockMap<>();
+	private static LockMap<NameTime> lockMap = new LockMap<>();
 	private static String dataDir;
 	private static int expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
-	private static volatile Map<String, int[]> namesCache = Collections.emptyMap();
+	private static volatile Map<String, long[]> namesCache = Collections.emptyMap();
 
-	private static int getSize(String name) {
+	private static long getSize(String name) {
 		File[] files = new File(dataDir + name).listFiles();
 		if (files == null) {
 			return 0;
 		}
-		int size = 0;
+		long size = 0;
 		long t = System.currentTimeMillis();
 		for (File file : files) {
 			size += file.length();
@@ -175,47 +175,40 @@ public class Collector {
 		return size;
 	}
 
-	private static Map<String, int[]> getNames() {
-		Map<String, int[]> names = new HashMap<>();
-		for (String filename : new File(dataDir).list()) {
-			if (filename.startsWith("_tags_quarter.")) {
+	private static Map<String, long[]> getNames() {
+		Map<String, long[]> names = new HashMap<>();
+		for (String name : new File(dataDir).list()) {
+			if (name.startsWith("_tags_quarter.") || name.startsWith("_meta.")) {
 				continue;
 			}
-			if (filename.startsWith("_quarter.")) {
-				String name = filename.substring(9);
-				names.computeIfAbsent(name, k -> new int[3])[1] =
-						getSize(filename);
-				continue;
+			if (name.startsWith("_quarter.")) {
+				names.computeIfAbsent(name.substring(9),
+						k -> new long[] {0, 0, 0})[1] = getSize(name);
+			} else {
+				names.computeIfAbsent(name,
+						k -> new long[] {0, 0, 0})[0] = getSize(name);
 			}
-			if (filename.equals("Aggregated.properties")) {
-				Properties p = new Properties();
-				try (FileInputStream in = new FileInputStream(dataDir +
-						"Aggregated.properties")) {
-					p.load(in);
-				} catch (IOException e) {
-					Log.e(e);
-				}
-				p.forEach((k, v) -> {
-					int[] value = names.get(k);
-					if (value != null) {
-						value[2] = Numbers.parseInt((String) v);
-					}
-				});
-				continue;
-			}
-			if (filename.equals("Tags.properties")) {
-				continue;
-			}
-			names.computeIfAbsent(filename,
-					k -> new int[3])[0] = getSize(filename);
 		}
+		Properties p = new Properties();
+		try (FileInputStream in = new FileInputStream(dataDir +
+				"_meta.aggregated.properties")) {
+			p.load(in);
+		} catch (IOException e) {
+			Log.w(e.getMessage());
+		}
+		p.forEach((k, v) -> {
+			long[] value = names.get(k);
+			if (value != null) {
+				value[2] = Numbers.parseInt((String) v);
+			}
+		});
 		namesCache = names;
 		return names;
 	}
 
 	private static void minutely(int minute) {
 		// Insert aggregation-during-collection metrics
-		Map<FileName, List<MetricRow>> rowsMap = new HashMap<>();
+		Map<NameTime, List<MetricRow>> rowsMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
 			put(rowsMap, entry.getName(), minute, entry.getTagMap(), entry.getCount(),
 					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
@@ -223,8 +216,12 @@ public class Collector {
 		insert(rowsMap);
 		// Put metric size
 		namesCache.forEach((name, size) -> {
-			Metric.put("metric.size", size[0], "name", name);
-			Metric.put("metric.size", size[1], "name", "_quarter." + name);
+			if (size[0] > 0) {
+				Metric.put("metric.size", size[0], "name", name);
+			}
+			if (size[1] > 0) {
+				Metric.put("metric.size", size[1], "name", "_quarter." + name);
+			}
 		});
 	}
 
@@ -298,16 +295,14 @@ public class Collector {
 			// 1. Delete _tags_quarter.*
 			delete("_tags_quarter." + name, quarter - tagsExpire);
 			// 2. Delete minute and quarter data
-			int minuteSize = sizeAndAggregated[0];
-			int quarterSize = sizeAndAggregated[1];
-			if (minuteSize == 0 && quarterSize == 0) {
+			if (sizeAndAggregated[0] == 0 && sizeAndAggregated[1] == 0) {
 				// 2.1 Delete folder if metric data does not exist
 				new File(dataDir + name).delete();
 				new File(dataDir + "_quarter." + name).delete();
 				new File(dataDir + "_tags_quarter." + name).delete();
 				return;
 			}
-			int aggregated = sizeAndAggregated[2];
+			int aggregated = (int) sizeAndAggregated[2];
 			delete(name, quarter * 15 - expire);
 			delete("_quarter." + name, quarter - expire);
 			// 3. Aggregate minute to quarter
@@ -424,7 +419,7 @@ public class Collector {
 			}
 			// 6. Set "aggregated"
 			aggregatedProp.setProperty(name, "" + quarter);
-			// 7. Aggregate "_tags_quarter" to "Tags.properties";
+			// 7. Aggregate "_tags_quarter" to "_meta.tags.properties";
 			File[] files = new File(dataDir + "_tags_quarter." + name).listFiles();
 			if (files == null) {
 				return;
@@ -460,13 +455,13 @@ public class Collector {
 		});
 
 		try (FileOutputStream out = new FileOutputStream(dataDir +
-				"Aggregated.properties")) {
+				"_meta.aggregated.properties")) {
 			aggregatedProp.store(out, null);
 		} catch (IOException e) {
 			Log.e(e);
 		}
 		try (FileOutputStream out = new FileOutputStream(dataDir +
-				"Tags.properties")) {
+				"_meta.tags.properties")) {
 			tagsProp.store(out, null);
 		} catch (IOException e) {
 			Log.e(e);
@@ -562,7 +557,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				Map<FileName, List<MetricRow>> rowsMap = new HashMap<>();
+				Map<NameTime, List<MetricRow>> rowsMap = new HashMap<>();
 				Map<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'

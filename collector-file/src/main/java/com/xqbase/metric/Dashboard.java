@@ -289,7 +289,7 @@ public class Dashboard {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			File file = new File(dataDir + "Tags.properties");
+			File file = new File(dataDir + "_meta.tags.properties");
 			if (!file.exists()) {
 				response(exchange, Collections.emptyMap(), false);
 				return;

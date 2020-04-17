@@ -92,11 +92,17 @@ public class Collector {
 		} else {
 			limitedTags = tags;
 		}
-		NameTime filename = new NameTime();
-		filename.name = name;
-		filename.time = time;
-		merge(metricMaps.computeIfAbsent(filename, k -> new HashMap<>()),
+		NameTime nameTime = new NameTime();
+		nameTime.name = name;
+		nameTime.time = time;
+		merge(metricMaps.computeIfAbsent(nameTime, k -> new HashMap<>()),
 				limitedTags, new MetricValue(count, sum, max, min, sqr));
+	}
+
+	private static void putElapsed(long elapsed,
+			String command, String name, String phase) {
+		Metric.put("metric.mvstore.elapsed", elapsed,
+				"command", command, "name", name, "phase", phase);		
 	}
 
 	private static void insert(Map<NameTime, Map<Map<String, String>, MetricValue>> metricMaps) {
@@ -104,26 +110,44 @@ public class Collector {
 			if (metricMap.isEmpty()) {
 				return;
 			}
-			long t = System.currentTimeMillis();
+			long t0 = System.currentTimeMillis();
 			CountLock lock = lockMap.acquire(key);
 			lock.lock();
 			try {
+				long t1 = System.currentTimeMillis();
 				Map<Integer, byte[]> metricTable = mv.openMap(key.name);
 				Integer time = Integer.valueOf(key.time);
 				byte[] b = metricTable.get(time);
+				long t2 = System.currentTimeMillis();
 				Map<Map<String, String>, MetricValue> aggrMetricMap;
+				long t3, t4;
+				String command;
 				if (b == null) {
 					aggrMetricMap = metricMap;
+					t4 = t3 = t2;
+					command = "insert";
 				} else {
 					aggrMetricMap = Codecs.deserialize(b, METRIC_TYPE);
+					t3 = System.currentTimeMillis();
 					putMetricValue(aggrMetricMap, metricMap);
+					t4 = System.currentTimeMillis();
+					command = "update";
 				}
-				metricTable.put(time, Codecs.serialize(aggrMetricMap));
+				b = Codecs.serialize(aggrMetricMap);
+				long t5 = System.currentTimeMillis();
+				metricTable.put(time, b);
+				long t6 = System.currentTimeMillis();
+				putElapsed(t1 - t0, command, key.name, "lock");
+				putElapsed(t2 - t1, command, key.name, "read");
+				putElapsed(t3 - t2, command, key.name, "decode");
+				putElapsed(t4 - t3, command, key.name, "merge");
+				putElapsed(t5 - t4, command, key.name, "encode");
+				putElapsed(t6 - t5, command, key.name, "write");
+				Metric.put("metric.mvstore.keycount", 1,
+						"command", command, "name", key.name);
 			} finally {
 				lock.unlock();
 				lockMap.release(key, lock);
-				Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-						"command", "insert", "name", key.name);
 			}
 		});
 	}
@@ -139,9 +163,11 @@ public class Collector {
 	private static long getSize(String name) {
 		long t = System.currentTimeMillis();
 		MVMap<?, ?> table = mv.openMap(name);
-		long size = table.isEmpty() ? 0 : table.getRootPage().getDiskSpaceUsed();
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-				"command", "size", "name", name);
+		// "getDiskSpaceUsed" takes too much time, see
+		// https://github.com/h2database/h2database/issues/2509
+		// long size = table.isEmpty() ? 0 : table.getRootPage().getDiskSpaceUsed();
+		long size = table.size();
+		putElapsed(System.currentTimeMillis() - t, "size", name, "N/A");
 		return size;
 	}
 
@@ -179,9 +205,16 @@ public class Collector {
 		insert(metricMaps);
 		// Put metric size
 		namesCache.forEach((name, size) -> {
-			Metric.put("metric.size", size[0], "name", name);
-			Metric.put("metric.size", size[1], "name", "_quarter." + name);
+			if (size[0] > 0) {
+				Metric.put("metric.size", size[0], "name", name);
+			}
+			if (size[1] > 0) {
+				Metric.put("metric.size", size[1], "name", "_quarter." + name);
+			}
 		});
+		// MVStore fill rate
+		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
+		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
 	}
 
 	private static void merge(Map<Map<String, String>, MetricValue>
@@ -255,8 +288,10 @@ public class Collector {
         for (Integer key : delKeys) {
         	table.remove(key);
         }
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-				"command", "delete", "name", table.getName());
+        String name = table.getName();
+        putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
+		Metric.put("metric.mvstore.keycount", delKeys.size(),
+				"command", "delete", "name", name);
 	}
 
 	private static void quarterly(int quarter) {
@@ -267,9 +302,7 @@ public class Collector {
 			MVMap<Integer, byte[]> tagsQuarter = mv.openMap("_tags_quarter." + name);
 			delete(tagsQuarter, quarter - tagsExpire);
 			// 2. Delete minute and quarter data
-			long minuteSize = sizeAndAggregated[0];
-			long quarterSize = sizeAndAggregated[1];
-			if (minuteSize == 0 && quarterSize == 0) {
+			if (sizeAndAggregated[0] == 0 && sizeAndAggregated[1] == 0) {
 				// 2.1 Delete folder if metric data does not exist
 				mv.removeMap(name);
 				mv.removeMap("_quarter." + name);
@@ -338,8 +371,7 @@ public class Collector {
 				});
 			}
 			tagsTable.put(name, Codecs.serialize(limit(tagMap)));
-			Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-					"command", "aggregate", "name", name);
+			putElapsed(System.currentTimeMillis() - t, "aggregate", name, "N/A");
 		});
 	}
 
