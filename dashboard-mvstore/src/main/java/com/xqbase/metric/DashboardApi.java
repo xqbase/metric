@@ -2,6 +2,8 @@ package com.xqbase.metric;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
+import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -18,7 +20,9 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.h2.mvstore.FileStore;
 import org.h2.mvstore.MVStore;
+import org.h2.store.fs.FilePath;
 import org.json.JSONObject;
 
 import com.xqbase.metric.common.MetricValue;
@@ -54,6 +58,25 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
+	private static Field fileField, fileNameField, readOnlyField, fileSizeField;
+
+	private static Field getField(String name) throws ReflectiveOperationException {
+		Field field = FileStore.class.getDeclaredField(name);
+		field.setAccessible(true);
+		return field;
+	}
+
+	static {
+		try {
+			fileField = getField("file");
+			fileNameField = getField("fileName");
+			readOnlyField = getField("readOnly");
+			fileSizeField = getField("fileSize");
+		} catch (ReflectiveOperationException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	private int maxTagValues = 0;
 	private MVStore mv = null;
 
@@ -61,8 +84,19 @@ public class DashboardApi extends HttpServlet {
 	public void init() throws ServletException {
 		Properties p = Conf.load("Dashboard");
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
-		mv = new MVStore.Builder().fileName(p.getProperty("data_file",
-				Conf.getAbsolutePath("data/metric.mv"))).readOnly().open();
+		FileStore fs = new FileStore();
+		String fileName = p.getProperty("data_file",
+				Conf.getAbsolutePath("data/metric.mv"));
+		try {
+			FileChannel fc = FilePath.get(fileName).open("r");
+			fileField.set(fs, fc);
+			fileNameField.set(fs, fileName);
+			fileSizeField.set(fs, Long.valueOf(fc.size()));
+			readOnlyField.set(fs, Boolean.TRUE);
+		} catch (IOException | ReflectiveOperationException e) {
+			throw new RuntimeException(e);
+		}
+		mv = new MVStore.Builder().fileStore(fs).cacheSize(0).open();
 	}
 
 	@Override

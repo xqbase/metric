@@ -277,19 +277,19 @@ public class Collector {
 	private static void delete(MVMap<Integer, ?> table, int time) {
 		long t = System.currentTimeMillis();
 		List<Integer> delKeys = new ArrayList<>();
-        Iterator<Integer> it = table.keyIterator(Integer.valueOf(0));
-        while (it.hasNext()) {
-        	Integer key = it.next();
-        	if (key.intValue() > time) {
-        		break;
-        	}
-        	delKeys.add(key);
-        }
-        for (Integer key : delKeys) {
-        	table.remove(key);
-        }
-        String name = table.getName();
-        putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
+		Iterator<Integer> it = table.keyIterator(Integer.valueOf(0));
+		while (it.hasNext()) {
+			Integer key = it.next();
+			if (key.intValue() > time) {
+				break;
+			}
+			delKeys.add(key);
+		}
+		for (Integer key : delKeys) {
+			table.remove(key);
+		}
+		String name = table.getName();
+		putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
 		Metric.put("metric.mvstore.keycount", delKeys.size(),
 				"command", "delete", "name", name);
 	}
@@ -417,7 +417,7 @@ public class Collector {
 			new File(dataDir).mkdirs();
 			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
 					autoCompactFillRate(40).open();
-			// TODO mv.setAutoCommitDelay(10_000);
+			mv.setAutoCommitDelay(10_000);
 			getNames();
 			Dashboard.startup(mv);
 

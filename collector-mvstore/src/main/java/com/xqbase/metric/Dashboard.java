@@ -93,7 +93,7 @@ public class Dashboard {
 		protected SimpleDateFormat initialValue() {
 			// https://stackoverflow.com/a/8642463/4260959
 			SimpleDateFormat format_ = new SimpleDateFormat(
-		    		"EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
+					"EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
 			format_.setTimeZone(TimeZone.getTimeZone("GMT"));
 			return format_;
 		}

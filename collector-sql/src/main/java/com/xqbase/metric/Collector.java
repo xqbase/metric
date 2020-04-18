@@ -407,17 +407,15 @@ public class Collector {
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
-			int colon = url.indexOf(":h2:");
-			if (colon >= 0) {
+			if (url.endsWith(":h2:metric")) {
 				h2DataDir = Conf.getAbsolutePath("data");
 				new File(h2DataDir).mkdir();
 				createTable = !new File(h2DataDir + "/metric.mv.db").exists();
 				h2DataDir = h2DataDir.replace('\\', '/');
-				url = url.substring(0, colon + 4) + h2DataDir +
+				url = url.substring(0, url.length() - 6) + "file:" + h2DataDir +
 						"/metric;mode=mysql;" +
 						"cache_size=0;lazy_query_execution=1;" +
-						"db_close_on_exit=false;" +
-						// TODO "write_delay=10000;" +
+						"db_close_on_exit=false;write_delay=10000;" +
 						"max_compact_time=0;max_compact_count=40";
 			}
 			DB = new ConnectionPool(driver, url,
