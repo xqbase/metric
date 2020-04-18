@@ -86,16 +86,13 @@ public class Dashboard {
 	};
 
 	private static ThreadLocal<SimpleDateFormat> format =
-			new ThreadLocal<SimpleDateFormat>() {
-		@Override
-		protected SimpleDateFormat initialValue() {
-			// https://stackoverflow.com/a/8642463/4260959
-			SimpleDateFormat format_ = new SimpleDateFormat(
-					"EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
-			format_.setTimeZone(TimeZone.getTimeZone("GMT"));
-			return format_;
-		}
-	};
+			ThreadLocal.withInitial(() -> {
+		// https://stackoverflow.com/a/8642463/4260959
+		SimpleDateFormat format_ = new SimpleDateFormat(
+				"EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
+		format_.setTimeZone(TimeZone.getTimeZone("GMT"));
+		return format_;
+	});
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();

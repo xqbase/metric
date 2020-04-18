@@ -40,13 +40,7 @@ public class Codecs {
 	private BinaryDecoder decoder = DecoderFactory.get().
 			binaryDecoder(baq.getInputStream(), null);
 
-	private static ThreadLocal<Codecs> codecs_ = 
-			new ThreadLocal<Codecs>() {
-		@Override
-		protected Codecs initialValue() {
-			return new Codecs();
-		}
-	};
+	private static ThreadLocal<Codecs> codecs_ = ThreadLocal.withInitial(Codecs::new);
 
 	private static <T> byte[] encode(ReflectDatumWriter<T> writer, T t) {
 		Codecs codecs = codecs_.get();

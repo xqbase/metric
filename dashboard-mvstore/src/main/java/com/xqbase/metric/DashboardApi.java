@@ -3,7 +3,6 @@ package com.xqbase.metric;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collections;
@@ -11,7 +10,6 @@ import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Properties;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -23,9 +21,7 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.h2.mvstore.FileStore;
 import org.h2.mvstore.MVMap;
-import org.h2.mvstore.MVMap.Builder;
 import org.h2.mvstore.MVStore;
-import org.h2.mvstore.RootReference;
 import org.h2.store.fs.FilePath;
 import org.json.JSONObject;
 
@@ -64,9 +60,8 @@ public class DashboardApi extends HttpServlet {
 
 	private static Field fileField, fileNameField, readOnlyField, fileSizeField;
 
-	static Method flushAppendBufferMethod;
-
-	private static Field getField(String name) throws ReflectiveOperationException {
+	private static Field getField(String name)
+			throws ReflectiveOperationException {
 		Field field = FileStore.class.getDeclaredField(name);
 		field.setAccessible(true);
 		return field;
@@ -78,23 +73,14 @@ public class DashboardApi extends HttpServlet {
 			fileNameField = getField("fileName");
 			readOnlyField = getField("readOnly");
 			fileSizeField = getField("fileSize");
-			flushAppendBufferMethod = MVMap.class.getDeclaredMethod(
-					"flushAppendBuffer", RootReference.class, boolean.class);
-			flushAppendBufferMethod.setAccessible(true);
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
 	}
 
-	private int maxTagValues = 0;
-	private MVStore mv = null;
-
-	@Override
-	public void init() throws ServletException {
-		Properties p = Conf.load("Dashboard");
-		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
+	private static MVStore open() {
 		FileStore fs = new FileStore();
-		String fileName = p.getProperty("data_file",
+		String fileName = Conf.load("Dashboard").getProperty("data_file",
 				Conf.getAbsolutePath("data/metric.mv"));
 		try {
 			FileChannel fc = FilePath.get(fileName).open("r");
@@ -105,52 +91,17 @@ public class DashboardApi extends HttpServlet {
 		} catch (IOException | ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
-		mv = new MVStore.Builder().fileStore(fs).cacheSize(0).open();
+		return new MVStore.Builder().fileStore(fs).cacheSize(0).open();
 	}
+
+	private int maxTagValues = 0;
 
 	@Override
-	public void destroy() {
-		if (mv != null) {
-			mv.close();
-		}
+	public void init() throws ServletException {
+		maxTagValues = Numbers.parseInt(Conf.
+				load("Dashboard").getProperty("max_tag_values"));
 	}
 
-	private static final Builder<Integer, byte[]>
-			METRIC_BUILDER = new Builder<Integer, byte[]>() {
-		@Override
-		protected MVMap<Integer,byte[]> create(Map<String, Object> config) {
-			config.put("singleWriter", Boolean.TRUE);
-			return new MVMap<Integer, byte[]>(config) {
-				@Override
-				public RootReference flushAndGetRoot() {
-					try {
-						return (RootReference) flushAppendBufferMethod.
-								invoke(this, getRoot(), Boolean.TRUE);
-					} catch (ReflectiveOperationException e) {
-						throw new RuntimeException(e);
-					}
-				}
-			};
-		}
-	};
-	private static final Builder<String, byte[]>
-			TAGS_BUILDER = new Builder<String, byte[]>() {
-		@Override
-		protected MVMap<String, byte[]> create(Map<String, Object> config) {
-			config.put("singleWriter", Boolean.TRUE);
-			return new MVMap<String, byte[]>(config) {
-				@Override
-				public RootReference flushAndGetRoot() {
-					try {
-						return (RootReference) flushAppendBufferMethod.
-								invoke(this, getRoot(), Boolean.TRUE);
-					} catch (ReflectiveOperationException e) {
-						throw new RuntimeException(e);
-					}
-				}
-			};
-		}
-	};
 	private static final Map<Map<String, String>, MetricValue>
 			METRIC_TYPE = new HashMap<>();
 	private static final Map<String, Map<String, MetricValue>>
@@ -235,7 +186,10 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			byte[] b = mv.openMap("_meta.tags", TAGS_BUILDER).get(metricName);
+			byte[] b;
+			try (MVStore mv = open()) {
+				b = mv.<String, byte[]>openMap("_meta.tags").get(metricName);
+			}
 			outputJson(req, resp, b == null ? Collections.emptyMap() :
 					Codecs.deserialize(b, TAGS_TYPE));
 			return;
@@ -267,35 +221,37 @@ public class DashboardApi extends HttpServlet {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		Map<Integer, byte[]> metricTable = mv.openMap(metricName, METRIC_BUILDER);
-		for (int time = begin; time <= end; time ++) {
-			int index = (time - begin) / interval;
-			if (time < begin || index >= length) {
-				continue;
-			}
-			byte[] b = metricTable.get(Integer.valueOf(time));
-			if (b == null) {
-				continue;
-			}
-			Map<Map<String, String>, MetricValue> metricMap =
-					Codecs.deserialize(b, METRIC_TYPE);
-			metricMap.forEach((tags, newValue) -> {
-				// Query Tags
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String tagValue = tags.get(entry.getKey());
-					if (!entry.getValue().equals(tagValue)) {
-						return;
+		try (MVStore mv = open()) {
+			MVMap<Integer, byte[]> metricTable = mv.openMap(metricName);
+			for (int time = begin; time <= end; time ++) {
+				int index = (time - begin) / interval;
+				if (time < begin || index >= length) {
+					continue;
+				}
+				byte[] b = metricTable.get(Integer.valueOf(time));
+				if (b == null) {
+					continue;
+				}
+				Map<Map<String, String>, MetricValue> metricMap =
+						Codecs.deserialize(b, METRIC_TYPE);
+				metricMap.forEach((tags, newValue) -> {
+					// Query Tags
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String tagValue = tags.get(entry.getKey());
+						if (!entry.getValue().equals(tagValue)) {
+							return;
+						}
 					}
-				}
-				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
-				}
-			});
+					// Group Tags
+					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue value = result.get(key);
+					if (value == null) {
+						result.put(key, newValue);
+					} else {
+						value.add(newValue);
+					}
+				});
+			}
 		}
 		// Generate Data
 		Map<String, double[]> data = new HashMap<>();
