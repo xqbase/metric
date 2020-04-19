@@ -276,7 +276,9 @@ public class Collector {
 				size += b.length;
 			}
 		}
-		updateSize(name, -size);
+		if (!name.startsWith("_tags_quarter.")) {
+			updateSize(name, -size);
+		}
 		putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
 		Metric.put("metric.mvstore.keycount", delKeys.size(),
 				"command", "delete", "name", name);
@@ -284,15 +286,20 @@ public class Collector {
 
 	private static void quarterly(int quarter) {
 		Map<String, long[]> names = new HashMap<>();
-		sizeTable.forEach((name, size) -> {
+		for (String name : mv.getMapNames()) {
+			if (name.startsWith("_tags_quarter.") || name.startsWith("_meta.")) {
+				continue;
+			}
+			Long size_ = sizeTable.get(name);
+			long size = size_ == null ? 0 : size_.longValue();
 			if (name.startsWith("_quarter.")) {
 				names.computeIfAbsent(name.substring(9),
-						k -> new long[] {0, 0, 0})[1] = size.longValue();
+						k -> new long[] {0, 0, 0})[1] = size;
 			} else {
 				names.computeIfAbsent(name,
-						k -> new long[] {0, 0, 0})[0] = size.longValue();
+						k -> new long[] {0, 0, 0})[0] = size;
 			}
-		});
+		}
 		aggregatedTable.forEach((name, time) -> {
 			long[] value = names.get(name);
 			if (value != null) {
@@ -423,7 +430,7 @@ public class Collector {
 			String dataDir = Conf.getAbsolutePath("data");
 			new File(dataDir).mkdirs();
 			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
-					autoCompactFillRate(40).open();
+					compress().autoCompactFillRate(40).open();
 			mv.setAutoCommitDelay(10_000);
 			sizeTable = mv.openMap("_meta.size");
 			aggregatedTable = mv.openMap("_meta.aggregated");
