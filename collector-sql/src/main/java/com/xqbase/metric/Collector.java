@@ -462,7 +462,7 @@ public class Collector {
 						"/metric;mode=mysql;compress=true;" +
 						"cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
-						"max_compact_time=0;max_compact_count=40";
+						"max_compact_time=0;max_compact_count=80";
 			}
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
