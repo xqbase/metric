@@ -196,6 +196,8 @@ public class Collector {
 		// MVStore fill rate
 		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
 		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
+		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
+		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
 	}
 
 	private static void merge(Map<Map<String, String>, MetricValue>

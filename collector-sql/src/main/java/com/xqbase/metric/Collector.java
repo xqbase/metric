@@ -27,6 +27,10 @@ import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
+import org.h2.engine.Session;
+import org.h2.jdbc.JdbcConnection;
+import org.h2.mvstore.MVStore;
+
 import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
@@ -176,6 +180,7 @@ public class Collector {
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
+	private static ConnectionPool.Entry h2PoolEntry;
 
 	private static MetricRow row(Map<String, String> tagMap, int now,
 			long count, double sum, double max, double min, double sqr) {
@@ -229,6 +234,16 @@ public class Collector {
 			Metric.put("metric.size", name.minuteSize, "name", name.name);
 			Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
 		}
+		// MVStore: fill rate, cache used and hit ratio
+		if (h2PoolEntry == null) {
+			return;
+		}
+		MVStore mv = ((Session) h2PoolEntry.getObject().unwrap(JdbcConnection.class).
+				getSession()).getDatabase().getStore().getMvStore();
+		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
+		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
+		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
+		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
 	}
 
 	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
@@ -395,14 +410,12 @@ public class Collector {
 		p = Conf.load("jdbc");
 		Runnable minutely = null;
 		String h2DataDir = null;
-		ConnectionPool.Entry h2PoolEntry = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
 			ManagementMonitor monitor = new ManagementMonitor("metric.server",
 					"server_id", "" + serverId);
 		) {
-
 			boolean createTable = false;
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
