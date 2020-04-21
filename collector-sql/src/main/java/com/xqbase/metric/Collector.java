@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -26,10 +27,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
-
-import org.h2.engine.Session;
-import org.h2.jdbc.JdbcConnection;
-import org.h2.mvstore.MVStore;
 
 import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
@@ -215,6 +212,31 @@ public class Collector {
 		return names;
 	}
 
+	private static Class<?> jdbcConnection;
+	private static Method getSession, getDatabase, getStore, getMvStore;
+	private static Method getFillRate, getChunksFillRate;
+	private static Method getCacheSizeUsed, getCacheHitRatio;
+
+	static {
+		try {
+			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
+			getSession = jdbcConnection.getMethod("getSession");
+			getDatabase = Class.forName("org.h2.engine.Session").
+					getMethod("getDatabase");
+			getStore = Class.forName("org.h2.engine.Database").
+					getMethod("getStore");
+			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+					getMethod("getMvStore");
+			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
+			getFillRate = mvStore.getMethod("getFillRate");
+			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
+			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
+			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
+		} catch (ReflectiveOperationException e) {
+			Log.w(e.getMessage());
+		}
+	}
+
 	private static void minutely(int minute) throws SQLException {
 		// Insert aggregation-during-collection metrics
 		Map<String, List<MetricRow>> rowsMap = new HashMap<>();
@@ -238,12 +260,23 @@ public class Collector {
 		if (h2PoolEntry == null) {
 			return;
 		}
-		MVStore mv = ((Session) h2PoolEntry.getObject().unwrap(JdbcConnection.class).
-				getSession()).getDatabase().getStore().getMvStore();
-		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
-		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
-		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
-		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
+		Object conn = h2PoolEntry.getObject().unwrap(jdbcConnection);
+		try {
+			Object session = getSession.invoke(conn);
+			Object database = getDatabase.invoke(session);
+			Object store = getStore.invoke(database);
+			Object mv = getMvStore.invoke(store);
+			Metric.put("metric.mvstore.fill_rate", ((Number) getFillRate.
+					invoke(mv)).doubleValue(), "type", "store");
+			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
+					invoke(mv)).doubleValue(), "type", "chunks");
+			Metric.put("metric.mvstore.cache_size_used",
+					((Number) getCacheSizeUsed.invoke(mv)).doubleValue());
+			Metric.put("metric.mvstore.cache_hit_ratio",
+					((Number) getCacheHitRatio.invoke(mv)).doubleValue());
+		} catch (ReflectiveOperationException e) {
+			Log.w(e.getMessage());
+		}
 	}
 
 	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
@@ -427,7 +460,7 @@ public class Collector {
 				h2DataDir = h2DataDir.replace('\\', '/');
 				url = url.substring(0, url.length() - 6) + "file:" + h2DataDir +
 						"/metric;mode=mysql;compress=true;" +
-						"cache_size=0;lazy_query_execution=1;" +
+						"cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
 						"max_compact_time=0;max_compact_count=40";
 			}
