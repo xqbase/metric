@@ -42,13 +42,11 @@ import com.xqbase.util.Runnables;
 import com.xqbase.util.Service;
 import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
-import com.xqbase.util.concurrent.CountLock;
-import com.xqbase.util.concurrent.LockMap;
 
 class NameTime {
 	String name;
 	int time;
-	
+
 	@Override
 	public int hashCode() {
 		return name.hashCode() * 31 + time;
@@ -80,24 +78,6 @@ public class Collector {
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
-	private static void put(Map<NameTime, Map<Map<String, String>, MetricValue>>
-			metricMaps, String name, int time, Map<String, String> tags,
-			long count, double sum, double max, double min, double sqr) {
-		Map<String, String> limitedTags;
-		if (maxTags > 0 && tags.size() > maxTags) {
-			limitedTags = new HashMap<>();
-			CollectionsEx.forEach(CollectionsEx.min(tags.entrySet(),
-					Comparator.comparing(Map.Entry::getKey), maxTags), limitedTags::put);
-		} else {
-			limitedTags = tags;
-		}
-		NameTime nameTime = new NameTime();
-		nameTime.name = name;
-		nameTime.time = time;
-		merge(metricMaps.computeIfAbsent(nameTime, k -> new HashMap<>()),
-				limitedTags, new MetricValue(count, sum, max, min, sqr));
-	}
-
 	private static void updateSize(String name, long delta) {
 		if (delta == 0) {
 			return;
@@ -117,79 +97,62 @@ public class Collector {
 		});
 	}
 
-	private static void putElapsed(long elapsed,
-			String command, String name, String phase) {
-		Metric.put("metric.mvstore.elapsed", elapsed,
-				"command", command, "name", name, "phase", phase);		
-	}
-
-	private static void insert(Map<NameTime,
-			Map<Map<String, String>, MetricValue>> metricMaps) {
-		metricMaps.forEach((key, metricMap) -> {
-			if (metricMap.isEmpty()) {
-				return;
-			}
-			long t0 = System.currentTimeMillis();
-			CountLock lock = lockMap.acquire(key);
-			lock.lock();
-			try {
-				long t1 = System.currentTimeMillis();
-				Map<Integer, byte[]> metricTable = mv.openMap(key.name);
-				Integer time = Integer.valueOf(key.time);
-				byte[] b = metricTable.get(time);
-				long t2 = System.currentTimeMillis();
-				Map<Map<String, String>, MetricValue> aggrMetricMap;
-				long t3, t4;
-				String command;
-				if (b == null) {
-					aggrMetricMap = metricMap;
-					t4 = t3 = t2;
-					command = "insert";
-				} else {
-					aggrMetricMap = Codecs.deserialize(b, METRIC_TYPE);
-					t3 = System.currentTimeMillis();
-					putMetricValue(aggrMetricMap, metricMap);
-					t4 = System.currentTimeMillis();
-					command = "update";
-				}
-				b = Codecs.serialize(aggrMetricMap);
-				long t5 = System.currentTimeMillis();
-				byte[] oldB = metricTable.put(time, b);
-				updateSize(key.name, b.length - (oldB == null ? 0 : oldB.length));
-				long t6 = System.currentTimeMillis();
-				putElapsed(t1 - t0, command, key.name, "lock");
-				putElapsed(t2 - t1, command, key.name, "read");
-				putElapsed(t3 - t2, command, key.name, "decode");
-				putElapsed(t4 - t3, command, key.name, "merge");
-				putElapsed(t5 - t4, command, key.name, "encode");
-				putElapsed(t6 - t5, command, key.name, "write");
-				Metric.put("metric.mvstore.keycount", 1,
-						"command", command, "name", key.name);
-			} finally {
-				lock.unlock();
-				lockMap.release(key, lock);
-			}
-		});
+	private static void insert(String name, int time, StringBuilder sb) {
+		long t = System.currentTimeMillis();
+		int seq = sequencesTable.compute(Integer.valueOf(time), (key, oldSeq) ->
+				Integer.valueOf(oldSeq == null ? 1 : oldSeq.intValue() + 1)).intValue();
+		String original = mv.<Long, String>openMap(name).
+				put(Long.valueOf(((long) time << 32) + seq), sb.toString());
+		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+				"command", "insert", "name", name);
+		Metric.put("metric.mvstore.keycount", 1,
+				"command", "insert", "name", name);
+		if (original != null) {
+			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
+		}
+		updateSize(name, sb.length());
 	}
 
 	private static Service service = new Service();
-	private static LockMap<NameTime> lockMap = new LockMap<>();
 	private static MVStore mv;
 	private static Map<String, Long> sizeTable;
 	private static Map<String, Integer> aggregatedTable;
 	private static Map<String, byte[]> tagsTable;
+	private static Map<Integer, Integer> sequencesTable;
 	private static int expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
 	private static void minutely(int minute) {
 		// Insert aggregation-during-collection metrics
-		Map<NameTime, Map<Map<String, String>, MetricValue>> metricMaps = new HashMap<>();
+		Map<String, StringBuilder> metricMap = new HashMap<>();
 		for (MetricEntry entry : Metric.removeAll()) {
-			put(metricMaps, entry.getName(), minute, entry.getTagMap(), entry.getCount(),
-					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
+			StringBuilder sb = metricMap.computeIfAbsent(entry.getName(),
+					k -> new StringBuilder());
+			sb.append(entry.getCount()).
+					append('/').append(entry.getSum()).
+					append('/').append(entry.getMax()).
+					append('/').append(entry.getMin()).
+					append('/').append(entry.getSqr());
+			int question = sb.length();
+			Map<String, String> tags = entry.getTagMap();
+			Map<String, String> limitedTags;
+			if (maxTags > 0 && tags.size() > maxTags) {
+				limitedTags = new HashMap<>();
+				CollectionsEx.forEach(CollectionsEx.min(tags.entrySet(),
+						Comparator.comparing(Map.Entry::getKey), maxTags), limitedTags::put);
+			} else {
+				limitedTags = tags;
+			}
+			limitedTags.forEach((k, v) -> {
+				sb.append('&').append(Strings.encodeUrl(k)).
+						append('=').append(Strings.encodeUrl(v));
+			});
+			if (!limitedTags.isEmpty()) {
+				sb.setCharAt(question, '?');
+			}
 		}
-		insert(metricMaps);
+		metricMap.forEach((name, sb) -> insert(name, minute, sb));
 		// Put metric size
 		sizeTable.forEach((name, size) ->
 				Metric.put("metric.size", size.longValue(), "name", name));
@@ -281,7 +244,8 @@ public class Collector {
 		if (!name.startsWith("_tags_quarter.")) {
 			updateSize(name, -size);
 		}
-		putElapsed(System.currentTimeMillis() - t, "delete", name, "N/A");
+		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+				"command", "delete", "name", name);		
 		Metric.put("metric.mvstore.keycount", delKeys.size(),
 				"command", "delete", "name", name);
 	}
@@ -387,7 +351,8 @@ public class Collector {
 				});
 			}
 			tagsTable.put(name, Codecs.serialize(limit(tagMap)));
-			putElapsed(System.currentTimeMillis() - t, "aggregate", name, "N/A");
+			Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+					"command", "aggregate", "name", name);		
 		});
 	}
 
@@ -437,6 +402,7 @@ public class Collector {
 			sizeTable = mv.openMap("_meta.size");
 			aggregatedTable = mv.openMap("_meta.aggregated");
 			tagsTable = mv.openMap("_meta.tags");
+			sequencesTable = mv.openMap("_meta.sequences");
 			Dashboard.startup(mv);
 
 			minutely = Runnables.wrap(() -> {
@@ -483,8 +449,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				Map<NameTime, Map<Map<String, String>, MetricValue>>
-						metricMap = new HashMap<>();
+				Map<NameTime, StringBuilder> metricMap = new HashMap<>();
 				Map<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
@@ -492,48 +457,55 @@ public class Collector {
 					if (length > 0 && line.charAt(length - 1) == '\r') {
 						line = line.substring(0, length - 1);
 					}
-					// Parse name, aggregation, value and tags
-					// <name>/<aggregation>/<value>[?<tag>=<value>[&...]]
-					String[] paths;
+					// Parse name, time, value and tags
+					int slash0 = line.indexOf('/');
+					if (slash0 < 0) {
+						Log.w("Incorrect format: [" + line + "]");
+						continue;
+					}
+					String name = decode(line.substring(0, slash0), MAX_METRIC_LEN);
+					Integer count = countMap.get(name);
+					countMap.put(name, Integer.valueOf(count == null ?
+							1 : count.intValue() + 1));
+					int slash1 = line.indexOf('/', slash0 + 1);
+					if (slash1 < 0) {
+						// <name>/<time>/<count>/<sum>/<max>/<min>/<sqr>[?<tag>=<value>[&...]]
+						// Aggregation-before-collection metric, insert immediately
+						NameTime key = new NameTime();
+						key.name = name;
+						key.time = Numbers.parseInt(line.substring(slash0 + 1, slash1),
+								currentMinute.get());
+						line = line.substring(slash1 + 1);
+						if (enableRemoteAddr) {
+							int index = line.indexOf('?');
+							line += (index < 0 ? '?' : '&') + "remote_addr=" + remoteAddr;
+						}
+						metricMap.computeIfAbsent(key, k -> new StringBuilder()).
+								append(line).append('\n');
+						continue;
+					}
+					// <name>/<value>[?<tag>=<value>[&...]]
+					// Aggregation-during-collection metric, aggregate first
 					Map<String, String> tagMap = new HashMap<>();
 					int index = line.indexOf('?');
+					double value;
 					if (index < 0) {
-						paths = line.split("/");
+						value = __(line.substring(slash0 + 1));
 					} else {
-						paths = line.substring(0, index).split("/");
+						value = __(line.substring(slash0 + 1, index));
 						String query = line.substring(index + 1);
 						for (String tag : query.split("&")) {
 							index = tag.indexOf('=');
-							if (index > 0) {
+							if (index >= 0) {
 								tagMap.put(decode(tag.substring(0, index), maxTagNameLen),
 										decode(tag.substring(index + 1), maxTagValueLen));
 							}
 						}
 					}
-					if (paths.length < 2) {
-						Log.w("Incorrect format: [" + line + "]");
-						continue;
-					}
-					String name = decode(paths[0], MAX_METRIC_LEN);
-					if (name.isEmpty()) {
-						Log.w("Incorrect format: [" + line + "]");
-						continue;
-					}
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
 					}
-					if (paths.length > 6) {
-						// For aggregation-before-collection metric, insert immediately
-						put(metricMap, name, Numbers.parseInt(paths[1], currentMinute.get()),
-								tagMap, Numbers.parseLong(paths[2]), __(paths[3]),
-								__(paths[4]), __(paths[5]), __(paths[6]));
-					} else {
-						// For aggregation-during-collection metric, aggregate first
-						Metric.put(name, __(paths[1]), tagMap);
-					}
-					Integer count = countMap.get(name);
-					countMap.put(name, Integer.valueOf(count == null ?
-							1 : count.intValue() + 1));
+					Metric.put(name, value, tagMap);
 				}
 				if (verbose) {
 					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
@@ -551,9 +523,12 @@ public class Collector {
 					});
 				}
 				// Insert aggregation-before-collection metrics
-				if (!metricMap.isEmpty()) {
-					executor.execute(Runnables.wrap(() -> insert(metricMap)));
+				if (metricMap.isEmpty()) {
+					continue;
 				}
+				executor.execute(Runnables.wrap(() -> metricMap.forEach((k, v) -> {
+					insert(k.name, k.time, v);
+				})));
 			}
 		} catch (IOException e) {
 			Log.w(e.getMessage());
