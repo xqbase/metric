@@ -371,12 +371,6 @@ public class Collector {
 					sb.setCharAt(question, '?');
 					sb.append('\n');
 				};
-				// 3'. Aggregate to "_quarter.*"
-				if (quarterTable.put(Integer.valueOf(i), sb.toString()) != null) {
-					Log.w("Duplicate key " + i + " in table " + quarterName);
-				}
-				updateSize(quarterName, sb.length());
-				// 5. Aggregate to "_tags_quarter.*"
 				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
 					CollectionsEx.forEach(CollectionsEx.max(accMetricMap.entrySet(),
 							Comparator.comparingLong(entry -> entry.getValue().getCount()),
@@ -384,6 +378,12 @@ public class Collector {
 				} else {
 					accMetricMap.forEach(action);
 				}
+				// 3'. Aggregate to "_quarter.*"
+				if (quarterTable.put(Integer.valueOf(i), sb.toString()) != null) {
+					Log.w("Duplicate key " + i + " in table " + quarterName);
+				}
+				updateSize(quarterName, sb.length());
+				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
 							"name", name, "key", tagKey);
@@ -587,12 +587,13 @@ public class Collector {
 					});
 				}
 				// Insert aggregation-before-collection metrics
-				if (metricMap.isEmpty()) {
-					continue;
+				if (!metricMap.isEmpty()) {
+					executor.execute(Runnables.wrap(() -> {
+						metricMap.forEach((key, sb) -> {
+							insert(key.name, key.time, sb);
+						});
+					}));
 				}
-				executor.execute(Runnables.wrap(() -> metricMap.forEach((k, v) -> {
-					insert(k.name, k.time, v);
-				})));
 			}
 		} catch (IOException e) {
 			Log.w(e.getMessage());
