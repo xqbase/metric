@@ -288,7 +288,7 @@ public class Dashboard {
 		if (method == TAGS_METHOD) {
 			File file = new File(dataDir + "_meta.tags.properties");
 			if (!file.exists()) {
-				response(exchange, Collections.emptyMap(), false);
+				response(exchange, "{}", false);
 				return;
 			}
 			Properties p = new Properties();
@@ -298,8 +298,7 @@ public class Dashboard {
 				Log.e(e);
 			}
 			String json = p.getProperty(metricName);
-			response(exchange, json == null ?
-					Collections.emptyMap() : json, acceptGzip);
+			response(exchange, json == null ? "{}": json, acceptGzip);
 			return;
 		}
 

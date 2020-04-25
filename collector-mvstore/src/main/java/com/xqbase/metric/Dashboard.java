@@ -29,7 +29,6 @@ import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
@@ -82,11 +81,6 @@ public class Dashboard {
 		"/index.js",
 	};
 
-	private static final Map<Map<String, String>, MetricValue>
-			METRIC_TYPE = new HashMap<>();
-	private static final Map<String, Map<String, MetricValue>>
-			TAGS_TYPE = new HashMap<>();
-
 	private static ThreadLocal<SimpleDateFormat> format =
 			ThreadLocal.withInitial(() -> {
 		// https://stackoverflow.com/a/8642463/4260959
@@ -136,7 +130,8 @@ public class Dashboard {
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		String out = JSONObject.valueToString(data);
+		String out = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -283,9 +278,8 @@ public class Dashboard {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			byte[] b = mv.<String, byte[]>openMap("_meta.tags").get(metricName);
-			response(exchange, b == null ? Collections.emptyMap() :
-					Codecs.deserialize(b, TAGS_TYPE), acceptGzip);
+			response(exchange, mv.<String, String>openMap("_meta.tags").
+					getOrDefault(metricName, "{}"), acceptGzip);
 			return;
 		}
 

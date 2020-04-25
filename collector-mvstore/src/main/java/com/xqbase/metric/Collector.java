@@ -27,12 +27,12 @@ import java.util.zip.InflaterInputStream;
 
 import org.h2.mvstore.MVMap;
 import org.h2.mvstore.MVStore;
+import org.json.JSONObject;
 
 import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
@@ -63,11 +63,6 @@ public class Collector {
 	private static final int MAX_BUFFER_SIZE = 1048576;
 	private static final int MAX_METRIC_LEN = 64;
 
-	private static final Map<Map<String, String>, MetricValue>
-			METRIC_TYPE = new HashMap<>();
-	private static final Map<String, Map<String, MetricValue>>
-			TAGS_TYPE = new HashMap<>();
-
 	private static double __(String s) {
 		double d = Numbers.parseDouble(s);
 		return Double.isNaN(d) ? 0 : d;
@@ -78,11 +73,32 @@ public class Collector {
 		return limit > 0 ? Strings.truncate(result, limit) : result;
 	}
 
+	private static Long fromLong(int minute) {
+		return Long.valueOf((long) minute << 32);
+	}
+
+	private static Long toLong(int minute) {
+		return Long.valueOf(((long) (minute + 1) << 32) - 1);
+	}
+
+	private static Service service = new Service();
+	private static MVStore mv;
+	private static Map<String, Long> sizeTable;
+	private static Map<String, Integer> aggregatedTable;
+	private static Map<String, String> tagsTable;
+	private static MVMap<Integer, Integer> sequenceTable;
+	private static int expire, tagsExpire, maxTags, maxTagValues,
+			maxTagCombinations, maxTagNameLen, maxTagValueLen;
+	private static boolean verbose;
+
 	private static void updateSize(String name, long delta) {
 		if (delta == 0) {
 			return;
 		}
+		long t = System.currentTimeMillis();
+		int[] keycount = {0};
 		sizeTable.compute(name, (key, oldSize) -> {
+			keycount[0] ++;
 			long size = (oldSize == null ? 0 : oldSize.longValue()) + delta;
 			if (size > 0) {
 				return Long.valueOf(size);
@@ -95,15 +111,27 @@ public class Collector {
 			}
 			return null;
 		});
+		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+				"command", "update", "name", "_meta.size");
+		Metric.put("metric.mvstore.keycount", keycount[0],
+				"command", "update", "name", "_meta.size");
 	}
 
 	private static void insert(String name, int time, StringBuilder sb) {
-		long t = System.currentTimeMillis();
-		int seq = sequencesTable.compute(Integer.valueOf(time), (key, oldSeq) ->
-				Integer.valueOf(oldSeq == null ? 1 : oldSeq.intValue() + 1)).intValue();
+		long t0 = System.currentTimeMillis();
+		int[] keycount = {0};
+		int seq = sequenceTable.compute(Integer.valueOf(time), (key, oldSeq) -> {
+			keycount[0] ++;
+			return Integer.valueOf(oldSeq == null ? 1 : oldSeq.intValue() + 1);
+		}).intValue();
+		long t1 = System.currentTimeMillis();
+		Metric.put("metric.mvstore.elapsed", t1 - t0,
+				"command", "update", "name", "_meta.sequence");
+		Metric.put("metric.mvstore.keycount", keycount[0],
+				"command", "update", "name", "_meta.sequence");
 		String original = mv.<Long, String>openMap(name).
 				put(Long.valueOf(((long) time << 32) + seq), sb.toString());
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t1,
 				"command", "insert", "name", name);
 		Metric.put("metric.mvstore.keycount", 1,
 				"command", "insert", "name", name);
@@ -113,69 +141,35 @@ public class Collector {
 		updateSize(name, sb.length());
 	}
 
-	private static Service service = new Service();
-	private static MVStore mv;
-	private static Map<String, Long> sizeTable;
-	private static Map<String, Integer> aggregatedTable;
-	private static Map<String, byte[]> tagsTable;
-	private static Map<Integer, Integer> sequencesTable;
-	private static int expire, tagsExpire, maxTags, maxTagValues,
-			maxTagCombinations, maxTagNameLen, maxTagValueLen;
-	private static boolean verbose;
-
-	private static void minutely(int minute) {
-		// Insert aggregation-during-collection metrics
-		Map<String, StringBuilder> metricMap = new HashMap<>();
-		for (MetricEntry entry : Metric.removeAll()) {
-			StringBuilder sb = metricMap.computeIfAbsent(entry.getName(),
-					k -> new StringBuilder());
-			sb.append(entry.getCount()).
-					append('/').append(entry.getSum()).
-					append('/').append(entry.getMax()).
-					append('/').append(entry.getMin()).
-					append('/').append(entry.getSqr());
-			int question = sb.length();
-			Map<String, String> tags = entry.getTagMap();
-			Map<String, String> limitedTags;
-			if (maxTags > 0 && tags.size() > maxTags) {
-				limitedTags = new HashMap<>();
-				CollectionsEx.forEach(CollectionsEx.min(tags.entrySet(),
-						Comparator.comparing(Map.Entry::getKey), maxTags), limitedTags::put);
-			} else {
-				limitedTags = tags;
+	private static <K extends Comparable<K>, V> void
+			delete(MVMap<K, V> table, K from, K to) {
+		long t = System.currentTimeMillis();
+		List<K> delKeys = new ArrayList<>();
+		Iterator<K> it = table.keyIterator(from);
+		while (it.hasNext()) {
+			K key = it.next();
+			if (key.compareTo(to) > 0) {
+				break;
 			}
-			limitedTags.forEach((k, v) -> {
-				sb.append('&').append(Strings.encodeUrl(k)).
-						append('=').append(Strings.encodeUrl(v));
-			});
-			if (!limitedTags.isEmpty()) {
-				sb.setCharAt(question, '?');
+			delKeys.add(key);
+		}
+		long size = 0;
+		String name = table.getName();
+		for (K key : delKeys) {
+			V v = table.remove(key);
+			if (v == null) {
+				Log.w("Unable to remove key " + key + " from table " + name);
+			} else if (v instanceof String) {
+				size += ((String) v).length();
 			}
 		}
-		metricMap.forEach((name, sb) -> insert(name, minute, sb));
-		// Put metric size
-		sizeTable.forEach((name, size) ->
-				Metric.put("metric.size", size.longValue(), "name", name));
-		// MVStore fill rate
-		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
-		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
-		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
-		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
-	}
-
-	private static void merge(Map<Map<String, String>, MetricValue>
-			metricMap, Map<String, String> key, MetricValue newValue) {
-		MetricValue value = metricMap.get(key);
-		if (value == null) {
-			metricMap.put(key, newValue);
-		} else {
-			value.add(newValue);
+		if (size > 0 && !name.startsWith("_tags_quarter.")) {
+			updateSize(name, -size);
 		}
-	}
-
-	private static void putMetricValue(Map<Map<String, String>, MetricValue>
-			aggrMetricMap, Map<Map<String, String>, MetricValue> metricMap) {
-		metricMap.forEach((tags, value) -> merge(aggrMetricMap, tags, value));
+		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
+				"command", "delete", "name", name);		
+		Metric.put("metric.mvstore.keycount", delKeys.size(),
+				"command", "delete", "name", name);
 	}
 
 	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
@@ -220,38 +214,49 @@ public class Collector {
 		return tags;
 	}
 
-	private static void delete(MVMap<Integer, byte[]> table, int time) {
-		long t = System.currentTimeMillis();
-		List<Integer> delKeys = new ArrayList<>();
-		Iterator<Integer> it = table.keyIterator(Integer.valueOf(0));
-		while (it.hasNext()) {
-			Integer key = it.next();
-			if (key.intValue() > time) {
-				break;
-			}
-			delKeys.add(key);
-		}
-		long size = 0;
-		String name = table.getName();
-		for (Integer key : delKeys) {
-			byte[] b = table.remove(key);
-			if (b == null) {
-				Log.w("Unable to remove key " + key + " from table " + name);
+	private static void minutely(int minute) {
+		// Insert aggregation-during-collection metrics
+		Map<String, StringBuilder> metricMap = new HashMap<>();
+		for (MetricEntry entry : Metric.removeAll()) {
+			StringBuilder sb = metricMap.computeIfAbsent(entry.getName(),
+					k -> new StringBuilder());
+			sb.append(entry.getCount()).
+					append('/').append(entry.getSum()).
+					append('/').append(entry.getMax()).
+					append('/').append(entry.getMin()).
+					append('/').append(entry.getSqr());
+			int question = sb.length();
+			Map<String, String> tags = entry.getTagMap();
+			Map<String, String> limitedTags;
+			if (maxTags > 0 && tags.size() > maxTags) {
+				limitedTags = new HashMap<>();
+				CollectionsEx.forEach(CollectionsEx.min(tags.entrySet(),
+						Comparator.comparing(Map.Entry::getKey), maxTags), limitedTags::put);
 			} else {
-				size += b.length;
+				limitedTags = tags;
+			}
+			limitedTags.forEach((k, v) -> {
+				sb.append('&').append(Strings.encodeUrl(k)).
+						append('=').append(Strings.encodeUrl(v));
+			});
+			if (!limitedTags.isEmpty()) {
+				sb.setCharAt(question, '?');
 			}
 		}
-		if (!name.startsWith("_tags_quarter.")) {
-			updateSize(name, -size);
-		}
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-				"command", "delete", "name", name);		
-		Metric.put("metric.mvstore.keycount", delKeys.size(),
-				"command", "delete", "name", name);
+		metricMap.forEach((name, sb) -> insert(name, minute, sb));
+		// Put metric size
+		sizeTable.forEach((name, size) ->
+				Metric.put("metric.size", size.longValue(), "name", name));
+		// MVStore fill rate
+		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
+		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
+		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
+		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
 	}
 
 	private static void quarterly(int quarter) {
 		Map<String, long[]> names = new HashMap<>();
+		delete(sequenceTable, Integer.valueOf(0), Integer.valueOf(quarter * 15));
 		for (String name : mv.getMapNames()) {
 			if (name.startsWith("_tags_quarter.") || name.startsWith("_meta.")) {
 				continue;
@@ -274,8 +279,8 @@ public class Collector {
 		});
 		names.forEach((name, sizeAndAggregated) -> {
 			// 1. Delete _tags_quarter.*
-			MVMap<Integer, byte[]> tagsQuarter = mv.openMap("_tags_quarter." + name);
-			delete(tagsQuarter, quarter - tagsExpire);
+			MVMap<Integer, String> tagsQuarter = mv.openMap("_tags_quarter." + name);
+			delete(tagsQuarter, Integer.valueOf(0), Integer.valueOf(quarter - tagsExpire));
 			// 2. Delete minute and quarter data
 			String quarterName = "_quarter." + name;
 			if (sizeAndAggregated[0] <= 0 && sizeAndAggregated[1] <= 0) {
@@ -288,36 +293,90 @@ public class Collector {
 				return;
 			}
 			int aggregated = (int) sizeAndAggregated[2];
-			MVMap<Integer, byte[]> minuteTable = mv.openMap(name);
-			MVMap<Integer, byte[]> quarterTable = mv.openMap(quarterName);
-			delete(minuteTable, quarter * 15 - expire);
-			delete(quarterTable, quarter - expire);
+			MVMap<Long, String> minuteTable = mv.openMap(name);
+			MVMap<Integer, String> quarterTable = mv.openMap(quarterName);
+			delete(minuteTable, fromLong(0), toLong(quarter * 15 - expire));
+			delete(quarterTable, Integer.valueOf(0), Integer.valueOf(quarter - expire));
 			// 3. Aggregate minute to quarter
 			long t = System.currentTimeMillis();
 			int start = aggregated == 0 ? quarter - expire : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
 				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
-				int i15 = i * 15;
-				for (int j = i * 15 - 14; j <= i15; j ++) {
-					byte[] b = minuteTable.get(Integer.valueOf(j));
-					if (b != null) {
-						putMetricValue(accMetricMap, Codecs.deserialize(b, METRIC_TYPE));
+				Iterator<Long> it = minuteTable.keyIterator(fromLong(i * 15 - 14));
+				Long to = toLong(i * 15);
+				while (it.hasNext()) {
+					Long key = it.next();
+					if (key.compareTo(to) > 0) {
+						break;
+					}
+					String s = minuteTable.get(key);
+					if (s == null) {
+						Log.w("Unable to get key " + key + " from table " + name);
+						continue;
+					}
+					for (String line : s.split("\n")) {
+						String[] paths;
+						Map<String, String> tags = new HashMap<>();
+						int index = line.indexOf('?');
+						if (index < 0) {
+							paths = line.split("/");
+						} else {
+							paths = line.substring(0, index).split("/");
+							String query = line.substring(index + 1);
+							for (String tag : query.split("&")) {
+								index = tag.indexOf('=');
+								if (index > 0) {
+									tags.put(decode(tag.substring(0, index), maxTagNameLen),
+											decode(tag.substring(index + 1), maxTagValueLen));
+								}
+							}
+						}
+						if (paths.length <= 4) {
+							continue;
+						}
+						MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+								__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+						MetricValue value = accMetricMap.get(tags);
+						if (value == null) {
+							accMetricMap.put(tags, newValue);
+						} else {
+							value.add(newValue);
+						}
 					}
 				}
-				// 3'. Aggregate to "_quarter.*"
 				if (accMetricMap.isEmpty()) {
 					continue;
 				}
 				int combinations = accMetricMap.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name);
+				// 3'. Aggregate to "_quarter.*"
 				// 5. Aggregate to "_tags_quarter.*"
+				StringBuilder sb = new StringBuilder();
 				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
-					// 5. Aggregate to "_tags_quarter.*"
+					sb.append(value.getCount()).append('/').
+							append(value.getSum()).append('/').
+							append(value.getMax()).append('/').
+							append(value.getMin()).append('/').
+							append(value.getSqr());
+					if (tags.isEmpty()) {
+						return;
+					}
+					int question = sb.length();
 					tags.forEach((tagKey, tagValue) -> {
+						sb.append('&').append(Strings.encodeUrl(tagKey)).
+								append('=').append(Strings.encodeUrl(tagValue));
 						putTagValue(tagMap, tagKey, tagValue, value);
 					});
+					sb.setCharAt(question, '?');
+					sb.append('\n');
 				};
+				// 3'. Aggregate to "_quarter.*"
+				if (quarterTable.put(Integer.valueOf(i), sb.toString()) != null) {
+					Log.w("Duplicate key " + i + " in table " + quarterName);
+				}
+				updateSize(quarterName, sb.length());
+				// 5. Aggregate to "_tags_quarter.*"
 				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
 					CollectionsEx.forEach(CollectionsEx.max(accMetricMap.entrySet(),
 							Comparator.comparingLong(entry -> entry.getValue().getCount()),
@@ -325,32 +384,37 @@ public class Collector {
 				} else {
 					accMetricMap.forEach(action);
 				}
-				// 3'. Aggregate to "_quarter.*"
-				byte[] b = Codecs.serialize(accMetricMap);
-				if (quarterTable.put(Integer.valueOf(i), b) != null) {
-					Log.w("Duplicate key " + i + " in table " + quarterName);
-				}
-				updateSize(quarterName, b.length);
-				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
 							"name", name, "key", tagKey);
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
-				tagsQuarter.put(Integer.valueOf(i), Codecs.serialize(limit(tagMap)));
+				tagsQuarter.put(Integer.valueOf(i),
+						new JSONObject(limit(tagMap)).toString());
 			}
 			// 6. Set "aggregated"
 			aggregatedTable.put(name, Integer.valueOf(quarter));
 			// 7. Aggregate "_tags_quarter" to "_meta.tags";
 			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
-			for (byte[] b : tagsQuarter.values()) {
-				Codecs.deserialize(b, TAGS_TYPE).forEach((tagKey, tags) -> {
-					tags.forEach((tagValue, value) -> {
-						putTagValue(tagMap, tagKey, tagValue, value);
-					});
-				});
+			for (String s : tagsQuarter.values()) {
+				JSONObject json = new JSONObject(s);
+				for (String tagKey : json.keySet()) {
+					JSONObject tagsJson = json.optJSONObject(tagKey);
+					if (tagsJson == null) {
+						continue;
+					}
+					for (String tagValue : tagsJson.keySet()) {
+						JSONObject j = tagsJson.optJSONObject(tagValue);
+						if (j == null) {
+							continue;
+						}
+						putTagValue(tagMap, tagKey, tagValue,
+								new MetricValue(j.optLong("count"), j.optDouble("sum"),
+								j.optDouble("max"), j.optDouble("min"), j.optDouble("sqr")));
+					}
+				}
 			}
-			tagsTable.put(name, Codecs.serialize(limit(tagMap)));
+			tagsTable.put(name, new JSONObject(limit(tagMap)).toString());
 			Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
 					"command", "aggregate", "name", name);		
 		});
@@ -402,7 +466,7 @@ public class Collector {
 			sizeTable = mv.openMap("_meta.size");
 			aggregatedTable = mv.openMap("_meta.aggregated");
 			tagsTable = mv.openMap("_meta.tags");
-			sequencesTable = mv.openMap("_meta.sequences");
+			sequenceTable = mv.openMap("_meta.sequence");
 			Dashboard.startup(mv);
 
 			minutely = Runnables.wrap(() -> {

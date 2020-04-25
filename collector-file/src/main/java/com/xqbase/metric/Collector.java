@@ -309,7 +309,7 @@ public class Collector {
 			int start = aggregated == 0 ? quarter - expire : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
 				List<MetricRow> rows = new ArrayList<>();
-				Map<Map<String, String>, MetricValue> result = new HashMap<>();
+				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
 				int i15 = i * 15;
 				long t = System.currentTimeMillis();
 				for (int j = i * 15 - 14; j <= i15; j ++) {
@@ -347,9 +347,9 @@ public class Collector {
 							}
 							MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
 									__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
-							MetricValue value = result.get(tags);
+							MetricValue value = accMetricMap.get(tags);
 							if (value == null) {
-								result.put(tags, newValue);
+								accMetricMap.put(tags, newValue);
 							} else {
 								value.add(newValue);
 							}
@@ -365,12 +365,12 @@ public class Collector {
 				}
 				Metric.put("metric.file.elapsed", System.currentTimeMillis() - t,
 						"command", "compress", "name", name);
-				// 3'. Aggregate to "_quarter.*"
-				if (result.isEmpty()) {
+				if (accMetricMap.isEmpty()) {
 					continue;
 				}
-				int combinations = result.size();
+				int combinations = accMetricMap.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name);
+				// 3'. Aggregate to "_quarter.*"
 				// 5. Aggregate to "_tags_quarter.*"
 				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
@@ -384,11 +384,11 @@ public class Collector {
 							putTagValue(tagMap, tagKey, tagValue, value));
 				};
 				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
-					CollectionsEx.forEach(CollectionsEx.max(result.entrySet(),
+					CollectionsEx.forEach(CollectionsEx.max(accMetricMap.entrySet(),
 							Comparator.comparingLong(entry -> entry.getValue().getCount()),
 							maxTagCombinations), action);
 				} else {
-					result.forEach(action);
+					accMetricMap.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
 				t = System.currentTimeMillis();
