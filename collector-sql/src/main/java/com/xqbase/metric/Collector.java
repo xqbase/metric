@@ -253,8 +253,12 @@ public class Collector {
 			return;
 		}
 		for (MetricName name : getNames()) {
-			Metric.put("metric.size", name.minuteSize, "name", name.name);
-			Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
+			if (name.minuteSize > 0) {
+				Metric.put("metric.size", name.minuteSize, "name", name.name);
+			}
+			if (name.quarterSize > 0) {
+				Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
+			}
 		}
 		// MVStore: fill rate, cache used and hit ratio
 		if (h2PoolEntry == null) {

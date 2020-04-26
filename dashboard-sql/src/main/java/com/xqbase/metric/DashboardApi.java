@@ -11,6 +11,8 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -57,6 +59,7 @@ class GroupKey {
 public class DashboardApi extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
+	private static final String QUERY_NAMES = "SELECT name FROM metric_name";
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
@@ -94,7 +97,8 @@ public class DashboardApi extends HttpServlet {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	static {
 		methodMap.put("count", MetricValue::getCount);
@@ -103,6 +107,7 @@ public class DashboardApi extends HttpServlet {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -183,6 +188,16 @@ public class DashboardApi extends HttpServlet {
 			error400(resp);
 			return;
 		}
+		if (method == NAMES_METHOD) {
+			try {
+				Set<String> names = new TreeSet<>();
+				db.queryEx(row -> names.add(row.getString("name")), QUERY_NAMES);
+				outputJson(req, resp, names);
+			} catch (SQLException e) {
+				error500(resp, e);
+			}
+			return;
+		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
 			Row row;
@@ -199,10 +214,10 @@ public class DashboardApi extends HttpServlet {
 			byte[] b = row.getBytes("tags");
 			if (b == null) {
 				outputJson(req, resp, Collections.emptyMap());
-				return;
+			} else {
+				Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
+				outputJson(req, resp, tags == null ? Collections.emptyMap() : tags);
 			}
-			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			outputJson(req, resp, tags == null ? Collections.emptyMap() : tags);
 			return;
 		}
 

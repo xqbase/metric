@@ -17,7 +17,9 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -83,6 +85,7 @@ public class Dashboard {
 		"/index.html",
 		"/index.js",
 	};
+	private static final String QUERY_NAMES = "SELECT name FROM metric_name";
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
@@ -103,7 +106,8 @@ public class Dashboard {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	private static ConnectionPool db;
 	private static HttpServer server;
@@ -120,6 +124,7 @@ public class Dashboard {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -293,6 +298,17 @@ public class Dashboard {
 			response(exchange, 400);
 			return;
 		}
+		if (method == NAMES_METHOD) {
+			try {
+				Set<String> names = new TreeSet<>();
+				db.queryEx(row -> names.add(row.getString("name")), QUERY_NAMES);
+				response(exchange, names, acceptGzip);
+			} catch (SQLException e) {
+				Log.e(e);
+				response(exchange, 500);
+			}
+			return;
+		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
 			Row row;
@@ -310,11 +326,11 @@ public class Dashboard {
 			byte[] b = row.getBytes("tags");
 			if (b == null) {
 				response(exchange, Collections.emptyMap(), false);
-				return;
+			} else {
+				Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
+				response(exchange, tags == null ?
+						Collections.emptyMap() : tags, acceptGzip);
 			}
-			Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-			response(exchange, tags == null ?
-					Collections.emptyMap() : tags, acceptGzip);
 			return;
 		}
 

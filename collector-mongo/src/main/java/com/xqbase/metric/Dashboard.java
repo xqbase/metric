@@ -16,7 +16,9 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -96,7 +98,8 @@ public class Dashboard {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	private static MongoDatabase db;
 	private static HttpServer server;
@@ -113,6 +116,7 @@ public class Dashboard {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -315,6 +319,16 @@ public class Dashboard {
 				methodMap.get(path.substring(slash + 1));
 		if (method == null) {
 			response(exchange, 400);
+			return;
+		}
+		if (method == NAMES_METHOD) {
+			Set<String> names = new TreeSet<>();
+			for (String name : db.listCollectionNames()) {
+				if (!(name.startsWith("system.") || name.startsWith("_meta."))) {
+					names.add(name.startsWith("_quarter.") ? name.substring(9) : name);
+				}
+			}
+			response(exchange, names, acceptGzip);
 			return;
 		}
 		String metricName = path.substring(0, slash);

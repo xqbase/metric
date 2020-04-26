@@ -9,6 +9,8 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -95,7 +97,8 @@ public class DashboardApi extends HttpServlet {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	static {
 		methodMap.put("count", MetricValue::getCount);
@@ -104,6 +107,7 @@ public class DashboardApi extends HttpServlet {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -201,6 +205,16 @@ public class DashboardApi extends HttpServlet {
 				methodMap.get(path.substring(slash + 1));
 		if (method == null) {
 			error400(resp);
+			return;
+		}
+		if (method == NAMES_METHOD) {
+			Set<String> names = new TreeSet<>();
+			for (String name : db.listCollectionNames()) {
+				if (!(name.startsWith("system.") || name.startsWith("_meta."))) {
+					names.add(name.startsWith("_quarter.") ? name.substring(9) : name);
+				}
+			}
+			outputJson(req, resp, names);
 			return;
 		}
 		String metricName = path.substring(0, slash);
