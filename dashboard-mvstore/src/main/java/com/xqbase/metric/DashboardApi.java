@@ -5,10 +5,10 @@ import java.io.PrintWriter;
 import java.lang.reflect.Field;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -28,7 +28,6 @@ import org.h2.store.fs.FilePath;
 import org.json.JSONObject;
 
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -80,6 +79,11 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isFinite(d) ? d : 0;
+	}
+
 	private static MVStore open() {
 		FileStore fs = new FileStore();
 		String fileName = Conf.load("Dashboard").getProperty("data_file",
@@ -103,11 +107,6 @@ public class DashboardApi extends HttpServlet {
 		maxTagValues = Numbers.parseInt(Conf.
 				load("Dashboard").getProperty("max_tag_values"));
 	}
-
-	private static final Map<Map<String, String>, MetricValue>
-			METRIC_TYPE = new HashMap<>();
-	private static final Map<String, Map<String, MetricValue>>
-			TAGS_TYPE = new HashMap<>();
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
@@ -149,7 +148,8 @@ public class DashboardApi extends HttpServlet {
 			Log.d(e.getMessage());
 			return;
 		}
-		String json = JSONObject.valueToString(data);
+		String json = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
 			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
@@ -202,12 +202,11 @@ public class DashboardApi extends HttpServlet {
 		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
-			byte[] b;
+			String s;
 			try (MVStore mv = open()) {
-				b = mv.<String, byte[]>openMap("_meta.tags").get(metricName);
+				s = mv.<String, String>openMap("_meta.tags").getOrDefault(metricName, "{}");
 			}
-			outputJson(req, resp, b == null ? Collections.emptyMap() :
-					Codecs.deserialize(b, TAGS_TYPE));
+			outputJson(req, resp, s);
 			return;
 		}
 
@@ -238,35 +237,73 @@ public class DashboardApi extends HttpServlet {
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		try (MVStore mv = open()) {
-			MVMap<Integer, byte[]> metricTable = mv.openMap(metricName);
-			for (int time = begin; time <= end; time ++) {
-				int index = (time - begin) / interval;
-				if (time < begin || index >= length) {
+			MVMap<Number, String> metricTable = mv.openMap(metricName);
+			Iterator<Number> it;
+			long to;
+			if (quarter) {
+				it = metricTable.keyIterator(Integer.valueOf(begin));
+				to = end;
+			} else {
+				it = metricTable.keyIterator(Long.valueOf((long) begin << 32));
+				to = ((long) (end + 1) << 32) - 1;
+			}
+			while (it.hasNext()) {
+				Number time = it.next();
+				if (time.longValue() > to) {
+					break;
+				}
+				int index = ((quarter ? time.intValue() :
+						(int) (time.longValue() >> 32)) - begin) / interval;
+				if (index < 0 || index >= length) {
+					Log.w("Key " + time + " out of range, end = " + end +
+							", interval = " + interval + ", length = " + length);
+					return;
+				}
+				String s = metricTable.get(time);
+				if (s == null) {
+					Log.w("Unable to get key " + time + " from table " + metricName);
 					continue;
 				}
-				byte[] b = metricTable.get(Integer.valueOf(time));
-				if (b == null) {
-					continue;
-				}
-				Map<Map<String, String>, MetricValue> metricMap =
-						Codecs.deserialize(b, METRIC_TYPE);
-				metricMap.forEach((tags, newValue) -> {
-					// Query Tags
-					for (Map.Entry<String, String> entry : query.entrySet()) {
-						String tagValue = tags.get(entry.getKey());
-						if (!entry.getValue().equals(tagValue)) {
-							return;
+				for (String line : s.split("\n")) {
+					String[] paths;
+					Map<String, String> tags = new HashMap<>();
+					int i = line.indexOf('?');
+					if (i < 0) {
+						paths = line.split("/");
+					} else {
+						paths = line.substring(0, i).split("/");
+						String q = line.substring(i + 1);
+						for (String tag : q.split("&")) {
+							i = tag.indexOf('=');
+							if (i > 0) {
+								tags.put(Strings.decodeUrl(tag.substring(0, i)),
+										Strings.decodeUrl(tag.substring(i + 1)));
+							}
 						}
+					}
+					// Query Tags
+					boolean skip = false;
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String value = tags.get(entry.getKey());
+						if (!entry.getValue().equals(value)) {
+							skip = true;
+							break;
+						}
+					}
+					if (skip || paths.length <= 4) {
+						continue;
 					}
 					// Group Tags
 					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
 					MetricValue value = result.get(key);
 					if (value == null) {
 						result.put(key, newValue);
 					} else {
 						value.add(newValue);
 					}
-				});
+				}
 			}
 		}
 		// Generate Data
