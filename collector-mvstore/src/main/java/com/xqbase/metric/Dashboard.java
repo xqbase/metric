@@ -9,14 +9,15 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -92,7 +93,8 @@ public class Dashboard {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	private static MVStore mv;
 	private static HttpServer server;
@@ -109,6 +111,7 @@ public class Dashboard {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -276,6 +279,16 @@ public class Dashboard {
 			response(exchange, 400);
 			return;
 		}
+		if (method == NAMES_METHOD) {
+			Set<String> names = new TreeSet<>();
+			for (String name : mv.getMapNames()) {
+				if (!(name.startsWith("_tags_quarter.") || name.startsWith("_meta."))) {
+					names.add(name.startsWith("_quarter.") ? name.substring(9) : name);
+				}
+			}
+			response(exchange, names, acceptGzip);
+			return;
+		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
 			response(exchange, mv.<String, String>openMap("_meta.tags").
@@ -305,18 +318,19 @@ public class Dashboard {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		Map<Integer, byte[]> metricTable = mv.openMap(metricName);
+		Map<Integer, String> metricTable = mv.openMap(metricName);
 		for (int time = begin; time <= end; time ++) {
 			int index = (time - begin) / interval;
 			if (time < begin || index >= length) {
 				continue;
 			}
-			byte[] b = metricTable.get(Integer.valueOf(time));
-			if (b == null) {
+			String s = metricTable.get(Integer.valueOf(time));
+			if (s == null) {
+				Log.w("");
 				continue;
 			}
-			Map<Map<String, String>, MetricValue> metricMap =
-					Codecs.deserialize(b, METRIC_TYPE);
+			Map<Map<String, String>, MetricValue> metricMap = new HashMap<>();
+			// TODO
 			metricMap.forEach((tags, newValue) -> {
 				// Query Tags
 				for (Map.Entry<String, String> entry : query.entrySet()) {

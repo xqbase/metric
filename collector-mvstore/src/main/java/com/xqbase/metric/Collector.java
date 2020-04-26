@@ -242,6 +242,7 @@ public class Collector {
 			if (!limitedTags.isEmpty()) {
 				sb.setCharAt(question, '?');
 			}
+			sb.append('\n');
 		}
 		metricMap.forEach((name, sb) -> insert(name, minute, sb));
 		// Put metric size
@@ -532,7 +533,7 @@ public class Collector {
 					countMap.put(name, Integer.valueOf(count == null ?
 							1 : count.intValue() + 1));
 					int slash1 = line.indexOf('/', slash0 + 1);
-					if (slash1 < 0) {
+					if (slash1 > 0) {
 						// <name>/<time>/<count>/<sum>/<max>/<min>/<sqr>[?<tag>=<value>[&...]]
 						// Aggregation-before-collection metric, insert immediately
 						NameTime key = new NameTime();

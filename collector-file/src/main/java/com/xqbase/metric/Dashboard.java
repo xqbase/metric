@@ -12,14 +12,15 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -100,7 +101,8 @@ public class Dashboard {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	private static String dataDir;
 	private static HttpServer server;
@@ -117,6 +119,7 @@ public class Dashboard {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -285,6 +288,21 @@ public class Dashboard {
 			return;
 		}
 		String metricName = path.substring(0, slash);
+		if (method == NAMES_METHOD) {
+			Set<String> names = new TreeSet<>();
+			String[] filenames = new File(dataDir).list();
+			if (filenames == null) {
+				response(exchange, "[]", false);
+				return;
+			}
+			for (String name : filenames) {
+				if (!(name.startsWith("_tags_quarter.") || name.startsWith("_meta."))) {
+					names.add(name.startsWith("_quarter.") ? name.substring(9) : name);
+				}
+			}
+			response(exchange, names, acceptGzip);
+			return;
+		}
 		if (method == TAGS_METHOD) {
 			File file = new File(dataDir + "_meta.tags.properties");
 			if (!file.exists()) {
@@ -297,8 +315,7 @@ public class Dashboard {
 			} catch (IOException e) {
 				Log.e(e);
 			}
-			String json = p.getProperty(metricName);
-			response(exchange, json == null ? "{}": json, acceptGzip);
+			response(exchange, p.getProperty(metricName, "{}"), acceptGzip);
 			return;
 		}
 
@@ -326,7 +343,7 @@ public class Dashboard {
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		String[] filenames = new File(dataDir + metricName).list();
 		if (filenames == null) {
-			response(exchange, Collections.emptyMap(), false);
+			response(exchange, "{}", false);
 			return;
 		}
 		for (String filename : filenames) {

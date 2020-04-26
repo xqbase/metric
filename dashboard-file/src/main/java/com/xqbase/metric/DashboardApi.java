@@ -7,12 +7,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
@@ -77,7 +78,8 @@ public class DashboardApi extends HttpServlet {
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
-	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
+	private static final ToDoubleFunction<MetricValue> TAGS_METHOD = value -> 1;
 
 	static {
 		methodMap.put("count", MetricValue::getCount);
@@ -86,6 +88,7 @@ public class DashboardApi extends HttpServlet {
 		methodMap.put("min", MetricValue::getMin);
 		methodMap.put("avg", MetricValue::getAvg);
 		methodMap.put("std", MetricValue::getStd);
+		methodMap.put("names", NAMES_METHOD);
 		methodMap.put("tags", TAGS_METHOD);
 	}
 
@@ -153,11 +156,26 @@ public class DashboardApi extends HttpServlet {
 			error400(resp);
 			return;
 		}
+		if (method == NAMES_METHOD) {
+			Set<String> names = new TreeSet<>();
+			String[] filenames = new File(dataDir).list();
+			if (filenames == null) {
+				outputJson(req, resp, "[]");
+				return;
+			}
+			for (String name : filenames) {
+				if (!(name.startsWith("_tags_quarter.") || name.startsWith("_meta."))) {
+					names.add(name.startsWith("_quarter.") ? name.substring(9) : name);
+				}
+			}
+			outputJson(req, resp, names);
+			return;
+		}
 		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
 			File file = new File(dataDir + "_meta.tags.properties");
 			if (!file.exists()) {
-				outputJson(req, resp, Collections.emptyMap());
+				outputJson(req, resp, "{}");
 				return;
 			}
 			Properties p = new Properties();
@@ -166,12 +184,7 @@ public class DashboardApi extends HttpServlet {
 			} catch (IOException e) {
 				Log.e(e);
 			}
-			String json = p.getProperty(metricName);
-			if (json == null) {
-				outputJson(req, resp, Collections.emptyMap());
-				return;
-			}
-			outputJson(req, resp, json);
+			outputJson(req, resp, p.getProperty(metricName, "{}"));
 			return;
 		}
 
@@ -203,7 +216,7 @@ public class DashboardApi extends HttpServlet {
 		Map<GroupKey, MetricValue> result = new HashMap<>();
 		String[] filenames = new File(dataDir + metricName).list();
 		if (filenames == null) {
-			outputJson(req, resp, Collections.emptyMap());
+			outputJson(req, resp, "{}");
 			return;
 		}
 		for (String filename : filenames) {
