@@ -91,6 +91,14 @@ public class Collector {
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
+	private static void putMetric(long elapsed,
+			int keycount, String command, String name) {
+		Metric.put("metric.mvstore.elapsed", elapsed,
+				"command", command, "name", name);
+		Metric.put("metric.mvstore.keycount", keycount,
+				"command", command, "name", name);
+	}
+
 	private static void updateSize(String name, long delta) {
 		if (delta == 0) {
 			return;
@@ -111,10 +119,7 @@ public class Collector {
 			}
 			return null;
 		});
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-				"command", "update", "name", "_meta.size");
-		Metric.put("metric.mvstore.keycount", keycount[0],
-				"command", "update", "name", "_meta.size");
+		putMetric(System.currentTimeMillis() - t, keycount[0], "update", "_meta.size");
 	}
 
 	private static void insert(String name, int time, StringBuilder sb) {
@@ -122,19 +127,13 @@ public class Collector {
 		int[] keycount = {0};
 		int seq = sequenceTable.compute(Integer.valueOf(time), (key, oldSeq) -> {
 			keycount[0] ++;
-			return Integer.valueOf(oldSeq == null ? 1 : oldSeq.intValue() + 1);
+			return Integer.valueOf(oldSeq == null ? 0 : oldSeq.intValue() + 1);
 		}).intValue();
 		long t1 = System.currentTimeMillis();
-		Metric.put("metric.mvstore.elapsed", t1 - t0,
-				"command", "update", "name", "_meta.sequence");
-		Metric.put("metric.mvstore.keycount", keycount[0],
-				"command", "update", "name", "_meta.sequence");
+		putMetric(t1 - t0, keycount[0], "update", "_meta.sequence");
 		String original = mv.<Long, String>openMap(name).
 				put(Long.valueOf(((long) time << 32) + seq), sb.toString());
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t1,
-				"command", "insert", "name", name);
-		Metric.put("metric.mvstore.keycount", 1,
-				"command", "insert", "name", name);
+		putMetric(System.currentTimeMillis() - t1, 1, "insert", name);
 		if (original != null) {
 			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
 		}
@@ -166,10 +165,7 @@ public class Collector {
 		if (size > 0 && !name.startsWith("_tags_quarter.")) {
 			updateSize(name, -size);
 		}
-		Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-				"command", "delete", "name", name);		
-		Metric.put("metric.mvstore.keycount", delKeys.size(),
-				"command", "delete", "name", name);
+		putMetric(System.currentTimeMillis() - t, delKeys.size(), "delete", name);
 	}
 
 	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
@@ -300,6 +296,7 @@ public class Collector {
 			delete(quarterTable, Integer.valueOf(0), Integer.valueOf(quarter - expire));
 			// 3. Aggregate minute to quarter
 			long t = System.currentTimeMillis();
+			int keycount = 0;
 			int start = aggregated == 0 ? quarter - expire : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
 				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
@@ -344,6 +341,7 @@ public class Collector {
 							value.add(newValue);
 						}
 					}
+					keycount ++;
 				}
 				if (accMetricMap.isEmpty()) {
 					continue;
@@ -416,8 +414,7 @@ public class Collector {
 				}
 			}
 			tagsTable.put(name, new JSONObject(limit(tagMap)).toString());
-			Metric.put("metric.mvstore.elapsed", System.currentTimeMillis() - t,
-					"command", "aggregate", "name", name);		
+			putMetric(System.currentTimeMillis() - t, keycount, "aggregate", name);
 		});
 	}
 
