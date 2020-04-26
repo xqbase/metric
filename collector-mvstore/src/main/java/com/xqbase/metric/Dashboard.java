@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -23,6 +24,7 @@ import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
 import java.util.zip.GZIPOutputStream;
 
+import org.h2.mvstore.MVMap;
 import org.h2.mvstore.MVStore;
 import org.json.JSONObject;
 
@@ -90,6 +92,11 @@ public class Dashboard {
 		format_.setTimeZone(TimeZone.getTimeZone("GMT"));
 		return format_;
 	});
+
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isFinite(d) ? d : 0;
+	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
@@ -318,36 +325,73 @@ public class Dashboard {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		Map<Integer, String> metricTable = mv.openMap(metricName);
-		for (int time = begin; time <= end; time ++) {
-			int index = (time - begin) / interval;
-			if (time < begin || index >= length) {
-				continue;
+		MVMap<Number, String> metricTable = mv.openMap(metricName);
+		Iterator<Number> it;
+		long to;
+		if (quarter) {
+			it = metricTable.keyIterator(Integer.valueOf(begin));
+			to = end;
+		} else {
+			it = metricTable.keyIterator(Long.valueOf((long) begin << 32));
+			to = ((long) (end + 1) << 32) - 1;
+		}
+		while (it.hasNext()) {
+			Number time = it.next();
+			if (time.longValue() > to) {
+				break;
 			}
-			String s = metricTable.get(Integer.valueOf(time));
+			int index = ((quarter ? time.intValue() :
+					(int) (time.longValue() >> 32)) - begin) / interval;
+			if (index < 0 || index >= length) {
+				Log.w("Key " + time + " out of range, end = " + end +
+						", interval = " + interval + ", length = " + length);
+				return;
+			}
+			String s = metricTable.get(time);
 			if (s == null) {
-				Log.w("");
+				Log.w("Unable to get key " + time + " from table " + metricName);
 				continue;
 			}
-			Map<Map<String, String>, MetricValue> metricMap = new HashMap<>();
-			// TODO
-			metricMap.forEach((tags, newValue) -> {
-				// Query Tags
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String tagValue = tags.get(entry.getKey());
-					if (!entry.getValue().equals(tagValue)) {
-						return;
+			for (String line : s.split("\n")) {
+				String[] paths;
+				Map<String, String> tags = new HashMap<>();
+				int i = line.indexOf('?');
+				if (i < 0) {
+					paths = line.split("/");
+				} else {
+					paths = line.substring(0, i).split("/");
+					String q = line.substring(i + 1);
+					for (String tag : q.split("&")) {
+						i = tag.indexOf('=');
+						if (i > 0) {
+							tags.put(Strings.decodeUrl(tag.substring(0, i)),
+									Strings.decodeUrl(tag.substring(i + 1)));
+						}
 					}
+				}
+				// Query Tags
+				boolean skip = false;
+				for (Map.Entry<String, String> entry : query.entrySet()) {
+					String value = tags.get(entry.getKey());
+					if (!entry.getValue().equals(value)) {
+						skip = true;
+						break;
+					}
+				}
+				if (skip || paths.length <= 4) {
+					continue;
 				}
 				// Group Tags
 				GroupKey key = new GroupKey(groupBy.apply(tags), index);
+				MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+						__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
 				MetricValue value = result.get(key);
 				if (value == null) {
 					result.put(key, newValue);
 				} else {
 					value.add(newValue);
 				}
-			});
+			}
 		}
 		// Generate Data
 		Map<String, double[]> data = new HashMap<>();

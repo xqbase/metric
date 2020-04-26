@@ -287,7 +287,6 @@ public class Dashboard {
 			response(exchange, 400);
 			return;
 		}
-		String metricName = path.substring(0, slash);
 		if (method == NAMES_METHOD) {
 			Set<String> names = new TreeSet<>();
 			String[] filenames = new File(dataDir).list();
@@ -303,6 +302,7 @@ public class Dashboard {
 			response(exchange, names, acceptGzip);
 			return;
 		}
+		String metricName = path.substring(0, slash);
 		if (method == TAGS_METHOD) {
 			File file = new File(dataDir + "_meta.tags.properties");
 			if (!file.exists()) {
