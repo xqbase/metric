@@ -45,11 +45,20 @@ import com.xqbase.util.Time;
 import com.xqbase.util.db.ConnectionPool;
 import com.xqbase.util.db.Row;
 
-class MetricRow {
+class NameTime {
+	String name;
 	int time;
-	long count;
-	double sum, max, min, sqr;
-	Map<String, String> tags;
+
+	@Override
+	public int hashCode() {
+		return name.hashCode() * 31 + time;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		NameTime o = (NameTime) obj;
+		return time == o.time && name.equals(o.name);
+	}
 }
 
 class MetricName {
@@ -61,14 +70,22 @@ public class Collector {
 	private static final int MAX_BUFFER_SIZE = 1048576;
 	private static final int MAX_METRIC_LEN = 64;
 
-	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
-	private static final String CREATE_ID = "INSERT INTO metric_name (name) VALUES (?)";
+	private static final String QUERY_ID =
+			"SELECT id FROM metric_name WHERE name = ?";
+	private static final String CREATE_ID =
+			"INSERT INTO metric_name (name) VALUES (?)";
 	private static final String QUERY_NAME =
 			"SELECT id, name, minute_size, quarter_size, aggregated_time FROM metric_name";
-	private static final String INSERT_MINUTE = "INSERT INTO metric_minute " +
-			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
-	private static final String INSERT_QUARTER = "INSERT INTO metric_quarter " +
-			"(id, time, _count, _sum, _max, _min, _sqr, tags) VALUES ";
+	private static final String QUERY_SEQ =
+			"SELECT seq FROM metric_seq WHERE time = ?";
+	private static final String INSERT_SEQ =
+			"INSERT INTO metric_seq (time, seq) VALUES (?, 0)";
+	private static final String INCREMENT_SEQ =
+			"UPDATE metric_seq SET seq = seq + 1 WHERE time = ? AND seq = ?";
+	private static final String INSERT_MINUTE =
+			"INSERT INTO metric_minute (id, time, seq, metrics) VALUES (?, ?, ?, ?)";
+	private static final String INSERT_QUARTER =
+			"INSERT INTO metric_quarter (id, time, metrics) VALUES (?, ?, ?)";
 	private static final String INCREMENT_MINUTE =
 			"UPDATE metric_name SET minute_size = minute_size + ? WHERE id = ?";
 	private static final String INCREMENT_QUARTER =
@@ -103,73 +120,6 @@ public class Collector {
 	private static String decode(String s, int limit) {
 		String result = Strings.decodeUrl(s);
 		return limit > 0 ? Strings.truncate(result, limit) : result;
-	}
-
-	private static void put(Map<String, List<MetricRow>> rowsMap,
-			String name, MetricRow row) {
-		List<MetricRow> rows = rowsMap.get(name);
-		if (rows == null) {
-			rows = new ArrayList<>();
-			rowsMap.put(name, rows);
-		}
-		rows.add(row);
-	}
-
-	private static int MAX_PARAMS = 256;
-
-	private static void insert(Integer id, List<MetricRow> rows,
-			boolean quarter) throws SQLException {
-		List<Object> ins = new ArrayList<>();
-		StringBuilder sb = new StringBuilder(quarter ?
-				INSERT_QUARTER : INSERT_MINUTE);
-		for (MetricRow row : rows) {
-			sb.append("(?, ?, ?, ?, ?, ?, ?, ?), ");
-			ins.add(id);
-			ins.add(Integer.valueOf(row.time));
-			ins.add(Long.valueOf(row.count));
-			ins.add(Double.valueOf(row.sum));
-			ins.add(Double.valueOf(row.max));
-			ins.add(Double.valueOf(row.min));
-			ins.add(Double.valueOf(row.sqr));
-			ins.add(Codecs.encode(row.tags));
-		}
-		DB.updateEx(sb.substring(0, sb.length() - 2), ins.toArray());
-	}
-
-	private static void insert(String name, List<MetricRow> rows,
-			boolean quarter) throws SQLException {
-		if (rows.isEmpty()) {
-			return;
-		}
-		int id;
-		Row idRow = DB.queryEx(QUERY_ID, name);
-		if (idRow == null) {
-			long[] id_ = new long[1];
-			if (DB.updateEx(id_, CREATE_ID, name) <= 0) {
-				Log.w("Unable to create name " + name);
-				return;
-			}
-			id = (int) id_[0];
-		} else {
-			id = idRow.getInt("id");
-		}
-		Integer id_ = Integer.valueOf(id);
-		int len1 = rows.size();
-		int len0 = len1 / MAX_PARAMS * MAX_PARAMS;
-		for (int off = 0; off < len0; off += MAX_PARAMS) {
-			insert(id_, rows.subList(off, off + MAX_PARAMS), quarter);
-		}
-		if (len0 < len1) {
-			insert(id_, rows.subList(len0, len1), quarter);
-		}
-		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, rows.size(), id);
-	}
-
-	private static void insert(Map<String, List<MetricRow>>
-			rowsMap) throws SQLException {
-		for (Map.Entry<String, List<MetricRow>> entry : rowsMap.entrySet()) {
-			insert(entry.getKey(), entry.getValue(), false);
-		}
 	}
 
 	private static Service service = new Service();
@@ -210,6 +160,52 @@ public class Collector {
 			names.add(name);
 		}, QUERY_NAME);
 		return names;
+	}
+
+	private static int nextSeq(int time, int lastSeq) throws SQLException {
+		int seq = lastSeq;
+		while (DB.update(INCREMENT_SEQ, time, seq) <= 0) {
+			Row row = DB.query(QUERY_SEQ, time);
+			if (row == null) {
+				Log.w("Failed to query seq by time " + time + ", expected " + seq);
+				break;
+			}
+			seq = row.getInt("seq");
+		}
+		Metric.put("metric.seq_increment", seq - lastSeq);
+		return seq ++;
+	}
+
+	private static void insert(String name, int time,
+			StringBuilder sb, boolean quarter) throws SQLException {
+		int id;
+		Row idRow = DB.queryEx(QUERY_ID, name);
+		if (idRow == null) {
+			long[] id_ = new long[1];
+			if (DB.updateEx(id_, CREATE_ID, name) <= 0) {
+				Log.w("Unable to create name " + name);
+				return;
+			}
+			id = (int) id_[0];
+		} else {
+			id = idRow.getInt("id");
+		}
+
+		if (quarter) {
+			DB.updateEx(INSERT_QUARTER, Integer.valueOf(id),
+					Integer.valueOf(time), sb.toString());
+		} else {
+			int seq;
+			Row row = DB.query(QUERY_SEQ, time);
+			if (row == null) {
+				seq = (DB.update(INSERT_SEQ, time) < 0 ? nextSeq(time, 0) : 0);
+			} else {
+				seq = nextSeq(time, row.getInt("seq"));
+			}
+			DB.updateEx(INSERT_MINUTE, Integer.valueOf(id),
+					Integer.valueOf(time), Integer.valueOf(seq), sb.toString());
+		}
+		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, sb.length(), id);
 	}
 
 	private static Class<?> jdbcConnection;
@@ -543,7 +539,7 @@ public class Collector {
 					// Continue to parse rows
 				}
 
-				Map<String, List<MetricRow>> rowsMap = new HashMap<>();
+				Map<NameTime, StringBuilder> metricMap = new HashMap<>();
 				Map<String, Integer> countMap = new HashMap<>();
 				for (String line : baq.toString().split("\n")) {
 					// Truncate tailing '\r'
@@ -551,49 +547,55 @@ public class Collector {
 					if (length > 0 && line.charAt(length - 1) == '\r') {
 						line = line.substring(0, length - 1);
 					}
-					// Parse name, aggregation, value and tags
-					// <name>/<aggregation>/<value>[?<tag>=<value>[&...]]
-					String[] paths;
+					// Parse name, time, value and tags
+					int slash0 = line.indexOf('/');
+					if (slash0 < 0) {
+						Log.w("Incorrect format: [" + line + "]");
+						continue;
+					}
+					String name = decode(line.substring(0, slash0), MAX_METRIC_LEN);
+					Integer count = countMap.get(name);
+					countMap.put(name, Integer.valueOf(count == null ?
+							1 : count.intValue() + 1));
+					int slash1 = line.indexOf('/', slash0 + 1);
+					if (slash1 > 0) {
+						// <name>/<time>/<count>/<sum>/<max>/<min>/<sqr>[?<tag>=<value>[&...]]
+						// Aggregation-before-collection metric, insert immediately
+						NameTime key = new NameTime();
+						key.name = name;
+						key.time = Numbers.parseInt(line.substring(slash0 + 1, slash1),
+								currentMinute.get());
+						line = line.substring(slash1 + 1);
+						if (enableRemoteAddr) {
+							int index = line.indexOf('?');
+							line += (index < 0 ? '?' : '&') + "remote_addr=" + remoteAddr;
+						}
+						metricMap.computeIfAbsent(key, k -> new StringBuilder()).
+								append(line).append('\n');
+						continue;
+					}
+					// <name>/<value>[?<tag>=<value>[&...]]
+					// Aggregation-during-collection metric, aggregate first
 					Map<String, String> tagMap = new HashMap<>();
 					int index = line.indexOf('?');
+					double value;
 					if (index < 0) {
-						paths = line.split("/");
+						value = __(line.substring(slash0 + 1));
 					} else {
-						paths = line.substring(0, index).split("/");
+						value = __(line.substring(slash0 + 1, index));
 						String query = line.substring(index + 1);
 						for (String tag : query.split("&")) {
 							index = tag.indexOf('=');
-							if (index > 0) {
+							if (index >= 0) {
 								tagMap.put(decode(tag.substring(0, index), maxTagNameLen),
 										decode(tag.substring(index + 1), maxTagValueLen));
 							}
 						}
 					}
-					if (paths.length < 2) {
-						Log.w("Incorrect format: [" + line + "]");
-						continue;
-					}
-					String name = decode(paths[0], MAX_METRIC_LEN);
-					if (name.isEmpty()) {
-						Log.w("Incorrect format: [" + line + "]");
-						continue;
-					}
 					if (enableRemoteAddr) {
 						tagMap.put("remote_addr", remoteAddr);
 					}
-					if (paths.length > 6) {
-						// For aggregation-before-collection metric, insert immediately
-						put(rowsMap, name, row(tagMap,
-								Numbers.parseInt(paths[1], currentMinute.get()),
-								Numbers.parseLong(paths[2]), __(paths[3]),
-								__(paths[4]), __(paths[5]), __(paths[6])));
-					} else {
-						// For aggregation-during-collection metric, aggregate first
-						Metric.put(name, __(paths[1]), tagMap);
-					}
-					Integer count = countMap.get(name);
-					countMap.put(name, Integer.valueOf(count == null ?
-							1 : count.intValue() + 1));
+					Metric.put(name, value, tagMap);
 				}
 				if (verbose) {
 					Log.d("Metrics received from " + remoteAddr + ": " + countMap);
@@ -613,13 +615,15 @@ public class Collector {
 					});
 				}
 				// Insert aggregation-before-collection metrics
-				if (!rowsMap.isEmpty()) {
+				if (!metricMap.isEmpty()) {
 					executor.execute(Runnables.wrap(() -> {
-						try {
-							insert(rowsMap);
-						} catch (SQLException e) {
-							Log.e(e);
-						}
+						metricMap.forEach((key, sb) -> {
+							try {
+								insert(key.name, key.time, sb, false);
+							} catch (SQLException e) {
+								Log.e(e);
+							}
+						});
 					}));
 				}
 			}
