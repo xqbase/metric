@@ -28,11 +28,12 @@ import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
+import org.json.JSONObject;
+
 import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
@@ -91,12 +92,16 @@ public class Collector {
 	private static final String INCREMENT_QUARTER =
 			"UPDATE metric_name SET quarter_size = quarter_size + ? WHERE id = ?";
 
-	private static final String DELETE_TAGS_BY_ID =
+	private static final String DELETE_TAGS_QUARTER_BY_ID =
 			"DELETE FROM metric_tags_quarter WHERE id = ?";
-	private static final String DELETE_TAGS_BY_TIME =
-			"DELETE FROM metric_tags_quarter WHERE time <= ?";
+	private static final String DELETE_TAGS_QUARTER =
+			"DELETE FROM metric_tags_quarter WHERE id = ? AND time <= ?";
 	private static final String DELETE_NAME = "DELETE FROM metric_name WHERE id = ?";
 
+	private static final String QUERY_MINUTE_SIZE =
+			"SELECT COUNT(*) c, SUM(LENGTH(metrics)) s FROM metric_minute WHERE id = ? AND time <= ?";
+	private static final String QUERY_QUARTER_SIZE =
+			"SELECT COUNT(*) c, SUM(LENGTH(metrics)) s FROM metric_quarter WHERE id = ? AND time <= ?";
 	private static final String DELETE_MINUTE =
 			"DELETE FROM metric_minute WHERE id = ? AND time <= ?";
 	private static final String DELETE_QUARTER =
@@ -129,25 +134,6 @@ public class Collector {
 	private static boolean verbose;
 	private static ConnectionPool.Entry h2PoolEntry;
 
-	private static MetricRow row(Map<String, String> tagMap, int now,
-			long count, double sum, double max, double min, double sqr) {
-		MetricRow row = new MetricRow();
-		if (maxTags > 0 && tagMap.size() > maxTags) {
-			row.tags = new HashMap<>();
-			CollectionsEx.forEach(CollectionsEx.min(tagMap.entrySet(),
-					Comparator.comparing(Map.Entry::getKey), maxTags), row.tags::put);
-		} else {
-			row.tags = tagMap;
-		}
-		row.time = now;
-		row.count = count;
-		row.sum = sum;
-		row.max = max;
-		row.min = min;
-		row.sqr = sqr;
-		return row;
-	}
-
 	private static List<MetricName> getNames() throws SQLException {
 		List<MetricName> names = new ArrayList<>();
 		DB.query(row -> {
@@ -162,22 +148,34 @@ public class Collector {
 		return names;
 	}
 
-	private static int nextSeq(int time, int lastSeq) throws SQLException {
+	private static int nextSeq(int time) throws SQLException {
+		int lastSeq;
+		Row row = DB.query(QUERY_SEQ, time);
+		if (row == null) {
+			if (DB.update(INSERT_SEQ, time) > 0) {
+				Metric.put("metric.seq_increment", 0, "server_id", "" + serverId);
+				return 0;
+			}
+			Log.i("Simultaneously inserted seq 0 for time " + time);
+			lastSeq = 0;
+		} else {
+			lastSeq = row.getInt("seq");
+		}
 		int seq = lastSeq;
 		while (DB.update(INCREMENT_SEQ, time, seq) <= 0) {
-			Row row = DB.query(QUERY_SEQ, time);
+			row = DB.query(QUERY_SEQ, time);
 			if (row == null) {
 				Log.w("Failed to query seq by time " + time + ", expected " + seq);
 				break;
 			}
 			seq = row.getInt("seq");
 		}
-		Metric.put("metric.seq_increment", seq - lastSeq);
+		Metric.put("metric.seq_increment", seq - lastSeq, "server_id", "" + serverId);
 		return seq ++;
 	}
 
 	private static void insert(String name, int time,
-			StringBuilder sb, boolean quarter) throws SQLException {
+			StringBuilder sb) throws SQLException {
 		int id;
 		Row idRow = DB.queryEx(QUERY_ID, name);
 		if (idRow == null) {
@@ -190,93 +188,9 @@ public class Collector {
 		} else {
 			id = idRow.getInt("id");
 		}
-
-		if (quarter) {
-			DB.updateEx(INSERT_QUARTER, Integer.valueOf(id),
-					Integer.valueOf(time), sb.toString());
-		} else {
-			int seq;
-			Row row = DB.query(QUERY_SEQ, time);
-			if (row == null) {
-				seq = (DB.update(INSERT_SEQ, time) < 0 ? nextSeq(time, 0) : 0);
-			} else {
-				seq = nextSeq(time, row.getInt("seq"));
-			}
-			DB.updateEx(INSERT_MINUTE, Integer.valueOf(id),
-					Integer.valueOf(time), Integer.valueOf(seq), sb.toString());
-		}
-		DB.update(quarter ? INCREMENT_QUARTER : INCREMENT_MINUTE, sb.length(), id);
-	}
-
-	private static Class<?> jdbcConnection;
-	private static Method getSession, getDatabase, getStore, getMvStore;
-	private static Method getFillRate, getChunksFillRate;
-	private static Method getCacheSizeUsed, getCacheHitRatio;
-
-	static {
-		try {
-			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
-			getSession = jdbcConnection.getMethod("getSession");
-			getDatabase = Class.forName("org.h2.engine.Session").
-					getMethod("getDatabase");
-			getStore = Class.forName("org.h2.engine.Database").
-					getMethod("getStore");
-			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
-					getMethod("getMvStore");
-			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
-			getFillRate = mvStore.getMethod("getFillRate");
-			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
-			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
-			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
-		} catch (ReflectiveOperationException e) {
-			Log.w(e.getMessage());
-		}
-	}
-
-	private static void minutely(int minute) throws SQLException {
-		// Insert aggregation-during-collection metrics
-		Map<String, List<MetricRow>> rowsMap = new HashMap<>();
-		for (MetricEntry entry : Metric.removeAll()) {
-			MetricRow row = row(entry.getTagMap(), minute, entry.getCount(),
-					entry.getSum(), entry.getMax(), entry.getMin(), entry.getSqr());
-			put(rowsMap, entry.getName(), row);
-		}
-		if (!rowsMap.isEmpty()) {
-			insert(rowsMap);
-		}
-		// Ensure index and calculate metric size by master collector
-		if (serverId != 0) {
-			return;
-		}
-		for (MetricName name : getNames()) {
-			if (name.minuteSize > 0) {
-				Metric.put("metric.size", name.minuteSize, "name", name.name);
-			}
-			if (name.quarterSize > 0) {
-				Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
-			}
-		}
-		// MVStore: fill rate, cache used and hit ratio
-		if (h2PoolEntry == null) {
-			return;
-		}
-		Object conn = h2PoolEntry.getObject().unwrap(jdbcConnection);
-		try {
-			Object session = getSession.invoke(conn);
-			Object database = getDatabase.invoke(session);
-			Object store = getStore.invoke(database);
-			Object mv = getMvStore.invoke(store);
-			Metric.put("metric.mvstore.fill_rate", ((Number) getFillRate.
-					invoke(mv)).doubleValue(), "type", "store");
-			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
-					invoke(mv)).doubleValue(), "type", "chunks");
-			Metric.put("metric.mvstore.cache_size_used",
-					((Number) getCacheSizeUsed.invoke(mv)).doubleValue());
-			Metric.put("metric.mvstore.cache_hit_ratio",
-					((Number) getCacheHitRatio.invoke(mv)).doubleValue());
-		} catch (ReflectiveOperationException e) {
-			Log.w(e.getMessage());
-		}
+		DB.updateEx(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
+				Integer.valueOf(nextSeq(time)), sb.toString());
+		DB.update(INCREMENT_MINUTE, sb.length(), id);
 	}
 
 	private static void putTagValue(Map<String, Map<String, MetricValue>> tagMap,
@@ -321,90 +235,239 @@ public class Collector {
 		return tags;
 	}
 
-	private static void quarterly(int quarter) throws SQLException {
-		DB.update(DELETE_TAGS_BY_TIME, quarter - tagsExpire);
+	private static Class<?> jdbcConnection;
+	private static Method getSession, getDatabase, getStore, getMvStore;
+	private static Method getFillRate, getChunksFillRate;
+	private static Method getCacheSizeUsed, getCacheHitRatio;
 
+	static {
+		try {
+			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
+			getSession = jdbcConnection.getMethod("getSession");
+			getDatabase = Class.forName("org.h2.engine.Session").
+					getMethod("getDatabase");
+			getStore = Class.forName("org.h2.engine.Database").
+					getMethod("getStore");
+			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+					getMethod("getMvStore");
+			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
+			getFillRate = mvStore.getMethod("getFillRate");
+			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
+			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
+			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
+		} catch (ReflectiveOperationException e) {
+			Log.w(e.getMessage());
+		}
+	}
+
+	private static void minutely(int minute) throws SQLException {
+		// Insert aggregation-during-collection metrics
+		Map<String, StringBuilder> metricMap = new HashMap<>();
+		for (MetricEntry entry : Metric.removeAll()) {
+			StringBuilder sb = metricMap.computeIfAbsent(entry.getName(),
+					k -> new StringBuilder());
+			sb.append(entry.getCount()).
+					append('/').append(entry.getSum()).
+					append('/').append(entry.getMax()).
+					append('/').append(entry.getMin()).
+					append('/').append(entry.getSqr());
+			int question = sb.length();
+			Map<String, String> tags = entry.getTagMap();
+			Map<String, String> limitedTags;
+			if (maxTags > 0 && tags.size() > maxTags) {
+				limitedTags = new HashMap<>();
+				CollectionsEx.forEach(CollectionsEx.min(tags.entrySet(),
+						Comparator.comparing(Map.Entry::getKey), maxTags), limitedTags::put);
+			} else {
+				limitedTags = tags;
+			}
+			limitedTags.forEach((k, v) -> {
+				sb.append('&').append(Strings.encodeUrl(k)).
+						append('=').append(Strings.encodeUrl(v));
+			});
+			if (!limitedTags.isEmpty()) {
+				sb.setCharAt(question, '?');
+			}
+			sb.append('\n');
+		}
+		for (Map.Entry<String, StringBuilder> entry : metricMap.entrySet()) {
+			insert(entry.getKey(), minute, entry.getValue());
+		}
+		// Calculate metric size by master collector
+		if (serverId != 0) {
+			return;
+		}
 		for (MetricName name : getNames()) {
+			if (name.minuteSize > 0) {
+				Metric.put("metric.size", name.minuteSize, "name", name.name);
+			}
+			if (name.quarterSize > 0) {
+				Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
+			}
+		}
+		// MVStore: fill rate, cache used and hit ratio
+		if (h2PoolEntry == null) {
+			return;
+		}
+		Object conn = h2PoolEntry.getObject().unwrap(jdbcConnection);
+		try {
+			Object session = getSession.invoke(conn);
+			Object database = getDatabase.invoke(session);
+			Object store = getStore.invoke(database);
+			Object mv = getMvStore.invoke(store);
+			Metric.put("metric.mvstore.fill_rate", ((Number) getFillRate.
+					invoke(mv)).doubleValue(), "type", "store");
+			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
+					invoke(mv)).doubleValue(), "type", "chunks");
+			Metric.put("metric.mvstore.cache_size_used",
+					((Number) getCacheSizeUsed.invoke(mv)).doubleValue());
+			Metric.put("metric.mvstore.cache_hit_ratio",
+					((Number) getCacheHitRatio.invoke(mv)).doubleValue());
+		} catch (ReflectiveOperationException e) {
+			Log.w(e.getMessage());
+		}
+	}
+
+	private static void quarterly(int quarter) throws SQLException {
+		for (MetricName name : getNames()) {
+			// Delete meta data
 			if (name.minuteSize <= 0 && name.quarterSize <= 0) {
-				DB.update(DELETE_TAGS_BY_ID, name.id);
+				DB.update(DELETE_TAGS_QUARTER_BY_ID, name.id);
 				DB.update(DELETE_NAME, name.id);
 				continue;
 			}
-			int deletedMinute = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
-			int deletedQuarter = DB.update(DELETE_QUARTER, name.id, quarter - expire);
+			// Delete tags_quarter
+			DB.update(DELETE_TAGS_QUARTER, name.id, quarter - tagsExpire);
+			// Delete minutely metrics
+			Row sizeRow = DB.query(QUERY_MINUTE_SIZE, name.id, quarter * 15 - expire);
+			if (sizeRow == null) {
+				Log.w("Unable to get minute size for metric " + name.name);
+				continue;
+			}
+			int deletedRows = DB.update(DELETE_MINUTE, name.id, quarter * 15 - expire);
+			if (deletedRows != sizeRow.getInt("c")) {
+				Log.w(deletedRows + " (deleted rows) != " + sizeRow.getInt("c") +
+						" (queried rows), for minute metric " + name.name);
+			}
+			long deletedMinute = sizeRow.getLong("s");
+			// Delete quarterly metrics
+			sizeRow = DB.query(QUERY_QUARTER_SIZE, name.id, quarter - expire);
+			if (sizeRow == null) {
+				Log.w("Unable to get quarter size for metric " + name.name);
+				continue;
+			}
+			deletedRows = DB.update(DELETE_QUARTER, name.id, quarter - expire);
+			if (deletedRows != sizeRow.getInt("c")) {
+				Log.w(deletedRows + " (deleted rows) != " + sizeRow.getInt("c") +
+						" (queried rows), for quarter metric " + name.name);
+			}
+			long deletedQuarter = sizeRow.getLong("s");
+			// Aggregate minute to quarter
 			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
 			for (int i = start + 1; i <= quarter; i ++) {
-				List<MetricRow> rows = new ArrayList<>();
-				Map<Map<String, String>, MetricValue> result = new HashMap<>();
+				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
 				DB.query(row -> {
-					Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
-					if (tags == null) {
-						tags = new HashMap<>();
-					}
-					// Aggregate to "_quarter.*"
-					MetricValue newValue = new MetricValue(row.getLong("_count"),
-							((Number) row.get("_sum")).doubleValue(),
-							((Number) row.get("_max")).doubleValue(),
-							((Number) row.get("_min")).doubleValue(),
-							((Number) row.get("_sqr")).doubleValue());
-					MetricValue value = result.get(tags);
-					if (value == null) {
-						result.put(tags, newValue);
-					} else {
-						value.add(newValue);
+					String s = row.getString("metrics");
+					for (String line : s.split("\n")) {
+						String[] paths;
+						Map<String, String> tags = new HashMap<>();
+						int index = line.indexOf('?');
+						if (index < 0) {
+							paths = line.split("/");
+						} else {
+							paths = line.substring(0, index).split("/");
+							String query = line.substring(index + 1);
+							for (String tag : query.split("&")) {
+								index = tag.indexOf('=');
+								if (index > 0) {
+									tags.put(decode(tag.substring(0, index), maxTagNameLen),
+											decode(tag.substring(index + 1), maxTagValueLen));
+								}
+							}
+						}
+						if (paths.length <= 4) {
+							continue;
+						}
+						MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+								__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+						MetricValue value = accMetricMap.get(tags);
+						if (value == null) {
+							accMetricMap.put(tags, newValue);
+						} else {
+							value.add(newValue);
+						}
 					}
 				}, AGGREGATE_FROM, name.id, i * 15 - 14, i * 15);
-				if (result.isEmpty()) {
+				if (accMetricMap.isEmpty()) {
 					continue;
 				}
-				int combinations = result.size();
+				int combinations = accMetricMap.size();
 				Metric.put("metric.tags.combinations", combinations, "name", name.name);
+				// 3'. Aggregate to "_quarter.*"
+				// 5. Aggregate to "_tags_quarter.*"
+				StringBuilder sb = new StringBuilder();
 				Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
-				int i_ = i;
 				BiConsumer<Map<String, String>, MetricValue> action = (tags, value) -> {
-					// {"_quarter": i}, but not {"_quarter": quarter} !
-					rows.add(row(tags, i_, value.getCount(), value.getSum(),
-							value.getMax(), value.getMin(), value.getSqr()));
-					// Aggregate to "_meta.tags_quarter"
-					tags.forEach((tagKey, tagValue) ->
-							putTagValue(tagMap, tagKey, tagValue, value));
+					sb.append(value.getCount()).append('/').
+							append(value.getSum()).append('/').
+							append(value.getMax()).append('/').
+							append(value.getMin()).append('/').
+							append(value.getSqr());
+					if (tags.isEmpty()) {
+						return;
+					}
+					int question = sb.length();
+					tags.forEach((tagKey, tagValue) -> {
+						sb.append('&').append(Strings.encodeUrl(tagKey)).
+								append('=').append(Strings.encodeUrl(tagValue));
+						putTagValue(tagMap, tagKey, tagValue, value);
+					});
+					sb.setCharAt(question, '?');
+					sb.append('\n');
 				};
 				if (maxTagCombinations > 0 && combinations > maxTagCombinations) {
-					CollectionsEx.forEach(CollectionsEx.max(result.entrySet(),
+					CollectionsEx.forEach(CollectionsEx.max(accMetricMap.entrySet(),
 							Comparator.comparingLong(entry -> entry.getValue().getCount()),
 							maxTagCombinations), action);
 				} else {
-					result.forEach(action);
+					accMetricMap.forEach(action);
 				}
-				insert(name.name, rows, true);
-				// Aggregate to "_meta.tags_quarter"
+				// 3'. Aggregate to "_quarter.*"
+				DB.updateEx(INSERT_QUARTER, Integer.valueOf(name.id),
+						Integer.valueOf(i), sb.toString());
+				DB.update(INCREMENT_QUARTER, sb.length(), name.id);
+				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
 					Metric.put("metric.tags.values", tagValue.size(),
 							"name", name.name, "key", tagKey);
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
 				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
-						Integer.valueOf(i), Codecs.encodeEx(limit(tagMap)));
+						Integer.valueOf(i), new JSONObject(limit(tagMap)).toString());
 			}
-
-			// Aggregate "_meta.tags_quarter" to "_meta.tags_all";
+			// Aggregate "tags_quarter.tags" to "name.tags";
 			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
 			DB.query(row -> {
-				Map<String, Map<String, MetricValue>> tags =
-						Codecs.decodeEx(row.getBytes("tags"));
-				if (tags == null) {
-					return;
+				JSONObject json = new JSONObject(row.getString("tags"));
+				for (String tagKey : json.keySet()) {
+					JSONObject tagsJson = json.optJSONObject(tagKey);
+					if (tagsJson == null) {
+						continue;
+					}
+					for (String tagValue : tagsJson.keySet()) {
+						JSONObject j = tagsJson.optJSONObject(tagValue);
+						if (j == null) {
+							continue;
+						}
+						putTagValue(tagMap, tagKey, tagValue,
+								new MetricValue(j.optLong("count"), j.optDouble("sum"),
+								j.optDouble("max"), j.optDouble("min"), j.optDouble("sqr")));
+					}
 				}
-				tags.forEach((tagKey, tagValues) -> {
-					tagValues.forEach((value, metric) -> {
-						putTagValue(tagMap, tagKey, value, metric);
-					});
-				});
 			}, AGGREGATE_TAGS_FROM, name.id);
-
-			DB.updateEx(UPDATE_NAME, Integer.valueOf(deletedMinute),
-					Integer.valueOf(deletedQuarter), Integer.valueOf(quarter),
-					Codecs.encodeEx(limit(tagMap)), Integer.valueOf(name.id));
+			DB.updateEx(UPDATE_NAME, Long.valueOf(deletedMinute),
+					Long.valueOf(deletedQuarter), Integer.valueOf(quarter),
+					new JSONObject(limit(tagMap)).toString(), Integer.valueOf(name.id));
 		}
 	}
 
@@ -619,7 +682,7 @@ public class Collector {
 					executor.execute(Runnables.wrap(() -> {
 						metricMap.forEach((key, sb) -> {
 							try {
-								insert(key.name, key.time, sb, false);
+								insert(key.name, key.time, sb);
 							} catch (SQLException e) {
 								Log.e(e);
 							}

@@ -24,8 +24,7 @@ CREATE TABLE metric_tags_quarter (
 	id INTEGER NOT NULL,
 	time INTEGER NOT NULL,
 	tags LONGTEXT NOT NULL,
-	PRIMARY KEY (id, time),
-	KEY (time));
+	PRIMARY KEY (id, time));
 
 CREATE TABLE metric_seq (
 	time INTEGER NOT NULL PRIMARY KEY,
