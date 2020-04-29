@@ -430,7 +430,7 @@ public class Dashboard {
 			server = null;
 			return;
 		}
-		
+
 		for (String path : RESOURCES) {
 			Resource resource = new Resource();
 			resource.mime = path.endsWith(".css") ? "text/css" :

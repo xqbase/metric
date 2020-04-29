@@ -107,8 +107,7 @@ public class Collector {
 	private static final String DELETE_QUARTER =
 			"DELETE FROM metric_quarter WHERE id = ? AND time <= ?";
 	private static final String AGGREGATE_FROM =
-			"SELECT _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
+			"SELECT metrics FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_TO =
 			"INSERT INTO metric_tags_quarter (id, time, tags) VALUES (?, ?, ?)";
 	private static final String AGGREGATE_TAGS_FROM =

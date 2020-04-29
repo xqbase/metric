@@ -25,13 +25,12 @@ import java.util.function.ToDoubleFunction;
 import java.util.stream.DoubleStream;
 import java.util.zip.GZIPOutputStream;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.json.JSONObject;
+
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.ByteArrayQueue;
 import com.xqbase.util.Conf;
@@ -89,11 +88,9 @@ public class Dashboard {
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
+			"SELECT time, metrics FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_QUARTER =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
+			"SELECT time, metrics FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private static ThreadLocal<SimpleDateFormat> format =
 			ThreadLocal.withInitial(() -> {
@@ -103,6 +100,11 @@ public class Dashboard {
 		format_.setTimeZone(TimeZone.getTimeZone("GMT"));
 		return format_;
 	});
+
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isFinite(d) ? d : 0;
+	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
@@ -143,17 +145,11 @@ public class Dashboard {
 		}
 	}
 
-	private static ObjectMapper writer = new ObjectMapper();
-
 	private static void response(HttpExchange exchange,
 			Object data, boolean acceptGzip) {
 		Headers headers = exchange.getResponseHeaders();
-		String out;
-		try {
-			out = writer.writeValueAsString(data);
-		} catch (JsonProcessingException e) {
-			throw new RuntimeException(e);
-		}
+		String out = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = getParameters(exchange.getRequestURI()).get("_callback");
 		if (callback == null) {
 			copyHeader(exchange, "Origin", "Access-Control-Allow-Origin");
@@ -320,16 +316,10 @@ public class Dashboard {
 				return;
 			}
 			if (row == null) {
-				response(exchange, Collections.emptyMap(), false);
-				return;
-			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
-				response(exchange, Collections.emptyMap(), false);
+				response(exchange, "{}", false);
 			} else {
-				Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-				response(exchange, tags == null ?
-						Collections.emptyMap() : tags, acceptGzip);
+				String s = row.getString("tags");
+				response(exchange, s == null ? "{}" : s, acceptGzip);
 			}
 			return;
 		}
@@ -377,36 +367,50 @@ public class Dashboard {
 			db.query(row -> {
 				int index = (row.getInt("time") - begin) / interval;
 				if (index < 0 || index >= length) {
+					Log.w("Key " + row.getInt("time") + " out of range, end = " + end +
+							", interval = " + interval + ", length = " + length);
 					return;
 				}
-				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
-				if (tags == null) {
-					tags = new HashMap<>();
-				}
-				// Query Tags
-				boolean skip = false;
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String value = tags.get(entry.getKey());
-					if (!entry.getValue().equals(value)) {
-						skip = true;
-						break;
+				String s = row.getString("metrics");
+				for (String line : s.split("\n")) {
+					String[] paths;
+					Map<String, String> tags = new HashMap<>();
+					int i = line.indexOf('?');
+					if (i < 0) {
+						paths = line.split("/");
+					} else {
+						paths = line.substring(0, i).split("/");
+						String q = line.substring(i + 1);
+						for (String tag : q.split("&")) {
+							i = tag.indexOf('=');
+							if (i > 0) {
+								tags.put(Strings.decodeUrl(tag.substring(0, i)),
+										Strings.decodeUrl(tag.substring(i + 1)));
+							}
+						}
 					}
-				}
-				if (skip) {
-					return;
-				}
-				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue newValue = new MetricValue(row.getLong("_count"),
-						((Number) row.get("_sum")).doubleValue(),
-						((Number) row.get("_max")).doubleValue(),
-						((Number) row.get("_min")).doubleValue(),
-						((Number) row.get("_sqr")).doubleValue());
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
+					// Query Tags
+					boolean skip = false;
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String value = tags.get(entry.getKey());
+						if (!entry.getValue().equals(value)) {
+							skip = true;
+							break;
+						}
+					}
+					if (skip || paths.length <= 4) {
+						continue;
+					}
+					// Group Tags
+					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+					MetricValue value = result.get(key);
+					if (value == null) {
+						result.put(key, newValue);
+					} else {
+						value.add(newValue);
+					}
 				}
 			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
 		} catch (SQLException e) {
@@ -451,7 +455,7 @@ public class Dashboard {
 			server = null;
 			return;
 		}
-		
+
 		for (String path : RESOURCES) {
 			Resource resource = new Resource();
 			resource.mime = path.endsWith(".css") ? "text/css" :
