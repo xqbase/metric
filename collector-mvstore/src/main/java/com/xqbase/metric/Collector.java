@@ -379,7 +379,7 @@ public class Collector {
 				}
 				// 3'. Aggregate to "_quarter.*"
 				if (quarterTable.put(Integer.valueOf(i), sb.toString()) != null) {
-					Log.w("Duplicate key " + i + " in table " + quarterName);
+					Log.w("Duplicate key " + i + " in " + quarterName);
 				}
 				updateSize(quarterName, sb.length());
 				// 5. Aggregate to "_tags_quarter.*"

@@ -92,11 +92,14 @@ public class Collector {
 	private static final String INCREMENT_QUARTER =
 			"UPDATE metric_name SET quarter_size = quarter_size + ? WHERE id = ?";
 
+	private static final String DELETE_SEQ =
+			"DELETE FROM metric_seq WHERE time <= ?";
 	private static final String DELETE_TAGS_QUARTER_BY_ID =
 			"DELETE FROM metric_tags_quarter WHERE id = ?";
 	private static final String DELETE_TAGS_QUARTER =
 			"DELETE FROM metric_tags_quarter WHERE id = ? AND time <= ?";
-	private static final String DELETE_NAME = "DELETE FROM metric_name WHERE id = ?";
+	private static final String DELETE_NAME =
+			"DELETE FROM metric_name WHERE id = ?";
 
 	private static final String QUERY_MINUTE_SIZE =
 			"SELECT COUNT(*) c, SUM(LENGTH(metrics)) s FROM metric_minute WHERE id = ? AND time <= ?";
@@ -169,8 +172,9 @@ public class Collector {
 			}
 			seq = row.getInt("seq");
 		}
+		seq ++;
 		Metric.put("metric.seq_increment", seq - lastSeq, "server_id", "" + serverId);
-		return seq ++;
+		return seq;
 	}
 
 	private static void insert(String name, int time,
@@ -187,8 +191,11 @@ public class Collector {
 		} else {
 			id = idRow.getInt("id");
 		}
-		DB.updateEx(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
-				Integer.valueOf(nextSeq(time)), sb.toString());
+		int seq = nextSeq(time);
+		if (DB.updateEx(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
+				Integer.valueOf(seq), sb.toString()) <= 0) {
+			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
+		}
 		DB.update(INCREMENT_MINUTE, sb.length(), id);
 	}
 
@@ -328,6 +335,7 @@ public class Collector {
 	}
 
 	private static void quarterly(int quarter) throws SQLException {
+		DB.update(DELETE_SEQ, quarter * 15);
 		for (MetricName name : getNames()) {
 			// Delete meta data
 			if (name.minuteSize <= 0 && name.quarterSize <= 0) {
@@ -432,8 +440,10 @@ public class Collector {
 					accMetricMap.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
-				DB.updateEx(INSERT_QUARTER, Integer.valueOf(name.id),
-						Integer.valueOf(i), sb.toString());
+				if (DB.updateEx(INSERT_QUARTER, Integer.valueOf(name.id),
+						Integer.valueOf(i), sb.toString()) <= 0) {
+					Log.w("Duplicate key " + i + " in " + name.name);
+				}
 				DB.update(INCREMENT_QUARTER, sb.length(), name.id);
 				// 5. Aggregate to "_tags_quarter.*"
 				tagMap.forEach((tagKey, tagValue) -> {
