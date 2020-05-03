@@ -521,7 +521,7 @@ public class Collector {
 			ManagementMonitor monitor = new ManagementMonitor("metric.server",
 					"server_id", "" + serverId);
 		) {
-			boolean createTable = false;
+			boolean createTable = false, derby = false, sqlite = false;
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
 			String url = p.getProperty("url", "");
@@ -535,31 +535,55 @@ public class Collector {
 						"cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
 						"max_compact_time=0;max_compact_count=80";
+			} else if (url.endsWith(":derby:metric")) {
+				String dataDir = Conf.getAbsolutePath("data");
+				new File(dataDir).mkdir();
+				String dataFile = dataDir + "/metric";
+				createTable = !new File(dataFile).exists();
+				url = url.substring(0, url.length() - 6) + dataFile.replace('\\', '/') +
+						(createTable ? ";create=true" : "");
+				derby = true;
+			} else if (url.endsWith(":sqlite:metric")) {
+				String dataDir = Conf.getAbsolutePath("data");
+				new File(dataDir).mkdir();
+				String dataFile = dataDir + "/metric.db";
+				createTable = !new File(dataFile).exists();
+				url = url.substring(0, url.length() - 6) + "file:" + dataFile;
+				sqlite = true;
 			}
+
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
-			if (h2DataDir != null) {
-				try {
+			try {
+				if (h2DataDir != null) {
 					// An embedded connection must be created first, see:
 					// https://github.com/h2database/h2database/issues/2294
 					h2PoolEntry = DB.borrow();
-					if (createTable) {
-						ByteArrayQueue baq = new ByteArrayQueue();
-						try (InputStream in = Collector.class.
-									getResourceAsStream("/sql/metric.sql")) {
-							baq.readFrom(in);
-							String[] sqls = baq.toString().split(";");
-							for (String s : sqls) {
-								String sql = s.trim();
-								if (!sql.isEmpty()) {
-									DB.update(sql);
+				}
+				if (createTable) {
+					ByteArrayQueue baq = new ByteArrayQueue();
+					try (InputStream in = Collector.class.
+								getResourceAsStream("/sql/metric.sql")) {
+						baq.readFrom(in);
+						String[] sqls = baq.toString().split(";");
+						for (String s : sqls) {
+							String sql = s.trim();
+							if (!sql.isEmpty()) {
+								if (derby) {
+									sql = sql.replace(" AUTO_INCREMENT,",
+											" GENERATED ALWAYS AS IDENTITY").
+											replace(" LONGTEXT ", " CLOB ");
+								} else if (sqlite) {
+									sql = sql.replace(" AUTO_INCREMENT,",
+											" AUTOINCREMENT,");
 								}
+								DB.update(sql);
 							}
 						}
 					}
-				} catch (SQLException e) {
-					throw new RuntimeException(e);
 				}
+			} catch (SQLException e) {
+				throw new RuntimeException(e);
 			}
 			Dashboard.startup(DB);
 
