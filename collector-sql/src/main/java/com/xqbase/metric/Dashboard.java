@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -332,7 +331,7 @@ public class Dashboard {
 		try {
 			Row row = db.queryEx(QUERY_ID, metricName);
 			if (row == null) {
-				response(exchange, Collections.emptyMap(), false);
+				response(exchange, "{}", false);
 				return;
 			}
 			id = row.getInt("id");

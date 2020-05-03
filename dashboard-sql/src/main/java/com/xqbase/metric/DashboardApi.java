@@ -5,7 +5,6 @@ import java.io.PrintWriter;
 import java.sql.Driver;
 import java.sql.SQLException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -22,10 +21,9 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.json.JSONObject;
+
 import com.xqbase.metric.common.MetricValue;
-import com.xqbase.metric.util.Codecs;
 import com.xqbase.metric.util.CollectionsEx;
 import com.xqbase.util.Conf;
 import com.xqbase.util.Log;
@@ -63,11 +61,9 @@ public class DashboardApi extends HttpServlet {
 	private static final String QUERY_TAGS = "SELECT tags FROM metric_name WHERE name = ?";
 	private static final String QUERY_ID = "SELECT id FROM metric_name WHERE name = ?";
 	private static final String AGGREGATE_MINUTE =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
+			"SELECT time, metrics FROM metric_minute WHERE id = ? AND time >= ? AND time <= ?";
 	private static final String AGGREGATE_QUARTER =
-			"SELECT time, _count, _sum, _max, _min, _sqr, tags " +
-			"FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
+			"SELECT time, metrics FROM metric_quarter WHERE id = ? AND time >= ? AND time <= ?";
 
 	private int maxTagValues = 0;
 	private ConnectionPool db = null;
@@ -93,6 +89,11 @@ public class DashboardApi extends HttpServlet {
 		if (db != null) {
 			db.close();
 		}
+	}
+
+	private static double __(String s) {
+		double d = Numbers.parseDouble(s);
+		return Double.isFinite(d) ? d : 0;
 	}
 
 	private static Map<String, ToDoubleFunction<MetricValue>>
@@ -132,8 +133,6 @@ public class DashboardApi extends HttpServlet {
 		}
 	}
 
-	private static ObjectMapper writer = new ObjectMapper();
-
 	private static void outputJson(HttpServletRequest req,
 			HttpServletResponse resp, Object data) {
 		resp.setCharacterEncoding("UTF-8");
@@ -144,12 +143,8 @@ public class DashboardApi extends HttpServlet {
 			Log.d(e.getMessage());
 			return;
 		}
-		String json;
-		try {
-			json = writer.writeValueAsString(data);
-		} catch (JsonProcessingException e) {
-			throw new RuntimeException(e);
-		}
+		String json = (data instanceof String ?
+				(String) data : JSONObject.valueToString(data));
 		String callback = req.getParameter("_callback");
 		if (callback == null) {
 			copyHeader(req, resp, "Origin", "Access-Control-Allow-Origin");
@@ -208,16 +203,11 @@ public class DashboardApi extends HttpServlet {
 				return;
 			}
 			if (row == null) {
-				outputJson(req, resp, Collections.emptyMap());
+				outputJson(req, resp, "{}");
 				return;
 			}
-			byte[] b = row.getBytes("tags");
-			if (b == null) {
-				outputJson(req, resp, Collections.emptyMap());
-			} else {
-				Map<String, Map<String, MetricValue>> tags = Codecs.decodeEx(b);
-				outputJson(req, resp, tags == null ? Collections.emptyMap() : tags);
-			}
+			String s = row.getString("tags");
+			outputJson(req, resp, s == null ? "{}" : s);
 			return;
 		}
 
@@ -229,7 +219,7 @@ public class DashboardApi extends HttpServlet {
 		try {
 			Row row = db.queryEx(QUERY_ID, metricName);
 			if (row == null) {
-				outputJson(req, resp, Collections.emptyMap());
+				outputJson(req, resp, "{}");
 				return;
 			}
 			id = row.getInt("id");
@@ -267,36 +257,50 @@ public class DashboardApi extends HttpServlet {
 			db.query(row -> {
 				int index = (row.getInt("time") - begin) / interval;
 				if (index < 0 || index >= length) {
+					Log.w("Key " + row.getInt("time") + " out of range, end = " + end +
+							", interval = " + interval + ", length = " + length);
 					return;
 				}
-				Map<String, String> tags = Codecs.decode(row.getBytes("tags"));
-				if (tags == null) {
-					tags = new HashMap<>();
-				}
-				// Query Tags
-				boolean skip = false;
-				for (Map.Entry<String, String> entry : query.entrySet()) {
-					String value = tags.get(entry.getKey());
-					if (!entry.getValue().equals(value)) {
-						skip = true;
-						break;
+				String s = row.getString("metrics");
+				for (String line : s.split("\n")) {
+					String[] paths;
+					Map<String, String> tags = new HashMap<>();
+					int i = line.indexOf('?');
+					if (i < 0) {
+						paths = line.split("/");
+					} else {
+						paths = line.substring(0, i).split("/");
+						String q = line.substring(i + 1);
+						for (String tag : q.split("&")) {
+							i = tag.indexOf('=');
+							if (i > 0) {
+								tags.put(Strings.decodeUrl(tag.substring(0, i)),
+										Strings.decodeUrl(tag.substring(i + 1)));
+							}
+						}
 					}
-				}
-				if (skip) {
-					return;
-				}
-				// Group Tags
-				GroupKey key = new GroupKey(groupBy.apply(tags), index);
-				MetricValue newValue = new MetricValue(row.getLong("_count"),
-						((Number) row.get("_sum")).doubleValue(),
-						((Number) row.get("_max")).doubleValue(),
-						((Number) row.get("_min")).doubleValue(),
-						((Number) row.get("_sqr")).doubleValue());
-				MetricValue value = result.get(key);
-				if (value == null) {
-					result.put(key, newValue);
-				} else {
-					value.add(newValue);
+					// Query Tags
+					boolean skip = false;
+					for (Map.Entry<String, String> entry : query.entrySet()) {
+						String value = tags.get(entry.getKey());
+						if (!entry.getValue().equals(value)) {
+							skip = true;
+							break;
+						}
+					}
+					if (skip || paths.length <= 4) {
+						continue;
+					}
+					// Group Tags
+					GroupKey key = new GroupKey(groupBy.apply(tags), index);
+					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+					MetricValue value = result.get(key);
+					if (value == null) {
+						result.put(key, newValue);
+					} else {
+						value.add(newValue);
+					}
 				}
 			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
 		} catch (SQLException e) {
@@ -321,7 +325,8 @@ public class DashboardApi extends HttpServlet {
 		});
 		if (maxTagValues > 0 && data.size() > maxTagValues) {
 			outputJson(req, resp, CollectionsEx.toMap(CollectionsEx.max(data.entrySet(),
-					Comparator.comparingDouble(entry -> DoubleStream.of((double[]) entry.getValue()).sum()),
+					Comparator.comparingDouble(entry ->
+					DoubleStream.of((double[]) entry.getValue()).sum()),
 					maxTagValues)));
 		} else {
 			outputJson(req, resp, data);
