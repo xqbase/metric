@@ -136,6 +136,26 @@ public class Collector {
 	private static boolean verbose;
 	private static ConnectionPool.Entry h2PoolEntry;
 
+	private static boolean insert(String sql, Object... in) throws SQLException {
+		return insert(null, sql, in);
+	}
+
+	private static boolean insert(long[] insertId,
+			String sql, Object... in) throws SQLException {
+		try {
+			if (DB.updateEx(insertId, sql, in) <= 0) {
+				return false;
+			}
+		} catch (SQLException e) {
+			if (e.getErrorCode() == 19 &&
+					e.getClass().getSimpleName().equals("SQLiteException")) {
+				return false;
+			}
+			throw e;
+		}
+		return true;
+	}
+
 	private static List<MetricName> getNames() throws SQLException {
 		List<MetricName> names = new ArrayList<>();
 		DB.query(row -> {
@@ -154,7 +174,7 @@ public class Collector {
 		int lastSeq;
 		Row row = DB.query(QUERY_SEQ, time);
 		if (row == null) {
-			if (DB.update(INSERT_SEQ, time) > 0) {
+			if (insert(INSERT_SEQ, Integer.valueOf(time))) {
 				Metric.put("metric.seq_increment", 0, "server_id", "" + serverId);
 				return 0;
 			}
@@ -183,17 +203,23 @@ public class Collector {
 		Row idRow = DB.queryEx(QUERY_ID, name);
 		if (idRow == null) {
 			long[] id_ = new long[1];
-			if (DB.updateEx(id_, CREATE_ID, name) <= 0) {
-				Log.w("Unable to create name " + name);
-				return;
+			if (insert(id_, CREATE_ID, name)) {
+				id = (int) id_[0];
+			} else {
+				Log.i("Simultaneously inserted name " + name);
+				idRow = DB.queryEx(QUERY_ID, name);
+				if (idRow == null) {
+					Log.w("Unable to create name " + name);
+					return;
+				}
+				id = idRow.getInt("id");
 			}
-			id = (int) id_[0];
 		} else {
 			id = idRow.getInt("id");
 		}
 		int seq = nextSeq(time);
-		if (DB.updateEx(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
-				Integer.valueOf(seq), sb.toString()) <= 0) {
+		if (!insert(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
+				Integer.valueOf(seq), sb.toString())) {
 			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
 		}
 		DB.update(INCREMENT_MINUTE, sb.length(), id);
@@ -440,8 +466,8 @@ public class Collector {
 					accMetricMap.forEach(action);
 				}
 				// 3'. Aggregate to "_quarter.*"
-				if (DB.updateEx(INSERT_QUARTER, Integer.valueOf(name.id),
-						Integer.valueOf(i), sb.toString()) <= 0) {
+				if (!insert(INSERT_QUARTER, Integer.valueOf(name.id),
+						Integer.valueOf(i), sb.toString())) {
 					Log.w("Duplicate key " + i + " in " + name.name);
 				}
 				DB.update(INCREMENT_QUARTER, sb.length(), name.id);
@@ -451,8 +477,10 @@ public class Collector {
 							"name", name.name, "key", tagKey);
 				});
 				// {"_quarter": i}, but not {"_quarter": quarter} !
-				DB.updateEx(AGGREGATE_TO, Integer.valueOf(name.id),
-						Integer.valueOf(i), new JSONObject(limit(tagMap)).toString());
+				if (!insert(AGGREGATE_TO, Integer.valueOf(name.id),
+						Integer.valueOf(i), new JSONObject(limit(tagMap)).toString())) {
+					Log.w("Duplicate key " + i + " in tags_quarter " + name.name);
+				}
 			}
 			// Aggregate "tags_quarter.tags" to "name.tags";
 			Map<String, Map<String, MetricValue>> tagMap = new HashMap<>();
@@ -571,7 +599,7 @@ public class Collector {
 							if (!sql.isEmpty()) {
 								if (derby) {
 									sql = sql.replace(" AUTO_INCREMENT,",
-											" GENERATED ALWAYS AS IDENTITY").
+											" GENERATED ALWAYS AS IDENTITY,").
 											replace(" LONGTEXT ", " CLOB ");
 								} else if (sqlite) {
 									sql = sql.replace(" AUTO_INCREMENT,",
