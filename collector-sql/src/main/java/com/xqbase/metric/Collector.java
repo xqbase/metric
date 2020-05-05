@@ -576,7 +576,8 @@ public class Collector {
 				new File(dataDir).mkdir();
 				String dataFile = dataDir + "/metric.db";
 				createTable = !new File(dataFile).exists();
-				url = url.substring(0, url.length() - 6) + "file:" + dataFile;
+				url = url.substring(0, url.length() - 6) + "file:" +
+						dataFile + "?busy_timeout=30000";
 				sqlite = true;
 			}
 
