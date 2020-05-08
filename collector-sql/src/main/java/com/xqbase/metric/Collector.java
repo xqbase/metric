@@ -272,26 +272,6 @@ public class Collector {
 	private static Method getFillRate, getChunksFillRate;
 	private static Method getCacheSizeUsed, getCacheHitRatio;
 
-	static {
-		try {
-			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
-			getSession = jdbcConnection.getMethod("getSession");
-			getDatabase = Class.forName("org.h2.engine.Session").
-					getMethod("getDatabase");
-			getStore = Class.forName("org.h2.engine.Database").
-					getMethod("getStore");
-			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
-					getMethod("getMvStore");
-			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
-			getFillRate = mvStore.getMethod("getFillRate");
-			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
-			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
-			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
-		} catch (ReflectiveOperationException e) {
-			Log.w(e.getMessage());
-		}
-	}
-
 	private static void minutely(int minute) throws SQLException {
 		// Insert aggregation-during-collection metrics
 		Map<String, StringBuilder> metricMap = new HashMap<>();
@@ -515,6 +495,25 @@ public class Collector {
 		System.setProperty("java.util.logging.SimpleFormatter.format",
 				"%1$tY-%1$tm-%1$td %1$tk:%1$tM:%1$tS.%1$tL %2$s%n%4$s: %5$s%6$s%n");
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+
+		try {
+			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
+			getSession = jdbcConnection.getMethod("getSession");
+			getDatabase = Class.forName("org.h2.engine.Session").
+					getMethod("getDatabase");
+			getStore = Class.forName("org.h2.engine.Database").
+					getMethod("getStore");
+			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+					getMethod("getMvStore");
+			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
+			getFillRate = mvStore.getMethod("getFillRate");
+			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
+			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
+			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
+		} catch (ReflectiveOperationException e) {
+			Log.w(e.getMessage());
+		}
+
 		ExecutorService executor = Executors.newCachedThreadPool();
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
