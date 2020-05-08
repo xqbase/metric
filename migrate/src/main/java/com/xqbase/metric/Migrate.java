@@ -16,6 +16,11 @@ public class Migrate {
 			System.out.println("Migrate Usage: java -jar metric-migrate.jar <src.jdbc.url> <dst.jdbc.url>");
 			return;
 		}
+		try {
+			Class.forName("com.mysql.jdbc.Driver");
+		} catch (ClassNotFoundException e) {
+			System.err.println(e.getMessage());
+		}
 		try (
 			Connection src = DriverManager.getConnection(args[0]);
 			Statement stSrc = src.createStatement();
@@ -25,7 +30,7 @@ public class Migrate {
 			try (ResultSet rs = src.getMetaData().
 					getTables(src.getCatalog(), src.getSchema(), null, null)) {
 				while (rs.next()) {
-					tables.add(rs.getString("TABLE_NAME"));
+					tables.add(rs.getString("TABLE_NAME").toLowerCase());
 				}
 			}
 			for (String table : tables) {
