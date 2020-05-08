@@ -3,11 +3,11 @@
 		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
-	<artifactId>xqbase-metric-test</artifactId>
+	<artifactId>xqbase-metric-migrate</artifactId>
 	<version>0.2.13</version>
 	<packaging>jar</packaging>
-	<name>XQBase Metric Test</name>
-	<description>a lightweight metric framework for aggregating, collecting and showing metric data - test part</description>
+	<name>XQBase Metric Migrate</name>
+	<description>a lightweight metric framework for aggregating, collecting and showing metric data - migrate part</description>
 	<url>https://github.com/xqbase/metric</url>
 
 	<licenses>
@@ -49,7 +49,7 @@
 					</descriptorRefs>
 					<archive>
 						<manifest>
-							<mainClass>com.xqbase.metric.Test</mainClass>
+							<mainClass>com.xqbase.metric.Migrate</mainClass>
 						</manifest>
 					</archive>
 				</configuration>
@@ -63,14 +63,35 @@
 				</executions>
 			</plugin>
 		</plugins>
-		<finalName>metric-test</finalName>
+		<finalName>metric-migrate</finalName>
 	</build>
 
 	<dependencies>
 		<dependency>
-			<groupId>com.xqbase</groupId>
-			<artifactId>xqbase-metric-client</artifactId>
-			<version>0.2.13</version>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<version>1.4.200</version>
+			<scope>runtime</scope>
+		</dependency>
+		<!--
+		<dependency>
+			<groupId>org.apache.derby</groupId>
+			<artifactId>derby</artifactId>
+			<version>10.14.2.0</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.xerial</groupId>
+			<artifactId>sqlite-jdbc</artifactId>
+			<version>3.30.1</version>
+			<scope>runtime</scope>
+		</dependency>
+		-->
+		<dependency>
+			<groupId>mysql</groupId>
+			<artifactId>mysql-connector-java</artifactId>
+			<version>8.0.19</version>
+			<scope>runtime</scope>
 		</dependency>
 	</dependencies>
 </project>

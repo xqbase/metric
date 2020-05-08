@@ -29,4 +29,5 @@ hs_err_pid*
 /dashboard-mongo/target
 /dashboard-mvstore/target
 /dashboard-sql/target
+/migrate/target
 /test/target
