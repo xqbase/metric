@@ -42,8 +42,9 @@ public class Migrate {
 				}
 			}
 			for (String table : tables) {
-				log("Begin Migrating Table " + table + " ...");
+				log("Begin migrating table " + table + " ...");
 				try (ResultSet rs = stSrc.executeQuery("SELECT * FROM " + table)) {
+					int rows = 0;
 					int columns = rs.getMetaData().getColumnCount();
 					try (PreparedStatement ps = dst.prepareStatement("INSERT INTO "  + table +
 							" VALUES (" + String.join(", ", Collections.nCopies(columns, "?")) + ")")) {
@@ -51,12 +52,12 @@ public class Migrate {
 							for (int i = 1; i <= columns; i ++) {
 								ps.setObject(i, rs.getObject(i));
 							}
-							ps.executeUpdate();
-							log("Inserted one row");
+							rows += ps.executeUpdate();
+							log(rows + " rows inserted into table " + table);
 						}
 					}
 				}
-				log("End Migrating table " + table);
+				log("End migrating table " + table);
 			}
 		}
 	}
