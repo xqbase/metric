@@ -495,6 +495,8 @@ public class Collector {
 		System.setProperty("java.util.logging.SimpleFormatter.format",
 				"%1$tY-%1$tm-%1$td %1$tk:%1$tM:%1$tS.%1$tL %2$s%n%4$s: %5$s%6$s%n");
 		Logger logger = Log.getAndSet(Conf.openLogger("Collector.", 16777216, 10));
+		ExecutorService executor = Executors.newCachedThreadPool();
+		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
 		try {
 			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
@@ -511,11 +513,8 @@ public class Collector {
 			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
 			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
 		} catch (ReflectiveOperationException e) {
-			Log.w(e.getMessage());
+			Log.w(e.getClass().getSimpleName() + ": " + e.getMessage());
 		}
-
-		ExecutorService executor = Executors.newCachedThreadPool();
-		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
