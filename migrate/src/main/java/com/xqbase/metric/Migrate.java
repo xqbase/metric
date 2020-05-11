@@ -13,6 +13,8 @@ import java.util.Date;
 import java.util.List;
 
 public class Migrate {
+	private static final int BATCH = 100;
+
 	private static SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss");
 
 	private static void log(String msg) {
@@ -25,9 +27,14 @@ public class Migrate {
 			return;
 		}
 		try {
+			Class.forName("org.postgresql.Driver");
+		} catch (ClassNotFoundException e) {
+			System.err.println(e.getClass().getSimpleName() + ": " + e.getMessage());
+		}
+		try {
 			Class.forName("com.mysql.jdbc.Driver");
 		} catch (ClassNotFoundException e) {
-			System.err.println(e.getMessage());
+			System.err.println(e.getClass().getSimpleName() + ": " + e.getMessage());
 		}
 		try (
 			Connection src = DriverManager.getConnection(args[0]);
@@ -44,15 +51,27 @@ public class Migrate {
 			for (String table : tables) {
 				log("Begin migrating table " + table + " ...");
 				try (ResultSet rs = stSrc.executeQuery("SELECT * FROM " + table)) {
-					int rows = 0;
 					int columns = rs.getMetaData().getColumnCount();
 					try (PreparedStatement ps = dst.prepareStatement("INSERT INTO "  + table +
 							" VALUES (" + String.join(", ", Collections.nCopies(columns, "?")) + ")")) {
+						int rows = 0;
+						int batch = 0;
 						while (rs.next()) {
 							for (int i = 1; i <= columns; i ++) {
 								ps.setObject(i, rs.getObject(i));
 							}
-							rows += ps.executeUpdate();
+							ps.addBatch();
+							batch ++;
+							if (batch == BATCH) {
+								ps.executeBatch();
+								rows += batch;
+								log(rows + " rows inserted into table " + table);
+								batch = 0;
+							}
+						}
+						if (batch > 0) {
+							ps.executeBatch();
+							rows += batch;
 							log(rows + " rows inserted into table " + table);
 						}
 					}
