@@ -140,7 +140,7 @@ public class DashboardApi extends HttpServlet {
 		try {
 			out = resp.getWriter();
 		} catch (IOException e) {
-			Log.d(e.getMessage());
+			Log.d("" + e);
 			return;
 		}
 		String json = (data instanceof String ?

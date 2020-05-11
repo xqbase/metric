@@ -336,7 +336,7 @@ public class Collector {
 			Metric.put("metric.mvstore.cache_hit_ratio",
 					((Number) getCacheHitRatio.invoke(mv)).doubleValue());
 		} catch (ReflectiveOperationException e) {
-			Log.w(e.getMessage());
+			Log.w("" + e);
 		}
 	}
 
@@ -513,7 +513,7 @@ public class Collector {
 			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
 			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
 		} catch (ReflectiveOperationException e) {
-			Log.w(e.getClass().getSimpleName() + ": " + e.getMessage());
+			Log.w("" + e);
 		}
 
 		Properties p = Conf.load("Collector");
@@ -751,7 +751,7 @@ public class Collector {
 				}
 			}
 		} catch (IOException | ReflectiveOperationException e) {
-			Log.w(e.getMessage());
+			Log.w("" + e);
 		} catch (Error | RuntimeException e) {
 			Log.e(e);
 		}

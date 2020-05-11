@@ -247,7 +247,7 @@ public class Dashboard {
 						lastModified = format.get().format(new Date(now));
 					} catch (IOException e) {
 						if (!(e instanceof FileNotFoundException)) {
-							Log.w(e.getMessage());
+							Log.w("" + e);
 						}
 						config = resources.get(path);
 					}
@@ -474,7 +474,7 @@ public class Dashboard {
 				resource.gzip = gzip.getBytes();
 				resources.put(path, resource);
 			} catch (IOException e) {
-				Log.w(e.getMessage());
+				Log.w("" + e);
 			}
 		}
 		Resource index = resources.get("/index.html");
@@ -497,7 +497,7 @@ public class Dashboard {
 			server.start();
 		} catch (IOException e) {
 			Log.w("Unable to start HttpServer (" +
-					host + ":" + port + "): " + e.getMessage());
+					host + ":" + port + "): " + e);
 			server = null;
 			return;
 		}

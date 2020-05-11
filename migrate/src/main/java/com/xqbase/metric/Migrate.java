@@ -29,12 +29,12 @@ public class Migrate {
 		try {
 			Class.forName("org.postgresql.Driver");
 		} catch (ClassNotFoundException e) {
-			System.err.println(e.getClass().getSimpleName() + ": " + e.getMessage());
+			System.err.println("" + e);
 		}
 		try {
 			Class.forName("com.mysql.jdbc.Driver");
 		} catch (ClassNotFoundException e) {
-			System.err.println(e.getClass().getSimpleName() + ": " + e.getMessage());
+			System.err.println("" + e);
 		}
 		try (
 			Connection src = DriverManager.getConnection(args[0]);
