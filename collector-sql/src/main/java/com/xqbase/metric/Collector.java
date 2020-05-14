@@ -151,6 +151,10 @@ public class Collector {
 					e.getClass().getSimpleName().equals("SQLiteException")) {
 				return false;
 			}
+			if ("23505".equals(e.getSQLState()) &&
+					e.getClass().getSimpleName().equals("PSQLException")) {
+				return false;
+			}
 			throw e;
 		}
 		return true;
