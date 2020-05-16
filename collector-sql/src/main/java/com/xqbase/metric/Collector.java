@@ -191,7 +191,7 @@ public class Collector {
 		while (DB.update(INCREMENT_SEQ, time, seq) <= 0) {
 			row = DB.query(QUERY_SEQ, time);
 			if (row == null) {
-				Log.w("Failed to query seq by time " + time + ", expected " + seq);
+				Log.w("Unable to query seq by time " + time + ", expected " + seq);
 				break;
 			}
 			seq = row.getInt("seq");
@@ -202,29 +202,28 @@ public class Collector {
 	}
 
 	private static void insert(String name, int time,
-			StringBuilder sb) throws SQLException {
+			int seq, StringBuilder sb) throws SQLException {
 		int id;
-		Row idRow = DB.queryEx(QUERY_ID, name);
-		if (idRow == null) {
+		Row row = DB.queryEx(QUERY_ID, name);
+		if (row == null) {
 			long[] id_ = new long[1];
 			if (insert(id_, CREATE_ID, name)) {
 				id = (int) id_[0];
 			} else {
 				Log.i("Simultaneously inserted name " + name);
-				idRow = DB.queryEx(QUERY_ID, name);
-				if (idRow == null) {
+				row = DB.queryEx(QUERY_ID, name);
+				if (row == null) {
 					Log.w("Unable to create name " + name);
 					return;
 				}
-				id = idRow.getInt("id");
+				id = row.getInt("id");
 			}
 		} else {
-			id = idRow.getInt("id");
+			id = row.getInt("id");
 		}
-		int seq = nextSeq(time);
 		if (!insert(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
 				Integer.valueOf(seq), sb.toString())) {
-			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
+			Log.w("Duplicate key " + id + "-" + time + "-" + seq);
 		}
 		DB.update(INCREMENT_MINUTE, sb.length(), id);
 	}
@@ -306,8 +305,9 @@ public class Collector {
 			}
 			sb.append('\n');
 		}
+		int seq = nextSeq(minute);
 		for (Map.Entry<String, StringBuilder> entry : metricMap.entrySet()) {
-			insert(entry.getKey(), minute, entry.getValue());
+			insert(entry.getKey(), minute, seq, entry.getValue());
 		}
 		// Calculate metric size by master collector
 		if (serverId != 0) {
@@ -489,6 +489,24 @@ public class Collector {
 			DB.updateEx(UPDATE_NAME, Long.valueOf(deletedMinute),
 					Long.valueOf(deletedQuarter), Integer.valueOf(quarter),
 					new JSONObject(limit(tagMap)).toString(), Integer.valueOf(name.id));
+		}
+	}
+
+	private static void insert(Map<NameTime, StringBuilder> metricMap)
+			throws SQLException {
+		Map<Integer, Map<String, StringBuilder>> timeMap = new HashMap<>();
+		metricMap.forEach((key, sb) -> {
+			timeMap.computeIfAbsent(Integer.valueOf(key.time),
+					k -> new HashMap<>()).put(key.name, sb);
+		});
+		for (Map.Entry<Integer, Map<String, StringBuilder>> timeEntry :
+				timeMap.entrySet()) {
+			int time = timeEntry.getKey().intValue();
+			int seq = nextSeq(time);
+			for (Map.Entry<String, StringBuilder> nameEntry :
+					timeEntry.getValue().entrySet()) {
+				insert(nameEntry.getKey(), time, seq, nameEntry.getValue());
+			}
 		}
 	}
 
@@ -744,13 +762,11 @@ public class Collector {
 				// Insert aggregation-before-collection metrics
 				if (!metricMap.isEmpty()) {
 					executor.execute(Runnables.wrap(() -> {
-						metricMap.forEach((key, sb) -> {
-							try {
-								insert(key.name, key.time, sb);
-							} catch (SQLException e) {
-								Log.e(e);
-							}
-						});
+						try {
+							insert(metricMap);
+						} catch (SQLException e) {
+							Log.e(e);
+						}
 					}));
 				}
 			}
