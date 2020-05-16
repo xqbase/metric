@@ -40,6 +40,7 @@ public class Migrate {
 			Connection src = DriverManager.getConnection(args[0]);
 			Statement stSrc = src.createStatement();
 			Connection dst = DriverManager.getConnection(args[1]);
+			Statement stDst = dst.createStatement();
 		) {
 			List<String> tables = new ArrayList<>();
 			try (ResultSet rs = src.getMetaData().
@@ -50,6 +51,7 @@ public class Migrate {
 			}
 			for (String table : tables) {
 				log("Begin migrating table " + table + " ...");
+				stDst.execute("TRUNCATE TABLE " + table);
 				try (ResultSet rs = stSrc.executeQuery("SELECT * FROM " + table)) {
 					int columns = rs.getMetaData().getColumnCount();
 					try (PreparedStatement ps = dst.prepareStatement("INSERT INTO "  + table +
