@@ -14,6 +14,13 @@ import java.util.List;
 
 public class Migrate {
 	private static final int BATCH = 100;
+	private static final String[] DRIVERS = {
+		"org.h2.Driver",
+		"org.apache.derby.jdbc.EmbeddedDriver",
+		"org.sqlite.JDBC",
+		"org.postgresql.Driver",
+		"com.mysql.jdbc.Driver",
+	};
 
 	private static SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss");
 
@@ -26,15 +33,12 @@ public class Migrate {
 			System.out.println("Migrate Usage: java -jar metric-migrate.jar <src.jdbc.url> <dst.jdbc.url>");
 			return;
 		}
-		try {
-			Class.forName("org.postgresql.Driver");
-		} catch (ClassNotFoundException e) {
-			System.err.println("" + e);
-		}
-		try {
-			Class.forName("com.mysql.jdbc.Driver");
-		} catch (ClassNotFoundException e) {
-			System.err.println("" + e);
+		for (String driver : DRIVERS) {
+			try {
+				Class.forName(driver);
+			} catch (ClassNotFoundException e) {
+				System.err.println("" + e);
+			}
 		}
 		try (
 			Connection src = DriverManager.getConnection(args[0]);
