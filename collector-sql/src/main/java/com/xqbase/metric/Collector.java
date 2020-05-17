@@ -223,7 +223,7 @@ public class Collector {
 		}
 		if (!insert(INSERT_MINUTE, Integer.valueOf(id), Integer.valueOf(time),
 				Integer.valueOf(seq), sb.toString())) {
-			Log.w("Duplicate key " + id + "-" + time + "-" + seq);
+			Log.w("Duplicate key " + time + "-" + seq + " in " + name);
 		}
 		DB.update(INCREMENT_MINUTE, sb.length(), id);
 	}
