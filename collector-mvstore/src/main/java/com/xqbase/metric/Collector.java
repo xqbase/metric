@@ -459,7 +459,7 @@ public class Collector {
 			String dataDir = Conf.getAbsolutePath("data");
 			new File(dataDir).mkdirs();
 			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
-					compress().autoCompactFillRate(80).open();
+					compress().autoCompactFillRate(-80).open();
 			mv.setAutoCommitDelay(10_000);
 			sizeTable = mv.openMap("_meta.size");
 			aggregatedTable = mv.openMap("_meta.aggregated");

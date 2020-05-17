@@ -617,7 +617,7 @@ public class Collector {
 						"/metric;mode=postgresql;database_to_lower=true;" +
 						"compress=true;cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
-						"max_compact_time=0;auto_compact_fill_rate=80";
+						"max_compact_time=0;auto_compact_fill_rate=-80";
 			} else if (url.endsWith(":derby:metric")) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
