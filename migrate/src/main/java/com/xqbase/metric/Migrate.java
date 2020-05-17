@@ -46,6 +46,7 @@ public class Migrate {
 			Connection dst = DriverManager.getConnection(args[1]);
 			Statement stDst = dst.createStatement();
 		) {
+			src.setReadOnly(true);
 			List<String> tables = new ArrayList<>();
 			try (ResultSet rs = src.getMetaData().
 					getTables(src.getCatalog(), src.getSchema(), null, null)) {
@@ -55,7 +56,11 @@ public class Migrate {
 			}
 			for (String table : tables) {
 				log("Begin migrating table " + table + " ...");
-				stDst.execute("TRUNCATE TABLE " + table);
+				if (args[1].startsWith("jdbc:sqlite:")) {
+					stDst.execute("DELETE FROM " + table);
+				} else {
+					stDst.execute("TRUNCATE TABLE " + table);
+				}
 				try (ResultSet rs = stSrc.executeQuery("SELECT * FROM " + table)) {
 					int columns = rs.getMetaData().getColumnCount();
 					try (PreparedStatement ps = dst.prepareStatement("INSERT INTO "  + table +
