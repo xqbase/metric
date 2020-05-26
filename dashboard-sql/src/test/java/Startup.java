@@ -32,7 +32,7 @@ public class Startup {
 			});
 			WebResourceRoot resources = new StandardRoot(ctx);
 			resources.addPreResources(new DirResourceSet(resources,
-					"/WEB-INF/classes", Conf.getAbsolutePath("classes"), "/"));
+					"/WEB-INF/classes", Conf.getAbsolutePath("test-classes"), "/"));
 			ctx.setResources(resources);
 
 			Server server = tomcat.getServer();
