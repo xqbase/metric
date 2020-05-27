@@ -510,6 +510,37 @@ public class Collector {
 		}
 	}
 
+	private static Object startServer(int port, String type, String h2DataDir) {
+		Object server = null;
+		// server = Server.createTcpServer(...);
+		// server.start();
+		String _type = "-" + type.toLowerCase();
+		try {
+			Class<?> serverCls = Class.forName("org.h2.tools.Server");
+			server = serverCls.getMethod("create" + type + "Server", String[].class).
+					invoke(null, (Object) new String[] {
+				_type + "AllowOthers", _type + "Port", "" + port, "-baseDir", h2DataDir
+			});
+			serverCls.getMethod("start").invoke(server);
+			Log.i("" + serverCls.getMethod("getStatus").invoke(server));
+		} catch (ReflectiveOperationException e) {
+			Log.e(e);
+		}
+		return server;
+	}
+
+	private static void stopServer(Object server) {
+		if (server == null) {
+			return;
+		}
+		try {
+			Class.forName("org.h2.tools.Server").
+					getMethod("stop").invoke(server);
+		} catch (ReflectiveOperationException e) {
+			Log.e(e);
+		}
+	}
+
 	public static void main(String[] args) {
 		if (!service.startup(args)) {
 			return;
@@ -540,6 +571,7 @@ public class Collector {
 
 		Properties p = Conf.load("Collector");
 		int port = Numbers.parseInt(p.getProperty("port"), 5514);
+		int h2Port = Numbers.parseInt(p.getProperty("h2_port"), 5513);
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
@@ -563,6 +595,7 @@ public class Collector {
 		p = Conf.load("jdbc");
 		Runnable minutely = null;
 		String h2DataDir = null;
+		Object h2Server = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
@@ -608,6 +641,9 @@ public class Collector {
 					// An embedded connection must be created first, see:
 					// https://github.com/h2database/h2database/issues/2294
 					h2PoolEntry = DB.borrow();
+					if (h2Port > 0) {
+						h2Server = startServer(h2Port, "Tcp", h2DataDir);
+					}
 				}
 				if (createTable) {
 					ByteArrayQueue baq = new ByteArrayQueue();
@@ -784,6 +820,7 @@ public class Collector {
 		Dashboard.shutdown();
 		if (DB != null) {
 			if (h2DataDir != null) {
+				stopServer(h2Server);
 				if (h2PoolEntry != null) {
 					h2PoolEntry.close();
 				}
