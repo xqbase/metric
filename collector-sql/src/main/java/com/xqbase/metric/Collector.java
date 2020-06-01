@@ -28,8 +28,10 @@ import java.util.function.BiConsumer;
 import java.util.logging.Logger;
 import java.util.zip.InflaterInputStream;
 
+import org.h2.tools.Server;
 import org.json.JSONObject;
 
+import com.xqbase.h2pg.PgServerCompat;
 import com.xqbase.metric.client.ManagementMonitor;
 import com.xqbase.metric.common.Metric;
 import com.xqbase.metric.common.MetricEntry;
@@ -597,7 +599,7 @@ public class Collector {
 		Runnable minutely = null;
 		String h2DataDir = null;
 		Object h2Server = null;
-		Object pgServer = null;
+		Server pgServer = null;
 		try (
 			DatagramSocket socket = new DatagramSocket(new
 					InetSocketAddress(host, port));
@@ -647,7 +649,10 @@ public class Collector {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);
 					}
 					if (pgPort > 0) {
-						pgServer = startServer(pgPort, "Pg", h2DataDir);
+						pgServer = new Server(new PgServerCompat(),
+								"-pgAllowOthers", "-pgPort", "" + pgPort, "-baseDir", h2DataDir);
+						pgServer.start();
+						// pgServer = startServer(pgPort, "Pg", h2DataDir);
 					}
 				}
 				if (createTable) {
