@@ -90,9 +90,9 @@
 
 		<dependency>
 			<groupId>com.xqbase</groupId>
-			<artifactId>h2pg-compat-h2-1.4.201</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
-			<!-- <scope>runtime</scope> -->
+			<artifactId>h2pg-compat</artifactId>
+			<version>1.4.201.1-SNAPSHOT</version>
+			<scope>runtime</scope>
 		</dependency>
 		<!--
 		<dependency>

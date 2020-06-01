@@ -8,13 +8,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.h2.server.pg.PgServer;
+import org.h2.server.pg.PgServerEx;
+import org.h2.server.pg.PgServerThread;
 import org.h2.util.NetUtils2;
 
-public class PgServerCompat extends PgServer {
+public class PgServerCompat extends PgServerEx {
 	private static Field stop, serverSocket, running, pid, isDaemon;
 	private static Method allow;
-
-	static Method trace, traceError;
 
 	private static Field getField(String name) throws ReflectiveOperationException {
 		Field field = PgServer.class.getDeclaredField(name);
@@ -36,7 +36,6 @@ public class PgServerCompat extends PgServer {
 			running = getField("running");
 			pid = getField("pid");
 			isDaemon = getField("isDaemon");
-			trace = getMethod("trace", String.class);
 			allow = getMethod("allow", Socket.class);
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
@@ -51,12 +50,12 @@ public class PgServerCompat extends PgServer {
 			while (!stop.getBoolean(this)) {
 				Socket s = ((ServerSocket) serverSocket.get(this)).accept();
 				if (!((Boolean) allow.invoke(this, s)).booleanValue()) {
-					trace.invoke(this, "Connection not allowed");
+					trace("Connection not allowed");
 					s.close();
 				} else {
 					NetUtils2.setTcpQuickack(s, true);
 					PgServerThreadCompat c = new PgServerThreadCompat(s, this);
-					((Set<PgServerThreadCompat>) running.get(this)).add(c);
+					((Set<PgServerThread>) running.get(this)).add(c);
 					int id = ((AtomicInteger) pid.get(this)).incrementAndGet();
 					c.setProcessId(id);
 					Thread thread = new Thread(c, threadName + " thread-" + id);

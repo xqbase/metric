@@ -3,19 +3,17 @@ package com.xqbase.h2pg;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.InputStream;
-import java.lang.reflect.Constructor;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Socket;
 
-import org.h2.server.pg.PgServer;
 import org.h2.server.pg.PgServerThread;
+import org.h2.server.pg.PgServerThreadEx;
 
-public class PgServerThreadCompat implements Runnable {
+public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Field out, dataInRaw, stop;
-	private static Constructor<?> constructor;
-	private static Method setProcessId, setThread;
+	private static Method process;
 
 	private static Field getField(String name) throws ReflectiveOperationException {
 		Field field = PgServerThread.class.getDeclaredField(name);
@@ -32,39 +30,34 @@ public class PgServerThreadCompat implements Runnable {
 
 	static {
 		try {
-			constructor = PgServerThread.class.getConstructor(Socket.class, PgServer.class);
-			constructor.setAccessible(true);
-			setProcessId = getMethod("setProcessId", int.class);
-			setThread = getMethod("setThread", Thread.class);
+			out = getField("out");
+			dataInRaw = getField("dataInRaw");
+			stop = getField("stop");
+			process = getMethod("process");
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
 	}
 
 	private Socket socket;
-	private PgServer server;
-	private PgServerThread thread;
+	private PgServerCompat server;
 
-	public PgServerThreadCompat(Socket socket, PgServer server) {
+	public PgServerThreadCompat(Socket socket, PgServerCompat server) {
+		super(socket, server);
 		this.socket = socket;
 		this.server = server;
-		try {
-			thread = (PgServerThread) constructor.newInstance(socket, server);
-		} catch (ReflectiveOperationException e) {
-			throw new RuntimeException(e);
-		}
 	}
 
 	@Override
 	public void run() {
 		try {
-			PgServerCompat.trace.invoke(server, "Connect");
+			server.trace("Connect");
 			InputStream ins = socket.getInputStream();
-			out = socket.getOutputStream();
-			dataInRaw = new DataInputStream(ins);
-			while (!stop) {
-				process();
-				out.flush();
+			out.set(this, socket.getOutputStream());
+			dataInRaw.set(this, new DataInputStream(ins));
+			while (!stop.getBoolean(this)) {
+				process.invoke(this);
+				((OutputStream) out.get(this)).flush();
 			}
 		} catch (EOFException e) {
 			// more or less normal disconnect
@@ -73,22 +66,6 @@ public class PgServerThreadCompat implements Runnable {
 		} finally {
 			server.trace("Disconnect");
 			close();
-		}
-	}
-
-	void setProcessId(int id) {
-		try {
-			setProcessId.invoke(thread, Integer.valueOf(id));
-		} catch (ReflectiveOperationException e) {
-			throw new RuntimeException(e);
-		}
-	}
-
-	void setThread(Thread thread) {
-		try {
-			setThread.invoke(this.thread, thread);
-		} catch (ReflectiveOperationException e) {
-			throw new RuntimeException(e);
 		}
 	}
 }
