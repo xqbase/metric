@@ -13,7 +13,7 @@ import org.h2.server.pg.PgServerThread;
 import org.h2.util.NetUtils2;
 
 public class PgServerCompat extends PgServerEx {
-	private static Field stop, serverSocket, running, pid, isDaemon;
+	private static Field stop, serverSocket, running, pid;
 	private static Method allow;
 
 	private static Field getField(String name) throws ReflectiveOperationException {
@@ -35,7 +35,6 @@ public class PgServerCompat extends PgServerEx {
 			serverSocket = getField("serverSocket");
 			running = getField("running");
 			pid = getField("pid");
-			isDaemon = getField("isDaemon");
 			allow = getMethod("allow", Socket.class);
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
@@ -59,7 +58,7 @@ public class PgServerCompat extends PgServerEx {
 					int id = ((AtomicInteger) pid.get(this)).incrementAndGet();
 					c.setProcessId(id);
 					Thread thread = new Thread(c, threadName + " thread-" + id);
-					thread.setDaemon(isDaemon.getBoolean(this));
+					thread.setDaemon(isDaemon());
 					c.setThread(thread);
 					thread.start();
 				}
