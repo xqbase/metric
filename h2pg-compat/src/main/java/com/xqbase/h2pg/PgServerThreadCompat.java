@@ -5,6 +5,7 @@ import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -14,6 +15,7 @@ import java.nio.charset.Charset;
 import org.h2.server.pg.PgServerThread;
 import org.h2.server.pg.PgServerThreadEx;
 import org.h2.util.Bits;
+import org.h2.util.ScriptReader;
 import org.h2.util.Utils;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
@@ -46,20 +48,28 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
-	private static final String HEIDISQL_ANY =
-			" \"a\".\"attnum\"=ANY(\"c\".\"conkey\") ";
-	private static final String HEIDISQL_ARRAY_CONTAINS =
-			" ARRAY_CONTAINS(\"c\".\"conkey\", \"a\".\"attnum\") ";
-	private static final int HEIDISQL_ANY_LEN = HEIDISQL_ANY.length();
+	private static final String[] REPLACE_FROM = {
+		" \"a\".\"attnum\"=ANY(\"c\".\"conkey\") ",
+		" n.nspname = ANY(current_schemas(true)), ",
+	};
+	private static final String[] REPLACE_TO = {
+		" ARRAY_CONTAINS(\"c\".\"conkey\", \"a\".\"attnum\") ",
+		" true, ",
+	};
 
 	private static String getSQL(String s) {
-		System.out.println(s);
-		int index = s.indexOf(HEIDISQL_ANY);
-		if (index < 0) {
-			return null;
+		String sql = s;
+		boolean replaced = false;
+		for (int i = 0; i < REPLACE_FROM.length; i ++) {
+			int index = s.indexOf(REPLACE_FROM[i]);
+			if (index < 0) {
+				continue;
+			}
+			sql = sql.substring(0, index) + REPLACE_TO[i] +
+					s.substring(index + REPLACE_FROM[i].length());
+			replaced = true;
 		}
-		return s.substring(0, index) + HEIDISQL_ARRAY_CONTAINS +
-				s.substring(index + HEIDISQL_ANY_LEN);
+		return replaced ? sql : null;
 	}
 
 	private static int findZero(byte[] b, int left, int right) throws EOFException {
@@ -134,7 +144,32 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 			break;
 		case 'Q':
-			// TODO
+			z1 = findZero(data, 5, data.length);
+			charset = (Charset) getEncoding.invoke(this);
+			StringBuilder sb = new StringBuilder();
+			boolean replaced = false;
+			try (ScriptReader reader = new ScriptReader(new
+					InputStreamReader(new ByteArrayInputStream(data, 5, z1 - 5), charset))) {
+				String line;
+				while ((line = reader.readStatement()) != null) {
+					sql = getSQL(line);
+					if (sql == null) {
+						sb.append(line).append(';');
+					} else {
+						sb.append(sql).append(';');
+						replaced = true;
+					}
+				}
+			}
+			if (replaced) {
+				byte[] sqlb = sb.substring(0, sb.length() - 1).getBytes(charset);
+				byte[] data_ = new byte[data.length - z1 + 5 + sqlb.length];
+				data_[0] = 'Q';
+				Bits.writeInt(data_, 1, data_.length - 1);
+				System.arraycopy(sqlb, 0, data_, 5, sqlb.length);
+				System.arraycopy(data, z1, data_, 5 + sqlb.length, data.length - z1);
+				data = data_;
+			}
 			break;
 		default:
 		}
