@@ -656,6 +656,7 @@ public class Collector {
 							"-pgAllowOthers", "-pgPort", "" + pgPort, "-baseDir", h2DataDir,
 						});
 						serverCls.getMethod("start").invoke(pgServer);
+						Log.i("" + serverCls.getMethod("getStatus").invoke(pgServer));
 					}
 				}
 				if (createTable) {
