@@ -11,12 +11,28 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.util.List;
 
 import org.h2.server.pg.PgServerThread;
 import org.h2.server.pg.PgServerThreadEx;
 import org.h2.util.Bits;
 import org.h2.util.ScriptReader;
 import org.h2.util.Utils;
+
+import net.sf.jsqlparser.expression.BinaryExpression;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.parser.CCJSqlParser;
+import net.sf.jsqlparser.parser.ParseException;
+import net.sf.jsqlparser.parser.StringProvider;
+import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SelectBody;
+import net.sf.jsqlparser.statement.select.SubSelect;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Field initDone, out, dataInRaw, stop;
@@ -48,28 +64,79 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
-	private static final String[] REPLACE_FROM = {
-		" \"a\".\"attnum\"=ANY(\"c\".\"conkey\") ",
-		" n.nspname = ANY(current_schemas(true)), ",
-	};
-	private static final String[] REPLACE_TO = {
-		" ARRAY_CONTAINS(\"c\".\"conkey\", \"a\".\"attnum\") ",
-		" true, ",
-	};
+	private static Expression replace(Expression exp) {
+		if (exp instanceof SubSelect) {
+			SelectBody sb = ((SubSelect) exp).getSelectBody();
+			return sb instanceof PlainSelect && replace((PlainSelect) sb) ? exp : null;
+		}
+		if (!(exp instanceof BinaryExpression)) {
+			return null;
+		}
+		BinaryExpression be = (BinaryExpression) exp;
+		Expression left = be.getLeftExpression();
+		Expression right = be.getRightExpression();
+		// "a"."attnum"=ANY("c"."conkey")
+		// TODO n.nspname = ANY(current_schemas(true))
+		if (be instanceof EqualsTo && right instanceof Function) {
+			Function func = (Function) right;
+			if (func.getName().toUpperCase().equals("ANY")) {
+				List<Expression> exps = func.getParameters().getExpressions();
+				if (exps.size() == 1 && exps.get(0) instanceof Column) {
+					Column col = (Column) exps.get(0);
+					if (col.getColumnName().toLowerCase().equals("\"conkey\"")) {
+						func.setName("ARRAY_CONTAINS");
+						func.setParameters(new ExpressionList(col, left));
+						replace(left);
+						return func;
+					}
+				}
+			}
+		}
+		Expression newExp = null;
+		Expression newLeft = replace(left);
+		if (newLeft != null) {
+			newExp = exp;
+			if (newLeft != left) {
+				be.setLeftExpression(newLeft);
+			}
+		}
+		Expression newRight = replace(right);
+		if (newRight != null) {
+			newExp = exp;
+			if (newRight != right) {
+				be.setRightExpression(newRight);
+			}
+		}
+		return newExp;
+	}
+
+	private static boolean replace(PlainSelect ps) {
+		Expression exp = ps.getWhere();
+		Expression newExp = replace(exp);
+		if (newExp == null) {
+			return false;
+		}
+		ps.setWhere(newExp);
+		return true;
+	}
 
 	private static String getSQL(String s) {
-		String sql = s;
-		boolean replaced = false;
-		for (int i = 0; i < REPLACE_FROM.length; i ++) {
-			int index = s.indexOf(REPLACE_FROM[i]);
-			if (index < 0) {
-				continue;
+		try {
+			CCJSqlParser parser = new CCJSqlParser(new StringProvider(s));
+			Statement st = parser.Statement();
+			if (st instanceof Select) {
+				Select sel = (Select) st;
+				SelectBody sb = sel.getSelectBody();
+				if (sb instanceof PlainSelect) {
+					if (replace((PlainSelect) sb)) {
+						return sb.toString();
+					}
+				}
 			}
-			sql = sql.substring(0, index) + REPLACE_TO[i] +
-					s.substring(index + REPLACE_FROM[i].length());
-			replaced = true;
+		} catch (ParseException e) {
+			// Ignored
 		}
-		return replaced ? sql : null;
+		return null;
 	}
 
 	private static int findZero(byte[] b, int left, int right) throws EOFException {
