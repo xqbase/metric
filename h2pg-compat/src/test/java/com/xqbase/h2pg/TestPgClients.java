@@ -249,6 +249,71 @@ public class TestPgClients {
 		}
 	}
 
+	@Test
+	public void testAdminer() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SHOW LC_COLLATE")) {
+			assertTrue(rs.next());
+			assertEquals("UNICODE", rs.getString(1));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT specific_name AS \"SPECIFIC_NAME\", " +
+				"routine_type AS \"ROUTINE_TYPE\", routine_name AS \"ROUTINE_NAME\", " +
+				"type_udt_name AS \"DTD_IDENTIFIER\" FROM information_schema.routines " + 
+				"WHERE routine_schema = current_schema() ORDER BY SPECIFIC_NAME")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.relname AS \"Name\", " +
+				"CASE c.relkind WHEN 'r' THEN 'table' WHEN 'm' THEN 'materialized view' ELSE 'view' END AS \"Engine\", " +
+				"pg_relation_size(c.oid) AS \"Data_length\", " +
+				"pg_total_relation_size(c.oid) - pg_relation_size(c.oid) AS \"Index_length\", " +
+				"obj_description(c.oid, 'pg_class') AS \"Comment\", " +
+				"CASE WHEN c.relhasoids THEN 'oid' ELSE '' END AS \"Oid\", " +
+				"c.reltuples as \"Rows\", n.nspname FROM pg_class c " + 
+				"JOIN pg_namespace n ON(n.nspname = current_schema() AND n.oid = c.relnamespace) " + 
+				"WHERE relkind IN ('r', 'm', 'v', 'f') ORDER BY relname")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("Name"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT a.attname AS field, " +
+				"format_type(a.atttypid, a.atttypmod) AS full_type, " +
+				"pg_get_expr(d.adbin, d.adrelid) AS default, a.attnotnull::int, " +
+				"col_description(c.oid, a.attnum) AS comment, 0 AS identity FROM pg_class c " +
+				"JOIN pg_namespace n ON c.relnamespace = n.oid " +
+				"JOIN pg_attribute a ON c.oid = a.attrelid " +
+				"LEFT JOIN pg_attrdef d ON c.oid = d.adrelid AND a.attnum = d.adnum " +
+				"WHERE c.relname = 'test' AND n.nspname = current_schema() AND " +
+				"NOT a.attisdropped AND a.attnum > 0 ORDER BY a.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("field"));
+			assertEquals("INTEGER", rs.getString("full_type"));
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("field"));
+			assertEquals("INTEGER", rs.getString("full_type"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT relname, indisunique::int, " +
+				"indisprimary::int, indkey, indoption , (indpred IS NOT NULL)::int as indispartial " +
+				"FROM pg_index i, pg_class ci WHERE i.indrelid = 11 AND ci.oid = i.indexrelid")) {
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
+	public void testAny() throws SQLException {
+		int rows = stat.executeUpdate("INSERT INTO test (x1) VALUES (2), (3), (4)");
+		assertEquals(3, rows);
+		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
+				"WHERE id = ANY(SELECT x1 FROM test) ORDER BY id")) {
+			assertTrue(rs.next());
+			assertEquals(2, rs.getInt("id"));
+			assertEquals(3, rs.getInt("x1"));
+			assertTrue(rs.next());
+			assertEquals(3, rs.getInt("id"));
+			assertEquals(4, rs.getInt("x1"));
+			assertFalse(rs.next());
+		}
+	}
+
 	@AfterEach
 	public void after() throws SQLException {
 		stat.close();

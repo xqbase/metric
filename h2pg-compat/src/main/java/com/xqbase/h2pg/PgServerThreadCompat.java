@@ -12,6 +12,7 @@ import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.h2.server.pg.PgServerThread;
 import org.h2.server.pg.PgServerThreadEx;
@@ -19,19 +20,28 @@ import org.h2.util.Bits;
 import org.h2.util.ScriptReader;
 import org.h2.util.Utils;
 
+import net.sf.jsqlparser.expression.Alias;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.NullValue;
+import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParser;
 import net.sf.jsqlparser.parser.ParseException;
 import net.sf.jsqlparser.parser.StringProvider;
 import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectBody;
+import net.sf.jsqlparser.statement.select.SelectExpressionItem;
+import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.statement.select.SubSelect;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
@@ -64,60 +74,98 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
-	private static Expression replace(Expression exp) {
+	private static final LongValue ZERO = new LongValue(0);
+	private static final StringValue EMPTY = new StringValue("");
+	private static final NullValue NULL = new NullValue();
+
+	private static boolean replace(Expression exp, Consumer<Expression> parentSet) {
+		return replace(exp, null, null, parentSet);
+	}
+
+	private static boolean replace(Expression exp, String alias,
+			String table, Consumer<Expression> parentSet) {
 		if (exp instanceof SubSelect) {
 			SelectBody sb = ((SubSelect) exp).getSelectBody();
-			return sb instanceof PlainSelect && replace((PlainSelect) sb) ? exp : null;
+			return sb instanceof PlainSelect && replace((PlainSelect) sb);
+		}
+		if (exp instanceof Column) {
+			Column col = (Column) exp;
+			switch (col.getName(false).toLowerCase()) {
+			case "type_udt_name":
+				if ("\"DTD_IDENTIFIER\"".equals(alias)) {
+					parentSet.accept(EMPTY);
+					return true;
+				}
+				break;
+			case "indoption":
+				if ("pg_index".equals(table)) {
+					parentSet.accept(NULL);
+					return true;
+				}
+				break;
+			default:
+			}
+			return false;
+		}
+		if (exp instanceof Function) {
+			switch (((Function) exp).getName().toLowerCase()) {
+			case "pg_total_relation_size":
+				parentSet.accept(ZERO);
+				return true;
+			case "col_description":
+				parentSet.accept(EMPTY);
+				return true;
+			default:
+			}
+			return false;
 		}
 		if (!(exp instanceof BinaryExpression)) {
-			return null;
+			return false;
 		}
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
-		// "a"."attnum"=ANY("c"."conkey")
-		// TODO n.nspname = ANY(current_schemas(true))
+		// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 		if (be instanceof EqualsTo && right instanceof Function) {
 			Function func = (Function) right;
 			if (func.getName().toUpperCase().equals("ANY")) {
 				List<Expression> exps = func.getParameters().getExpressions();
-				if (exps.size() == 1 && exps.get(0) instanceof Column) {
-					Column col = (Column) exps.get(0);
-					if (col.getColumnName().toLowerCase().equals("\"conkey\"")) {
+				if (exps.size() == 1) {
+					Expression exp0 = exps.get(0);
+					if (!(exp0 instanceof SubSelect)) {
+						ExpressionList el = new ExpressionList(exp0, left);
+						replace(exp0, e -> el.getExpressions().set(0, e));
+						replace(left, e -> el.getExpressions().set(1, e));
 						func.setName("ARRAY_CONTAINS");
-						func.setParameters(new ExpressionList(col, left));
-						replace(left);
-						return func;
+						func.setParameters(el);
+						parentSet.accept(func);
+						return true;
 					}
 				}
 			}
 		}
-		Expression newExp = null;
-		Expression newLeft = replace(left);
-		if (newLeft != null) {
-			newExp = exp;
-			if (newLeft != left) {
-				be.setLeftExpression(newLeft);
-			}
-		}
-		Expression newRight = replace(right);
-		if (newRight != null) {
-			newExp = exp;
-			if (newRight != right) {
-				be.setRightExpression(newRight);
-			}
-		}
-		return newExp;
+		// Use `|` instead of `||` to avoid short-circuit
+		return replace(left, be::setLeftExpression) |
+				replace(right, be::setRightExpression);
 	}
 
 	private static boolean replace(PlainSelect ps) {
-		Expression exp = ps.getWhere();
-		Expression newExp = replace(exp);
-		if (newExp == null) {
-			return false;
+		boolean replaced = false;
+		String table = null;
+		FromItem fi = ps.getFromItem();
+		if (fi instanceof Table) {
+			table = ((Table) fi).getName();
 		}
-		ps.setWhere(newExp);
-		return true;
+		for (SelectItem si : ps.getSelectItems()) {
+			if (si instanceof SelectExpressionItem) {
+				SelectExpressionItem sei = (SelectExpressionItem) si;
+				Alias alias = sei.getAlias();
+				replaced |= replace(sei.getExpression(), alias == null ?
+						null : alias.getName(), table, sei::setExpression);
+			}
+		}
+		replaced |= replace(ps.getWhere(), ps::setWhere);
+		return replaced;
 	}
 
 	private static String getSQL(String s) {
@@ -133,8 +181,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					}
 				}
 			}
+			if (st instanceof ShowStatement) {
+				ShowStatement ss = (ShowStatement) st;
+				switch (ss.getName().toLowerCase()) {
+				case "lc_collate":
+					ss.setName("client_encoding");
+					return ss.toString();
+				default:
+				}
+			}
 		} catch (ParseException e) {
 			// Ignored
+			System.err.println(s + ": " + e);
 		}
 		return null;
 	}
