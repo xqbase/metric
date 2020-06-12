@@ -314,6 +314,16 @@ public class TestPgClients {
 		}
 	}
 
+	@Test
+	public void testJSqlParser() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT 0 IS NULL, 1 IS NOT NULL, 0 IN (2, 1)")) {
+			assertTrue(rs.next());
+			assertFalse(rs.getBoolean(1));
+			assertTrue(rs.getBoolean(2));
+			assertFalse(rs.getBoolean(3));
+		}
+	}
+
 	@AfterEach
 	public void after() throws SQLException {
 		stat.close();
