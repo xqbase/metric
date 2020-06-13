@@ -173,7 +173,7 @@ public class TestPgClients {
 				assertFalse(rs.next());
 			}
 
-			stat.execute("create table test2 (x1 int primary key, x2 int, unique (x2))");
+			stat.execute("CREATE TABLE test2 (x1 INT PRIMARY KEY, x2 INT, UNIQUE (x2))");
 			ps.setString(1, "test2");
 			try (ResultSet rs = ps.executeQuery()) {
 				assertTrue(rs.next());
@@ -185,7 +185,7 @@ public class TestPgClients {
 				assertFalse(rs.next());
 			}
 
-			stat.execute("create table test3 (x1 int, x2 int, primary key (x1, x2))");
+			stat.execute("CREATE TABLE test3 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
 			ps.setString(1, "test3");
 			try (ResultSet rs = ps.executeQuery()) {
 				assertTrue(rs.next());
@@ -296,6 +296,18 @@ public class TestPgClients {
 				"FROM pg_index i, pg_class ci WHERE i.indrelid = 11 AND ci.oid = i.indexrelid")) {
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT conname, condeferrable::int AS deferrable, " +
+				"pg_get_constraintdef(oid) AS definition FROM pg_constraint " +
+				"WHERE conrelid = (SELECT pc.oid FROM pg_class AS pc " +
+				"INNER JOIN pg_namespace AS pn ON (pn.oid = pc.relnamespace) " +
+				"WHERE pc.relname = 'test' AND pn.nspname = current_schema()) " + 
+				"AND contype = 'f'::char ORDER BY conkey, conname")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT * FROM information_schema.triggers " +
+				"WHERE event_object_table = 'test'")) {
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -316,11 +328,23 @@ public class TestPgClients {
 
 	@Test
 	public void testJSqlParser() throws SQLException {
+		// See https://github.com/JSQLParser/JSqlParser/issues/991
+		/*
 		try (ResultSet rs = stat.executeQuery("SELECT 0 IS NULL, 1 IS NOT NULL, 0 IN (2, 1)")) {
 			assertTrue(rs.next());
 			assertFalse(rs.getBoolean(1));
 			assertTrue(rs.getBoolean(2));
 			assertFalse(rs.getBoolean(3));
+		}
+		*/
+		stat.execute("CREATE TABLE test2 (id INT, indpred INT)");
+		stat.execute("INSERT INTO test2 (id, indpred) VALUES (1, 0), (2, NULL)");
+		try (ResultSet rs = stat.executeQuery(
+				"SELECT (indpred IS NOT NULL)::int AS i FROM test2 ORDER BY id")) {
+			assertTrue(rs.next());
+			assertEquals(1, rs.getInt("i"));
+			assertTrue(rs.next());
+			assertEquals(0, rs.getInt("i"));
 		}
 	}
 

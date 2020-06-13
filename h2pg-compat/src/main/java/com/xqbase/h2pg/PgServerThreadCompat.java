@@ -113,6 +113,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				parentSet.accept(ZERO);
 				return true;
 			case "col_description":
+			case "pg_get_constraintdef":
 				parentSet.accept(EMPTY);
 				return true;
 			default:
@@ -126,20 +127,28 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
 		// value = ANY(array) -> ARRAY_CONTAINS(array, value)
-		if (be instanceof EqualsTo && right instanceof Function) {
-			Function func = (Function) right;
-			if (func.getName().toUpperCase().equals("ANY")) {
-				List<Expression> exps = func.getParameters().getExpressions();
-				if (exps.size() == 1) {
-					Expression exp0 = exps.get(0);
-					if (!(exp0 instanceof SubSelect)) {
-						ExpressionList el = new ExpressionList(exp0, left);
-						replace(exp0, e -> el.getExpressions().set(0, e));
-						replace(left, e -> el.getExpressions().set(1, e));
-						func.setName("ARRAY_CONTAINS");
-						func.setParameters(el);
-						parentSet.accept(func);
-						return true;
+		if (be instanceof EqualsTo) {
+			if (left instanceof Column && ((Column) left).getColumnName().
+					toLowerCase().equals("event_object_table")) {
+				be.setLeftExpression(EMPTY);
+				replace(right, be::setRightExpression);
+				return true;
+			}
+			if (right instanceof Function) {
+				Function func = (Function) right;
+				if (func.getName().toUpperCase().equals("ANY")) {
+					List<Expression> exps = func.getParameters().getExpressions();
+					if (exps.size() == 1) {
+						Expression exp0 = exps.get(0);
+						if (!(exp0 instanceof SubSelect)) {
+							ExpressionList el = new ExpressionList(exp0, left);
+							replace(exp0, e -> el.getExpressions().set(0, e));
+							replace(left, e -> el.getExpressions().set(1, e));
+							func.setName("ARRAY_CONTAINS");
+							func.setParameters(el);
+							parentSet.accept(func);
+							return true;
+						}
 					}
 				}
 			}
@@ -168,9 +177,31 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		return replaced;
 	}
 
+	private static final String[] REPLACE_FROM = {
+		"(indpred IS NOT NULL)",
+		", condeferrable::int AS deferrable, "
+	};
+	private static final String[] REPLACE_TO = {
+		"(NVL2(indpred, TRUE, FALSE))",
+		", 0 AS \"deferrable\", " // "deferrable" is a keyword in JSqlParser
+	};
+	private static final int[] REPLACE_FROM_LEN = {
+		21,
+		36,
+	};
+
 	private static String getSQL(String s) {
+		String sql = s;
+		for (int i = 0; i < REPLACE_FROM.length; i ++) {
+			int index;
+			while ((index = sql.indexOf(REPLACE_FROM[i])) >= 0) {
+				sql = sql.substring(0, index) + REPLACE_TO[i] +
+						sql.substring(index + REPLACE_FROM_LEN[i]);
+			}
+		}
+
 		try {
-			CCJSqlParser parser = new CCJSqlParser(new StringProvider(s));
+			CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
 				Select sel = (Select) st;
@@ -192,7 +223,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 		} catch (ParseException e) {
 			// Ignored
-			System.err.println(s + ": " + e);
+			// System.err.println(s + ": " + e);
 		}
 		return null;
 	}
