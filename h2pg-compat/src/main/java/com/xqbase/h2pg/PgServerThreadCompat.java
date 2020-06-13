@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -22,11 +23,14 @@ import org.h2.util.Utils;
 
 import net.sf.jsqlparser.expression.Alias;
 import net.sf.jsqlparser.expression.BinaryExpression;
+import net.sf.jsqlparser.expression.CaseExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.NotExpression;
 import net.sf.jsqlparser.expression.NullValue;
 import net.sf.jsqlparser.expression.StringValue;
+import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParser;
@@ -37,12 +41,14 @@ import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectBody;
 import net.sf.jsqlparser.statement.select.SelectExpressionItem;
 import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.statement.select.SubSelect;
+import net.sf.jsqlparser.statement.select.TableFunction;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Field initDone, out, dataInRaw, stop;
@@ -61,6 +67,27 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		return method;
 	}
 
+	private static SubSelect select(String sql) {
+		CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
+		SubSelect ss = new SubSelect();
+		try {
+			ss.setSelectBody(((Select) parser.Statement()).getSelectBody());
+		} catch (ParseException e) {
+			throw new RuntimeException(e);
+		}
+		return ss;
+	}
+
+	private static final LongValue ZERO = new LongValue(0);
+	private static final LongValue MINUS_ONE = new LongValue(-1);
+	private static final StringValue EMPTY = new StringValue("");
+	private static final NullValue NULL = new NullValue();
+	private static final Column TRUE = new Column("TRUE");
+	private static final Column FALSE = new Column("FALSE");
+	private static final SubSelect PG_GET_KEYWORDS = select("SELECT '' AS word WHERE FALSE");
+	private static final SubSelect EMPTY_TABLE = select("SELECT 0 WHERE FALSE");
+	private static final Function SESSION_USER = new Function();
+
 	static {
 		try {
 			initDone = getField("initDone");
@@ -72,11 +99,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
+		SESSION_USER.setName("session_user");
 	}
-
-	private static final LongValue ZERO = new LongValue(0);
-	private static final StringValue EMPTY = new StringValue("");
-	private static final NullValue NULL = new NullValue();
 
 	private static boolean replace(Expression exp, Consumer<Expression> parentSet) {
 		return replace(exp, null, null, parentSet);
@@ -103,22 +127,73 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return true;
 				}
 				break;
+			case "datconnlimit":
+				if ("pg_database".equals(table)) {
+					parentSet.accept(NULL);
+					return true;
+				}
+				break;
 			default:
 			}
 			return false;
 		}
 		if (exp instanceof Function) {
-			switch (((Function) exp).getName().toLowerCase()) {
+			Function func = (Function) exp;
+			switch (func.getName().toLowerCase()) {
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
 				return true;
 			case "col_description":
 			case "pg_get_constraintdef":
+			case "shobj_description":
 				parentSet.accept(EMPTY);
+				return true;
+			case "pg_catalog.array_upper":
+				parentSet.accept(MINUS_ONE);
+				return true;
+			case "pg_catalog.pg_function_is_visible":
+				parentSet.accept(TRUE);
 				return true;
 			default:
 			}
-			return false;
+			boolean replaced = false;
+			ExpressionList el = func.getParameters();
+			if (el != null) {
+				List<Expression> exps = func.getParameters().getExpressions();
+				for (int i = 0; i < exps.size(); i ++) {
+					Expression ei = exps.get(i);
+					if (ei instanceof Column &&
+							((Column) ei).getColumnName().toLowerCase().equals("nspowner") &&
+							func.getName().toLowerCase().equals("pg_get_userbyid")) {
+						parentSet.accept(SESSION_USER);
+						return true;
+					}
+					int i_ = i;
+					replaced |= replace(ei, e -> exps.set(i_, e));
+				}
+			}
+			if (((Function) exp).getName().toLowerCase().contains("array_upper")) {
+				System.out.println(exp);
+			}
+			return replaced;
+		}
+		if (exp instanceof NotExpression) {
+			Expression notExp = ((NotExpression) exp).getExpression();
+			if (notExp instanceof Column && ((Column) notExp).
+					getColumnName().equals("datistemplate")) {
+				parentSet.accept(TRUE);
+				return true;
+			}
+		}
+		if (exp instanceof CaseExpression) {
+			boolean replaced = false;
+			CaseExpression ce = (CaseExpression) exp;
+			replaced |= replace(ce.getSwitchExpression(), ce::setSwitchExpression);
+			for (WhenClause wc : ce.getWhenClauses()) {
+				replaced |= replace(wc.getWhenExpression(), wc::setWhenExpression) |
+						replace(wc.getThenExpression(), wc::setThenExpression);
+			}
+			return replaced | replace(ce.getElseExpression(), ce::setElseExpression);
 		}
 		if (!(exp instanceof BinaryExpression)) {
 			return false;
@@ -126,14 +201,32 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
-		// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 		if (be instanceof EqualsTo) {
-			if (left instanceof Column && ((Column) left).getColumnName().
-					toLowerCase().equals("event_object_table")) {
-				be.setLeftExpression(EMPTY);
-				replace(right, be::setRightExpression);
-				return true;
+			if (left instanceof Column) {
+				Column col = (Column) left;
+				switch (col.getColumnName().toLowerCase()) {
+				case "event_object_table":
+					if (right instanceof StringValue) {
+						parentSet.accept(FALSE);
+						return true;
+					}
+					break;
+				case "pronargs":
+					Table colTable = col.getTable();
+					if (colTable == null) {
+						break;
+					}
+					if (colTable.getName().toLowerCase().equals("p") &&
+							right instanceof LongValue &&
+							((LongValue) right).getValue() == 0) {
+						parentSet.accept(TRUE);
+						return true;
+					}
+					break;
+				default:
+				}
 			}
+			// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 			if (right instanceof Function) {
 				Function func = (Function) right;
 				if (func.getName().toUpperCase().equals("ANY")) {
@@ -158,19 +251,56 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replace(right, be::setRightExpression);
 	}
 
-	private static boolean replace(PlainSelect ps) {
-		boolean replaced = false;
-		String table = null;
-		FromItem fi = ps.getFromItem();
+	private static boolean replace(FromItem fi,
+			Consumer<FromItem> parentSet, String[] table) {
 		if (fi instanceof Table) {
-			table = ((Table) fi).getName();
+			String name = ((Table) fi).getName();
+			if (name.toLowerCase().equals("pg_event_trigger")) {
+				parentSet.accept(EMPTY_TABLE);
+				return true;
+			}
+			table[0] = name;
+			return false;
 		}
+		if (!(fi instanceof TableFunction)) {
+			return false;
+		}
+		TableFunction ti = (TableFunction) fi;
+		Function func = ti.getFunction();
+		if (func.getName().toLowerCase().equals("pg_get_keywords")) {
+			parentSet.accept(PG_GET_KEYWORDS);
+			return true;
+		}
+		return replace(func, exp -> {
+			if (exp instanceof Function) {
+				ti.setFunction((Function) exp);
+			} else {
+				PlainSelect ps1 = new PlainSelect();
+				ps1.setSelectItems(Collections.
+						singletonList(new SelectExpressionItem(exp)));
+				SubSelect ss = new SubSelect();
+				ss.setSelectBody(ps1);
+				parentSet.accept(ss);
+			}
+		});
+	}
+
+	private static boolean replace(PlainSelect ps) {
+		String[] table = {null};
+		boolean replaced = replace(ps.getFromItem(), ps::setFromItem, table);
 		for (SelectItem si : ps.getSelectItems()) {
 			if (si instanceof SelectExpressionItem) {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
 				Alias alias = sei.getAlias();
 				replaced |= replace(sei.getExpression(), alias == null ?
-						null : alias.getName(), table, sei::setExpression);
+						null : alias.getName(), table[0], sei::setExpression);
+			}
+		}
+		List<Join> joins = ps.getJoins();
+		if (joins != null) {
+			for (Join join : ps.getJoins()) {
+				replaced |= replace(join.getRightItem(), join::setRightItem, table) |
+						replace(join.getOnExpression(), join::setOnExpression);
 			}
 		}
 		replaced |= replace(ps.getWhere(), ps::setWhere);
@@ -179,24 +309,29 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
-		", condeferrable::int AS deferrable, "
+		", condeferrable::int AS deferrable, ",
+		" CAST('*' AS pg_catalog.text) ",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
-		", 0 AS \"deferrable\", " // "deferrable" is a keyword in JSqlParser
+		", 0 AS \"deferrable\", ", // "deferrable" is a keyword in JSqlParser
+		" '*' ",
 	};
 	private static final int[] REPLACE_FROM_LEN = {
 		21,
 		36,
+		30,
 	};
 
 	private static String getSQL(String s) {
+		boolean replaced = false;
 		String sql = s;
 		for (int i = 0; i < REPLACE_FROM.length; i ++) {
 			int index;
 			while ((index = sql.indexOf(REPLACE_FROM[i])) >= 0) {
 				sql = sql.substring(0, index) + REPLACE_TO[i] +
 						sql.substring(index + REPLACE_FROM_LEN[i]);
+				replaced = true;
 			}
 		}
 
@@ -225,7 +360,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			// Ignored
 			// System.err.println(s + ": " + e);
 		}
-		return null;
+		return replaced ? sql : null;
 	}
 
 	private static int findZero(byte[] b, int left, int right) throws EOFException {

@@ -311,6 +311,51 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testValentina() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT oid, datname, datconnlimit, encoding, " +
+				"shobj_description( oid, 'pg_database' ) as comment, " +
+				"pg_get_userbyid( datdba ) AS owner FROM pg_database " +
+				"WHERE NOT datistemplate AND datname<>'postgres'")) {
+			assertTrue(rs.next());
+			assertEquals("pgserver", rs.getString("datname"));
+			assertEquals("sa", rs.getString("owner"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT word from pg_get_keywords()")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT p.proname AS fld_procedure" +
+				", pg_catalog.format_type(p.prorettype, NULL) AS fld_return_type, " +
+				"CASE WHEN p.pronargs = 0 AND p.proname = 'count' " +
+				"THEN CAST('*' AS pg_catalog.text) ELSE pg_catalog.array_to_string(ARRAY" +
+				"( SELECT pg_catalog.format_type(p.proargtypes[s.i], NULL) " +
+				"FROM pg_catalog.generate_series(0, pg_catalog.array_upper(p.proargtypes, 1)) " +
+				"AS s(i) ), ', ') END AS fld_arguments, " +
+				"pg_catalog.obj_description(p.oid, 'pg_proc') as fld_description " +
+				"FROM pg_catalog.pg_proc p LEFT JOIN pg_catalog.pg_namespace n " +
+				"ON n.oid = p.pronamespace AND pg_catalog.pg_function_is_visible(p.oid) " +
+				"ORDER BY 1, 2, 4")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT oid, nspname, " +
+				"obj_description( oid ) AS comment, pg_get_userbyid( nspowner ) AS owner " +
+				"FROM pg_namespace WHERE nspname <> 'information_schema' " +
+				"AND substr( nspname, 0, 4 ) <> 'pg_'")) {
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("nspname"));
+			assertEquals("sa", rs.getString("owner"));
+			assertTrue(rs.next());
+			assertEquals("pg_catalog", rs.getString("nspname"));
+			assertEquals("sa", rs.getString("owner"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_event_trigger")) {
+			assertTrue(rs.next());
+			assertEquals(0, rs.getLong(1));
+		}
+	}
+
+	@Test
 	public void testAny() throws SQLException {
 		int rows = stat.executeUpdate("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		assertEquals(3, rows);
