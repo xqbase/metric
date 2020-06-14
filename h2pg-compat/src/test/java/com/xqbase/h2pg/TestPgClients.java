@@ -323,7 +323,8 @@ public class TestPgClients {
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT word from pg_get_keywords()")) {
-			assertFalse(rs.next());
+			assertTrue(rs.next());
+			assertNotNull(rs.getString("word"));
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT p.proname AS fld_procedure" +
 				", pg_catalog.format_type(p.prorettype, NULL) AS fld_return_type, " +
@@ -497,6 +498,12 @@ public class TestPgClients {
 			assertTrue(rs.next());
 			assertEquals("x2\r\nx3", rs.getString("unique_fields"));
 			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("select pg_listening_channels()")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("EXPLAIN VERBOSE SELECT * FROM test")) {
+			assertTrue(rs.next());
 		}
 	}
 

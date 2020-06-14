@@ -11,12 +11,14 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import org.h2.command.Parser;
 import org.h2.server.pg.PgServerThread;
 import org.h2.server.pg.PgServerThreadEx;
 import org.h2.util.Bits;
@@ -37,6 +39,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParser;
 import net.sf.jsqlparser.parser.ParseException;
@@ -56,6 +59,7 @@ import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.SubSelect;
 import net.sf.jsqlparser.statement.select.TableFunction;
+import net.sf.jsqlparser.statement.select.ValuesList;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Field initDone, out, dataInRaw, stop;
@@ -90,12 +94,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final NullValue NULL = new NullValue();
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
-	private static final SubSelect PG_GET_KEYWORDS = new SubSelect();
 	private static final Function CURRENT_USER = new Function();
-
-	private static Map<String, SelectBody> tableMap = new HashMap<>();
+	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
+	private static final StringValue PG_LISTENING_CHANNELS = new StringValue("");
+	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
+			new Alias("pg_listening_channels");
+	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 
 	static {
+		String[] tokens;
 		try {
 			initDone = getField("initDone");
 			out = getField("out");
@@ -103,24 +110,38 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			stop = getField("stop");
 			process = getMethod("process");
 			getEncoding = getMethod("getEncoding");
+			Field tokensField = Parser.class.getDeclaredField("TOKENS");
+			tokensField.setAccessible(true);
+			tokens = (String[]) tokensField.get(null);
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
-		PG_GET_KEYWORDS.setSelectBody(select("SELECT '' AS word WHERE FALSE"));
 		CURRENT_USER.setName("current_user");
-		tableMap.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
-		tableMap.put("pg_depend",
+		MultiExpressionList words = new MultiExpressionList();
+		for (String token : tokens) {
+			if (token != null && !token.isEmpty()) {
+				char c = token.charAt(0);
+				if (c >= 'A' && c <= 'Z') {
+					words.addExpressionList(new StringValue(token.toLowerCase()));
+				}
+			}
+		}
+		PG_GET_KEYWORDS.setMultiExpressionList(words);
+		PG_GET_KEYWORDS.setColumnNames(Arrays.asList("word"));
+		PG_GET_KEYWORDS.setAlias(new Alias("pg_get_keywords"));
+		TABLE_MAP.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
+		TABLE_MAP.put("pg_depend",
 				select("SELECT '' AS deptype, 0 AS classid, 0 AS refclassid, 0 AS objid, " +
 				"0 AS objsubid, 0 AS refobjid, 0 AS refobjsubid WHERE FALSE"));
-		tableMap.put("pg_language",
+		TABLE_MAP.put("pg_language",
 				select("SELECT 0 AS oid, '' AS lanname WHERE FALSE"));
-		tableMap.put("pg_trigger",
+		TABLE_MAP.put("pg_trigger",
 				select("SELECT 0 AS oid, '' AS tgname, 0 AS tgrelid WHERE FALSE"));
-		tableMap.put("pg_tables",
+		TABLE_MAP.put("pg_tables",
 				select("SELECT n.nspname AS schemaname, c.relname AS tablename " +
 				"FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " + 
 				"WHERE c.relkind IN ('r', 'p')"));
-		tableMap.put("pg_views",
+		TABLE_MAP.put("pg_views",
 				select("SELECT n.nspname AS schemaname, c.relname AS viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
 	}
@@ -169,8 +190,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			case "array_length":
 				List<Expression> exps = func.getParameters().getExpressions();
 				if (exps.size() > 1) {
-					func.getParameters().
-							setExpressions(Collections.singletonList(exps.get(0)));
+					func.getParameters().setExpressions(Arrays.asList(exps.get(0)));
 					return true;
 				}
 				break;
@@ -197,6 +217,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					}
 				}
 				break;
+			case "pg_listening_channels":
+				parentSet.accept(PG_LISTENING_CHANNELS);
+				return true;
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
 				return true;
@@ -342,7 +365,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			Consumer<FromItem> parentSet, String[] table) {
 		if (fi instanceof Table) {
 			String name = ((Table) fi).getName();
-			SelectBody sb = tableMap.get(name);
+			SelectBody sb = TABLE_MAP.get(name);
 			if (sb != null) {
 				SubSelect ss = new SubSelect();
 				ss.setSelectBody(sb);
@@ -384,7 +407,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
 				Alias alias = sei.getAlias();
 				replaced |= replace(sei.getExpression(), alias == null ?
-						null : alias.getName(), table[0], sei::setExpression);
+						null : alias.getName(), table[0], e -> {
+					sei.setExpression(e);
+					if (e == PG_LISTENING_CHANNELS) {
+						sei.setAlias(PG_LISTENING_CHANNELS_ALIAS);
+						ps.setWhere(FALSE);
+					}
+				});
 			}
 		}
 		List<Join> joins = ps.getJoins();
@@ -443,6 +472,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static String getSQL(String s) {
 		boolean replaced = false;
 		String sql = s;
+		if (sql.startsWith("EXPLAIN VERBOSE ")) {
+			sql = "EXPLAIN " + sql.substring(16);
+			replaced = true;
+		}
 		for (int i = 0; i < REPLACE_FROM.length; i ++) {
 			int index;
 			while ((index = sql.indexOf(REPLACE_FROM[i])) >= 0) {
@@ -470,7 +503,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 		} catch (ParseException e) {
 			// Ignored
-			// System.err.println(s + ": " + e);
+			System.err.println(s + ": " + e);
 		}
 		return replaced ? sql : null;
 	}
