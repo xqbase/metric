@@ -262,7 +262,8 @@ public class TestPgClients {
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.relname AS \"Name\", " +
-				"CASE c.relkind WHEN 'r' THEN 'table' WHEN 'm' THEN 'materialized view' ELSE 'view' END AS \"Engine\", " +
+				"CASE c.relkind WHEN 'r' THEN 'table' " +
+				"WHEN 'm' THEN 'materialized view' ELSE 'view' END AS \"Engine\", " +
 				"pg_relation_size(c.oid) AS \"Data_length\", " +
 				"pg_total_relation_size(c.oid) - pg_relation_size(c.oid) AS \"Index_length\", " +
 				"obj_description(c.oid, 'pg_class') AS \"Comment\", " +
@@ -353,12 +354,155 @@ public class TestPgClients {
 			assertTrue(rs.next());
 			assertEquals(0, rs.getLong(1));
 		}
+		try (ResultSet rs = stat.executeQuery(
+				"( SELECT lanname as fld_ident, 21 AS fld_kind FROM pg_language ) " +
+				"UNION ( SELECT nspname as fld_ident, 2 AS fld_kind FROM pg_namespace ) " +
+				"UNION ( SELECT schemaname || '.' || tablename AS fld_ident, 1 AS fld_kind FROM pg_tables ) " +
+				"UNION ( SELECT tablename AS fld_ident, 1 AS fld_kind FROM pg_tables ) " +
+				"UNION ( SELECT table_schema || '.' || table_name || '.' || column_name AS fld_ident, " +
+				"3 AS fld_kind FROM information_schema.COLUMNS ) " +
+				"UNION ( SELECT table_name || '.' || column_name AS fld_ident, " +
+				"3 AS fld_kind FROM information_schema.COLUMNS ) " +
+				"UNION ( SELECT column_name AS fld_ident, 3 AS fld_kind FROM information_schema.COLUMNS ) " +
+				"UNION ( SELECT ns.nspname || '.' || proname AS fld_ident, 9 AS fld_kind " +
+				"FROM pg_proc JOIN pg_namespace ns ON pronamespace = ns.oid ) " +
+				"UNION ( SELECT proname AS fld_ident, 9 AS fld_kind FROM pg_proc ) " +
+				"UNION ( SELECT schemaname || '.' || viewname AS fld_ident, 15 AS fld_kind FROM pg_views ) " +
+				"UNION ( SELECT viewname AS fld_ident, 15 AS fld_kind FROM pg_views ) " +
+				"UNION ( SELECT tgname AS fld_ident, 14 AS fld_kind FROM pg_trigger ) " +
+				"UNION ( SELECT constraint_name AS fld_ident, 4 AS fld_kind " +
+				"FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY' ) " +
+				"UNION ( SELECT cl.relname AS fld_ident, 16 AS fld_kind " +
+				"FROM pg_index i JOIN pg_class cl ON cl.oid = i.indexrelid ) " +
+				"UNION ( SELECT c.conname AS fld_ident, 17 AS fld_kind FROM pg_constraint c " +
+				"JOIN pg_class cl ON c.conrelid = cl.oid AND c.contype = 'u' ) " +
+				"UNION (  SELECT conname AS fld_ident, 18 AS fld_kind FROM pg_constraint " +
+				"JOIN pg_class cl ON pg_constraint.conrelid = cl.oid AND contype='c' ) " +
+				"UNION ( SELECT ns.nspname || '.' || cl.relname AS fld_ident, 19 AS fld_kind " +
+				"FROM pg_class cl JOIN pg_namespace ns ON ns.oid = relnamespace AND cl.relkind = 'S' )" +
+				"UNION ( SELECT cl.relname AS fld_ident, 19 AS fld_kind " +
+				"FROM pg_class cl WHERE cl.relkind = 'S' )")) {
+			// just no exception
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT  pg_class.oid, relname AS tablename, " +
+				"nsp.nspname AS schema, pg_get_userbyid( relowner ) AS owner,conname, " +
+				"relhasoids, obj_description( pg_class.oid ) AS comment, " +
+				"( SELECT COUNT(*) FROM pg_attribute att WHERE att.attrelid = pg_class.oid " +
+				"AND att.attnum > 0 AND att.attisdropped IS FALSE ) AS field_count " +
+				"FROM pg_class JOIN pg_namespace nsp ON relnamespace = nsp.oid " +
+				"AND relkind = 'r' AND nsp.nspname = 'public' " +
+				"LEFT OUTER JOIN pg_constraint " +
+				"ON pg_constraint.conrelid = pg_class.oid AND contype='p'")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("tablename"));
+			assertEquals("public", rs.getString("schema"));
+			assertEquals("sa", rs.getString("owner"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery(
+				"SELECT COUNT(*) FROM pg_catalog.pg_namespace ns " +
+				"JOIN pg_catalog.pg_proc p ON p.pronamespace = ns.oid " +
+				"AND ns.nspname = 'public' AND p.proisagg = FALSE")) {
+			assertTrue(rs.next());
+			assertEquals(0, rs.getLong(1));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_type T " + 
+				"JOIN pg_namespace nsp ON nsp.oid = T.typnamespace " + 
+				"LEFT JOIN pg_class ct ON ct.oid = T.typrelid AND ct.relkind <> 'c' " + 
+				"WHERE ( T.typtype != 'd' AND T.typtype != 'p' AND T.typcategory != 'A' ) " + 
+				"AND (ct.oid IS NULL OR ct.oid = 0) -- filter for tables\r\n" + 
+				"AND nsp.nspname =  'public'")) {
+			// just no exception
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT att.attname AS column_name, " +
+				"format_type(ty.oid, NULL) AS data_type, " +
+				"ty.oid AS type_id, tn.nspname AS type_schema, " +
+				"pg_catalog.pg_get_expr(def.adbin, def.adrelid) AS column_default, " +
+				"NOT att.attnotnull AS is_nullable, att.attnum AS ordinal_position, " +
+				"att.attndims AS dimensions, att.atttypmod AS modifiers, '' AS comment, " +
+				"'' AS collation FROM pg_attribute att " +
+				"JOIN pg_type ty ON ty.oid = atttypid " +
+				"JOIN pg_namespace tn ON tn.oid = ty.typnamespace " +
+				"JOIN pg_class cl ON cl.oid = att.attrelid " +
+				"JOIN pg_namespace na ON na.oid = cl.relnamespace " +
+				"LEFT OUTER JOIN pg_attrdef def ON adrelid = att.attrelid " +
+				"AND adnum = att.attnum WHERE na.nspname = 'public' AND cl.relname = 'test' " +
+				"AND att.attnum > 0 AND att.attisdropped IS FALSE")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("column_name"));
+			assertEquals("INTEGER", rs.getString("data_type"));
+			assertEquals(1, rs.getInt("ordinal_position"));
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("column_name"));
+			assertEquals("INTEGER", rs.getString("data_type"));
+			assertEquals(2, rs.getInt("ordinal_position"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_index i " +
+				"LEFT JOIN pg_class ct ON ct.oid = i.indrelid " +
+				"LEFT JOIN pg_class ci ON ci.oid = i.indexrelid " +
+				"LEFT JOIN pg_namespace tns ON tns.oid = ct.relnamespace " +
+				"LEFT JOIN pg_depend dep ON dep.classid = ci.tableoid " +
+				"AND dep.objid = ci.oid AND dep.refobjsubid = '0' " +
+				"LEFT JOIN pg_constraint con ON con.tableoid = dep.refclassid AND con.oid = dep.refobjid " +
+				"WHERE conname IS NULL AND tns.nspname = 'public' AND ct.relname = 'test'")) {
+			assertTrue(rs.next());
+			assertEquals(0, rs.getLong(1));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT ( SELECT CASE " +
+				"WHEN ( reltuples IS NOT NULL AND reltuples > 1000 ) " +
+				"THEN CONCAT( '~',  reltuples::BIGINT::TEXT ) " +
+				"ELSE ( SELECT COUNT(*) FROM \"public\".\"test\" )::TEXT  END ) AS r " +
+				"FROM pg_class JOIN pg_namespace nsp ON relnamespace = nsp.oid " +
+				"AND relname= 'test' and nspname = 'public'")) {
+			assertTrue(rs.next());
+			assertEquals("0", rs.getObject("r"));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT ( SELECT CASE " +
+				"WHEN ( reltuples IS NOT NULL AND reltuples > 1000 ) " +
+				"THEN CONCAT( '~',  reltuples::BIGINT::TEXT ) " +
+				"ELSE ( SELECT COUNT(*) FROM \"public\".\"test\" )::TEXT  END ) AS r " +
+				"FROM pg_class JOIN pg_namespace nsp ON relnamespace = nsp.oid " +
+				"AND relname= 'test' and nspname = 'public'")) {
+			assertTrue(rs.next());
+			assertEquals("0", rs.getObject("r"));
+		}
+		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4), (5)");
+		try (ResultSet rs = stat.executeQuery("SELECT x1 FROM test ORDER BY id OFFSET 1 LIMIT 2")) {
+			assertTrue(rs.next());
+			assertEquals(3, rs.getInt("x1"));
+			assertTrue(rs.next());
+			assertEquals(4, rs.getInt("x1"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT i.indisunique FROM pg_index i " +
+				"LEFT JOIN pg_class ct ON ct.oid = i.indrelid " +
+				"LEFT JOIN pg_namespace tns ON tns.oid = ct.relnamespace " +
+				"WHERE tns.nspname  = 'public' AND ct.relname = 'test' " +
+				"AND array_length( i.indkey, 1 ) = 1 " +
+				"AND quote_ident( 'name' ) = pg_get_indexdef( i.indexrelid, 1, TRUE )")) {
+			assertFalse(rs.next());
+		}
+		stat.execute("CREATE TABLE test2 (x1 INT PRIMARY KEY, x2 INT, x3 INT, UNIQUE (x2, x3))");
+		try (ResultSet rs = stat.executeQuery("SELECT c.oid, c.conname, " +
+				"( SELECT obj_description( c.oid ) ) AS comment, " +
+				"array_to_string( array(   " +
+				"SELECT a.attname FROM pg_attribute a WHERE a.attnum = ANY( c.conkey ) " +
+				"AND a.attrelid = c.conrelid ORDER BY (    SELECT i FROM ( " +
+				"SELECT generate_series( array_lower( c.conkey, 1 ), array_upper( c.conkey, 1 ) ) ) g( i) " +
+				"WHERE c.conkey[i] = a.attnum LIMIT 1 ) ), '\r\n' ) AS unique_fields FROM pg_constraint c " +
+				"JOIN pg_class ON c.conrelid = pg_class.oid " +
+				"JOIN pg_namespace n ON n.oid = relnamespace " +
+				"WHERE c.contype = 'u' AND nspname ='public' AND relname = 'test2'")) {
+			assertTrue(rs.next());
+			assertEquals("x2\r\nx3", rs.getString("unique_fields"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
-	public void testAny() throws SQLException {
-		int rows = stat.executeUpdate("INSERT INTO test (x1) VALUES (2), (3), (4)");
-		assertEquals(3, rows);
+	public void testJSqlParser() throws SQLException {
+		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
 				"WHERE id = ANY(SELECT x1 FROM test) ORDER BY id")) {
 			assertTrue(rs.next());
@@ -369,11 +513,7 @@ public class TestPgClients {
 			assertEquals(4, rs.getInt("x1"));
 			assertFalse(rs.next());
 		}
-	}
-
-	@Test
-	public void testJSqlParser() throws SQLException {
-		// See https://github.com/JSQLParser/JSqlParser/issues/991
+		// See https://github.com/JSQLParser/JSqlParser/issues/720
 		/*
 		try (ResultSet rs = stat.executeQuery("SELECT 0 IS NULL, 1 IS NOT NULL, 0 IN (2, 1)")) {
 			assertTrue(rs.next());
@@ -390,6 +530,11 @@ public class TestPgClients {
 			assertEquals(1, rs.getInt("i"));
 			assertTrue(rs.next());
 			assertEquals(0, rs.getInt("i"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT pg_total_relation_size(0)::text::int::text")) {
+			assertTrue(rs.next());
+			assertEquals("0", rs.getObject(1));
 		}
 	}
 
