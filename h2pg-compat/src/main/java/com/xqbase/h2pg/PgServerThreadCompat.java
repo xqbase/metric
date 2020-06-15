@@ -99,6 +99,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final StringValue PG_LISTENING_CHANNELS = new StringValue("");
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
 			new Alias("pg_listening_channels");
+	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 
 	static {
@@ -133,13 +134,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		TABLE_MAP.put("pg_depend",
 				select("SELECT '' AS deptype, 0 AS classid, 0 AS refclassid, 0 AS objid, " +
 				"0 AS objsubid, 0 AS refobjid, 0 AS refobjsubid WHERE FALSE"));
+		TABLE_MAP.put("pg_collation",
+				select("SELECT 0 AS oid, '' AS collnamespace, '' AS collname WHERE FALSE"));
 		TABLE_MAP.put("pg_language",
 				select("SELECT 0 AS oid, '' AS lanname WHERE FALSE"));
 		TABLE_MAP.put("pg_trigger",
 				select("SELECT 0 AS oid, '' AS tgname, 0 AS tgrelid WHERE FALSE"));
 		TABLE_MAP.put("pg_tables",
 				select("SELECT n.nspname AS schemaname, c.relname AS tablename " +
-				"FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " + 
+				"FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
 				"WHERE c.relkind IN ('r', 'p')"));
 		TABLE_MAP.put("pg_views",
 				select("SELECT n.nspname AS schemaname, c.relname AS viewname FROM pg_class c " +
@@ -173,6 +176,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return true;
 				}
 				break;
+			case "t.typdefault":
+				if ("pg_type".equals(table)) {
+					parentSet.accept(NULL);
+					return true;
+				}
+				break;
+			case "t.typndims":
+				if ("pg_type".equals(table)) {
+					parentSet.accept(ZERO);
+					return true;
+				}
+				break;
 			case "type_udt_name":
 				if ("\"DTD_IDENTIFIER\"".equals(alias)) {
 					parentSet.accept(EMPTY);
@@ -186,13 +201,29 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (exp instanceof Function) {
 			Function func = (Function) exp;
 			ExpressionList el = func.getParameters();
+			boolean replaced = false;
 			switch (func.getName()) {
 			case "array_length":
-				List<Expression> exps = func.getParameters().getExpressions();
-				if (exps.size() > 1) {
-					func.getParameters().setExpressions(Arrays.asList(exps.get(0)));
-					return true;
+				if (el != null) {
+					List<Expression> exps = el.getExpressions();
+					if (exps.size() > 1) {
+						el.setExpressions(Arrays.asList(exps.get(0)));
+						replaced = true;
+					}
 				}
+				break;
+			case "array_lower":
+				parentSet.accept(ONE);
+				return true;
+			case "array_upper":
+				func.setName("array_length");
+				if (el != null) {
+					List<Expression> exps = el.getExpressions();
+					if (exps.size() > 1) {
+						el.setExpressions(Arrays.asList(exps.get(0)));
+					}
+				}
+				replaced = true;
 				break;
 			case "col_description":
 			case "pg_get_constraintdef":
@@ -206,11 +237,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				parentSet.accept(TRUE);
 				return true;
 			case "pg_get_userbyid":
-				exps = func.getParameters().getExpressions();
-				if (exps.size() == 1 && exps.get(0) instanceof Column) {
+				List<Expression> exps = func.getParameters().getExpressions();
+				if (exps != null && exps.size() == 1 &&
+						exps.get(0) instanceof Column) {
 					switch (((Column) exps.get(0)).getColumnName()) {
 					case "nspowner":
 					case "relowner":
+					case "typowner":
 						parentSet.accept(CURRENT_USER);
 						return true;
 					default:
@@ -223,11 +256,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
 				return true;
+			case "pg_get_functiondef":
+			case "information_schema._pg_char_max_length":
+			case "information_schema._pg_numeric_precision":
+			case "information_schema._pg_numeric_scale":
+			case "information_schema._pg_datetime_precision":
+				parentSet.accept(NULL);
+				return true;
 			default:
 			}
-			boolean replaced = false;
 			if (el != null) {
-				List<Expression> exps = func.getParameters().getExpressions();
+				List<Expression> exps = el.getExpressions();
 				for (int i = 0; i < exps.size(); i ++) {
 					Expression ei = exps.get(i);
 					int i_ = i;
@@ -284,6 +323,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (left instanceof Column) {
 				Column col = (Column) left;
 				switch (col.getFullyQualifiedName()) {
+				case "c.oid":
+					if (right instanceof Column && ((Column) right).
+							getFullyQualifiedName().equals("t.typcollation")) {
+						parentSet.accept(FALSE);
+						return true;
+					}
+					break;
 				case "event_object_table":
 					if (right instanceof StringValue) {
 						parentSet.accept(FALSE);
@@ -298,8 +344,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					}
 					break;
 				case "p.proisagg":
-					if (right instanceof Column &&
-							((Column) right).getColumnName().equals("FALSE")) {
+					if (right instanceof Column && ((Column) right).
+							getFullyQualifiedName().equals("FALSE")) {
 						parentSet.accept(TRUE);
 						return true;
 					}
@@ -376,6 +422,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			table[0] = name;
 			return false;
 		}
+		if (fi instanceof SubSelect) {
+			SelectBody sb = ((SubSelect) fi).getSelectBody();
+			return sb instanceof PlainSelect && replace((PlainSelect) sb);
+		}
 		if (!(fi instanceof TableFunction)) {
 			return false;
 		}
@@ -406,8 +456,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (si instanceof SelectExpressionItem) {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
 				Alias alias = sei.getAlias();
-				replaced |= replace(sei.getExpression(), alias == null ?
-						null : alias.getName(), table[0], e -> {
+				Expression exp = sei.getExpression();
+				if (exp instanceof Function &&
+						((Function) exp).getName().equals("generate_series") &&
+						ps.getSelectItems().size() == 1 && ps.getFromItem() == null) {
+					sei.setExpression(GENERATE_SERIES_COLUMN);
+					TableFunction tf = new TableFunction();
+					tf.setFunction((Function) exp);
+					replace(exp, null);
+					ps.setFromItem(tf);
+					replaced = true;
+					break;
+				}
+				replaced |= replace(exp, alias == null ? null : alias.getName(),
+						table[0], e -> {
 					sei.setExpression(e);
 					if (e == PG_LISTENING_CHANNELS) {
 						sei.setAlias(PG_LISTENING_CHANNELS_ALIAS);
@@ -430,7 +492,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				ps.getSelectItems().size() == 1) {
 			obes.get(0).setExpression(ONE);
 		}
-		// OFFSET m LIMIT n -> LIMIT n OFFSET m 
+		// OFFSET m LIMIT n -> LIMIT n OFFSET m
 		if (ps.getOffset() != null && ps.getLimit() != null) {
 			replaced = true;
 		}
@@ -503,7 +565,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 		} catch (ParseException e) {
 			// Ignored
-			System.err.println(s + ": " + e);
+			// System.err.println(s + ": " + e);
 		}
 		return replaced ? sql : null;
 	}

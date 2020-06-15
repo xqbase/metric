@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 public class TestPgClients {
 	private Server server;
-	private Connection h2Conn, conn;
+	private Connection conn;
 	private Statement stat;
 
 	static {
@@ -34,10 +34,8 @@ public class TestPgClients {
 
 	@BeforeEach
 	public void before() throws SQLException {
-		h2Conn = DriverManager.getConnection("jdbc:h2:mem:pgserver;" +
-				"mode=postgresql;database_to_lower=true", "sa", "sa");
-		server = new Server(new PgServerCompat(), "-pgPort", "5535",
-				"-key", "pgserver", "mem:pgserver");
+		server = new Server(new PgServerCompat(), "-ifNotExists",
+				"-pgPort", "5535", "-key", "pgserver", "mem:pgserver");
 		server.start();
 		conn = DriverManager.getConnection("jdbc:postgresql://localhost:5535/pgserver", "sa", "sa");
 		stat = conn.createStatement();
@@ -257,7 +255,7 @@ public class TestPgClients {
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT specific_name AS \"SPECIFIC_NAME\", " +
 				"routine_type AS \"ROUTINE_TYPE\", routine_name AS \"ROUTINE_NAME\", " +
-				"type_udt_name AS \"DTD_IDENTIFIER\" FROM information_schema.routines " + 
+				"type_udt_name AS \"DTD_IDENTIFIER\" FROM information_schema.routines " +
 				"WHERE routine_schema = current_schema() ORDER BY SPECIFIC_NAME")) {
 			assertFalse(rs.next());
 		}
@@ -268,8 +266,8 @@ public class TestPgClients {
 				"pg_total_relation_size(c.oid) - pg_relation_size(c.oid) AS \"Index_length\", " +
 				"obj_description(c.oid, 'pg_class') AS \"Comment\", " +
 				"CASE WHEN c.relhasoids THEN 'oid' ELSE '' END AS \"Oid\", " +
-				"c.reltuples as \"Rows\", n.nspname FROM pg_class c " + 
-				"JOIN pg_namespace n ON(n.nspname = current_schema() AND n.oid = c.relnamespace) " + 
+				"c.reltuples as \"Rows\", n.nspname FROM pg_class c " +
+				"JOIN pg_namespace n ON(n.nspname = current_schema() AND n.oid = c.relnamespace) " +
 				"WHERE relkind IN ('r', 'm', 'v', 'f') ORDER BY relname")) {
 			assertTrue(rs.next());
 			assertEquals("test", rs.getString("Name"));
@@ -301,7 +299,7 @@ public class TestPgClients {
 				"pg_get_constraintdef(oid) AS definition FROM pg_constraint " +
 				"WHERE conrelid = (SELECT pc.oid FROM pg_class AS pc " +
 				"INNER JOIN pg_namespace AS pn ON (pn.oid = pc.relnamespace) " +
-				"WHERE pc.relname = 'test' AND pn.nspname = current_schema()) " + 
+				"WHERE pc.relname = 'test' AND pn.nspname = current_schema()) " +
 				"AND contype = 'f'::char ORDER BY conkey, conname")) {
 			assertFalse(rs.next());
 		}
@@ -407,11 +405,11 @@ public class TestPgClients {
 			assertTrue(rs.next());
 			assertEquals(0, rs.getLong(1));
 		}
-		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_type T " + 
-				"JOIN pg_namespace nsp ON nsp.oid = T.typnamespace " + 
-				"LEFT JOIN pg_class ct ON ct.oid = T.typrelid AND ct.relkind <> 'c' " + 
-				"WHERE ( T.typtype != 'd' AND T.typtype != 'p' AND T.typcategory != 'A' ) " + 
-				"AND (ct.oid IS NULL OR ct.oid = 0) -- filter for tables\r\n" + 
+		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_type T " +
+				"JOIN pg_namespace nsp ON nsp.oid = T.typnamespace " +
+				"LEFT JOIN pg_class ct ON ct.oid = T.typrelid AND ct.relkind <> 'c' " +
+				"WHERE ( T.typtype != 'd' AND T.typtype != 'p' AND T.typcategory != 'A' ) " +
+				"AND (ct.oid IS NULL OR ct.oid = 0) -- filter for tables\r\n" +
 				"AND nsp.nspname =  'public'")) {
 			// just no exception
 		}
@@ -505,6 +503,72 @@ public class TestPgClients {
 		try (ResultSet rs = stat.executeQuery("EXPLAIN VERBOSE SELECT * FROM test")) {
 			assertTrue(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT t.oid AS id, nsp.nspname AS schema, " +
+				"t.typname AS name, t.typtype AS kind, pg_get_userbyid( t.typowner ) AS owner, " +
+				"t.typlen AS size, obj_description( t.oid ) as comment, " +
+				"NOT t.typnotnull AS is_nullable, t.typdefault, t_base.typname AS base_type, " +
+				"t.typndims, CONCAT( '\"', cn.nspname, '\".\"', c.collname, '\"' ) AS collation, " +
+				"information_schema._pg_char_max_length( t.typbasetype, t.typtypmod ) AS length, " +
+				"information_schema._pg_numeric_precision( t.typbasetype, t.typtypmod ) AS precision, " +
+				"information_schema._pg_numeric_scale( t.typbasetype, t.typtypmod ) AS scale, " +
+				"information_schema._pg_datetime_precision( t.typbasetype, t.typtypmod ) AS datetime_precision " +
+				"FROM pg_type T JOIN pg_namespace nsp ON nsp.oid = t.typnamespace " +
+				"JOIN pg_type t_base ON t.typbasetype = t_base.oid " +
+				"LEFT JOIN pg_collation c ON c.oid = t.typcollation " +
+				"LEFT JOIN pg_namespace cn ON c.collnamespace = cn.oid " +
+				"WHERE t.typtype = 'd' AND nsp.nspname = 'public'")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery(
+				"SELECT proname || '$$' || array_to_string(p.proargtypes, '_') AS function_name, " +
+				"n.nspname AS schema, proname, typname, lanname, p.oid, " +
+				"pg_get_functiondef(p.oid) AS text, obj_description(p.oid) AS comment, " +
+				"(SELECT CASE WHEN p.proallargtypes IS NULL " +
+				"THEN array_to_string(array(SELECT t.typname FROM pg_type t JOIN (SELECT i FROM (SELECT " +
+				"generate_series(array_lower(p.proargtypes, 1), array_upper(p.proargtypes, 1))) g(i)) sub " +
+				"ON p.proargtypes[sub.i] = t.oid ORDER BY sub.i), '\r\n ') " +
+				"ELSE array_to_string(array(SELECT t.typname FROM pg_type t JOIN (SELECT i FROM (SELECT " +
+				"generate_series(array_lower(p.proallargtypes, 1), array_upper(p.proallargtypes, 1))) g(i)) sub " +
+				"ON p.proallargtypes[sub.i] = t.oid ORDER BY sub.i), '\r\n') END) AS argtypenames, " +
+				"array_to_string(array(SELECT t.typname FROM pg_type t JOIN (SELECT i FROM (SELECT " +
+				"generate_series(array_lower(p.proargtypes, 1), array_upper(p.proargtypes, 1))) g(i)) sub " +
+				"ON p.proargtypes[sub.i] = t.oid ORDER BY sub.i), '\r\n ') AS argsignature, " +
+				"array_to_string(p.proargmodes, '\r\n') AS argmodes FROM pg_catalog.pg_namespace n " +
+				"JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid " +
+				"JOIN (SELECT 0 AS oid, '' AS lanname WHERE FALSE) l ON p.prolang = l.oid " +
+				"JOIN pg_catalog.pg_type t ON p.prorettype = t.oid " +
+				"WHERE proisagg = false AND n.nspname = 'public'")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.oid, c.conname AS constraint_name, " +
+				"ns.nspname AS schema, ns_c.nspname As \"Schema Child\", " +
+				"ns_p.nspname As \"Schema Parent\", obj_description( c.oid ) AS comment, " +
+				"confdeltype, confupdtype, confmatchtype, cls_c.relname AS table_name, " +
+				"cls_p.relname AS foreign_table_name FROM pg_constraint c " +
+				"JOIN pg_namespace ns ON ns.oid = c.connamespace " +
+				"JOIN pg_class cls_c ON cls_c.oid = c.conrelid " +
+				"JOIN pg_namespace ns_c ON ns_c.oid = cls_c.relnamespace " +
+				"JOIN pg_class cls_p ON cls_p.oid = c.confrelid " +
+				"JOIN pg_namespace ns_p ON ns_p.oid = cls_p.relnamespace " +
+				"WHERE c.contype = 'f' AND ( ns_c.nspname = 'public' OR ns_p.nspname = 'public' )")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT T.oid AS id, nsp.nspname AS schema, " +
+				"T.typname AS name, T.typtype AS kind, pg_get_userbyid(t.typowner) AS owner, " +
+				"typlen AS len, obj_description(t.oid) AS comment FROM pg_type T " +
+				"JOIN pg_namespace nsp ON nsp.oid = T.typnamespace " +
+				"LEFT JOIN pg_class ct ON ct.oid = T.typrelid AND ct.relkind <> 'c' " +
+				"WHERE (T.typtype != 'd' AND T.typtype != 'p' AND TRUE) " +
+				"AND (ct.oid IS NULL OR ct.oid = 0) AND nsp.nspname = 'public'")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT cl.oid, cl.relname AS viewname, " +
+				"ns.nspname AS schema,ltrim( pg_get_viewdef( cl.oid ) ) AS definition, " +
+				"obj_description( cl.oid ) AS comment FROM pg_class cl " +
+				"JOIN pg_namespace ns ON ns.oid=relnamespace " +
+				"AND cl.relkind = 'v' AND ns.nspname = 'public'")) {
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -543,6 +607,30 @@ public class TestPgClients {
 			assertTrue(rs.next());
 			assertEquals("0", rs.getObject(1));
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT * FROM generate_series(5, 10)")) {
+			for (int i = 5; i <= 10; i ++) {
+				assertTrue(rs.next());
+				assertEquals(i, rs.getLong(1));
+			}
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT generate_series(5, 10) gs")) {
+			for (int i = 5; i <= 10; i ++) {
+				assertTrue(rs.next());
+				assertEquals(i, rs.getLong("gs"));
+			}
+			assertFalse(rs.next());
+		}
+		/*
+		try (ResultSet rs = stat.executeQuery("SELECT array_upper(ARRAY[5, 6, 7, 8, 9, 10], 1)")) {
+			assertEquals(6, rs.getLong(1));
+		}
+		*/
+		try (ResultSet rs = stat.executeQuery("SELECT array_upper()")) {
+			assertFalse(true);
+		} catch (SQLException e) {
+			assertEquals("42001", e.getSQLState());
+		}
 	}
 
 	@AfterEach
@@ -550,6 +638,5 @@ public class TestPgClients {
 		stat.close();
 		conn.close();
 		server.stop();
-		h2Conn.close();
 	}
 }
