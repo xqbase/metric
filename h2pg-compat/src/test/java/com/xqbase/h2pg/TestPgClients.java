@@ -569,6 +569,12 @@ public class TestPgClients {
 				"AND cl.relkind = 'v' AND ns.nspname = 'public'")) {
 			assertFalse(rs.next());
 		}
+		try (PreparedStatement ps = conn.prepareStatement("INSERT INTO \"public\".\"test\" " +
+				"( \"id\", \"x1\" ) VALUES(?, ? ) RETURNING \"id\", \"x1\"")) {
+			ps.setInt(1, 5);
+			ps.setInt(2, 10);
+			assertEquals(1, ps.executeUpdate());
+		}
 	}
 
 	@Test

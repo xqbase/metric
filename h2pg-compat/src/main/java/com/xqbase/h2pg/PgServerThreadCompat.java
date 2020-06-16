@@ -39,6 +39,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParser;
@@ -48,6 +49,7 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.OrderByElement;
@@ -90,13 +92,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final LongValue ZERO = new LongValue(0);
 	private static final LongValue ONE = new LongValue(1);
 	private static final LongValue MINUS_ONE = new LongValue(-1);
-	private static final StringValue EMPTY = new StringValue("");
 	private static final NullValue NULL = new NullValue();
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
 	private static final Function CURRENT_USER = new Function();
 	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
-	private static final StringValue PG_LISTENING_CHANNELS = new StringValue("");
+	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
 			new Alias("pg_listening_channels");
 	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
@@ -150,10 +151,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private static boolean replace(Expression exp, Consumer<Expression> parentSet) {
-		return replace(exp, null, null, parentSet);
+		return replace(exp, null, parentSet);
 	}
 
-	private static boolean replace(Expression exp, String alias,
+	private static boolean replace(Expression exp,
 			String table, Consumer<Expression> parentSet) {
 		if (exp instanceof Column) {
 			Column col = (Column) exp;
@@ -164,9 +165,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return true;
 				}
 				break;
+			case "confdeltype":
+			case "confmatchtype":
+			case "confupdtype":
+				if ("pg_constraint".equals(table)) {
+					parentSet.accept(NULL);
+					return true;
+				}
+				break;
 			case "datconnlimit":
 				if ("pg_database".equals(table)) {
-					parentSet.accept(NULL);
+					parentSet.accept(MINUS_ONE);
 					return true;
 				}
 				break;
@@ -189,8 +198,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 				break;
 			case "type_udt_name":
-				if ("\"DTD_IDENTIFIER\"".equals(alias)) {
-					parentSet.accept(EMPTY);
+				if ("information_schema.routines".equals(table)) {
+					parentSet.accept(NULL);
 					return true;
 				}
 				break;
@@ -216,22 +225,44 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				parentSet.accept(ONE);
 				return true;
 			case "array_upper":
-				func.setName("array_length");
-				if (el != null) {
-					List<Expression> exps = el.getExpressions();
-					if (exps.size() > 1) {
-						el.setExpressions(Arrays.asList(exps.get(0)));
+			case "pg_catalog.array_upper":
+				if (el != null && el.getExpressions().size() > 0) {
+					Expression exp0 = el.getExpressions().get(0);
+					if (exp0 instanceof Column) {
+						// array_upper(p.proargtypes, 1) -> -1
+						switch (((Column) exp0).getFullyQualifiedName()) {
+						case "p.proargtypes":
+						case "p.proallargtypes":
+							parentSet.accept(MINUS_ONE);
+							return true;
+						default:
+						}
 					}
+					el.setExpressions(Arrays.asList(exp0));
 				}
+				func.setName("array_length");
 				replaced = true;
 				break;
+			case "array_to_string":
+				if (el != null && el.getExpressions().size() > 0) {
+					Expression exp0 = el.getExpressions().get(0);
+					if (exp0 instanceof Column && ((Column) exp0).
+							getFullyQualifiedName().equals("p.proargmodes")) {
+						parentSet.accept(NULL);
+						return true;
+					}
+				}
+				break;
 			case "col_description":
+			case "information_schema._pg_char_max_length":
+			case "information_schema._pg_numeric_precision":
+			case "information_schema._pg_numeric_scale":
+			case "information_schema._pg_datetime_precision":
 			case "pg_get_constraintdef":
+			case "pg_get_functiondef":
+			case "pg_get_viewdef":
 			case "shobj_description":
-				parentSet.accept(EMPTY);
-				return true;
-			case "pg_catalog.array_upper":
-				parentSet.accept(MINUS_ONE);
+				parentSet.accept(NULL);
 				return true;
 			case "pg_catalog.pg_function_is_visible":
 				parentSet.accept(TRUE);
@@ -240,10 +271,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				List<Expression> exps = func.getParameters().getExpressions();
 				if (exps != null && exps.size() == 1 &&
 						exps.get(0) instanceof Column) {
-					switch (((Column) exps.get(0)).getColumnName()) {
+					// pg_get_userbyid(*owner) -> current_user()
+					switch (((Column) exps.get(0)).getFullyQualifiedName()) {
 					case "nspowner":
 					case "relowner":
-					case "typowner":
+					case "t.typowner":
 						parentSet.accept(CURRENT_USER);
 						return true;
 					default:
@@ -255,13 +287,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				return true;
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
-				return true;
-			case "pg_get_functiondef":
-			case "information_schema._pg_char_max_length":
-			case "information_schema._pg_numeric_precision":
-			case "information_schema._pg_numeric_scale":
-			case "information_schema._pg_datetime_precision":
-				parentSet.accept(NULL);
 				return true;
 			default:
 			}
@@ -278,8 +303,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (exp instanceof NotExpression) {
 			NotExpression ne = (NotExpression) exp;
 			Expression exp1 = ne.getExpression();
-			if (exp1 instanceof Column &&
-					((Column) exp1).getColumnName().equals("datistemplate")) {
+			if (exp1 instanceof Column && ((Column) exp1).
+					getFullyQualifiedName().equals("datistemplate")) {
 				parentSet.accept(TRUE);
 				return true;
 			}
@@ -290,6 +315,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			CaseExpression ce = (CaseExpression) exp;
 			replaced |= replace(ce.getSwitchExpression(), ce::setSwitchExpression);
 			for (WhenClause wc : ce.getWhenClauses()) {
+				Expression when = wc.getWhenExpression();
+				if (when instanceof IsNullExpression) {
+					IsNullExpression isNull = (IsNullExpression) when;
+					Expression left = isNull.getLeftExpression();
+					// WHEN p.proallargtypes IS NULL -> WHEN TRUE
+					if (!isNull.isNot() && left instanceof Column && ((Column) left).
+							getFullyQualifiedName().equals("p.proallargtypes")) {
+						wc.setWhenExpression(TRUE);
+						replaced = true;
+					}
+				}
 				replaced |= replace(wc.getWhenExpression(), wc::setWhenExpression) |
 						replace(wc.getThenExpression(), wc::setThenExpression);
 			}
@@ -320,47 +356,32 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
 		if (be instanceof EqualsTo) {
+			switch (be.toString()) {
+			case "c.oid = t.typcollation":
+			case "con.tableoid = dep.refclassid":
+			case "dep.classid = ci.tableoid":
+			case "ns.oid = c.connamespace":
+			case "p.prolang = l.oid":
+				parentSet.accept(FALSE);
+				return true;
+			case "p.pronargs = 0":
+				parentSet.accept(TRUE);
+				return true;
+			default:
+			}
 			if (left instanceof Column) {
-				Column col = (Column) left;
-				switch (col.getFullyQualifiedName()) {
-				case "c.oid":
-					if (right instanceof Column && ((Column) right).
-							getFullyQualifiedName().equals("t.typcollation")) {
-						parentSet.accept(FALSE);
-						return true;
-					}
-					break;
+				switch (((Column) left).getFullyQualifiedName()) {
 				case "event_object_table":
 					if (right instanceof StringValue) {
 						parentSet.accept(FALSE);
 						return true;
 					}
 					break;
-				case "p.pronargs":
-					if (right instanceof LongValue &&
-							((LongValue) right).getValue() == 0) {
-						parentSet.accept(TRUE);
-						return true;
-					}
-					break;
+				case "proisagg":
 				case "p.proisagg":
 					if (right instanceof Column && ((Column) right).
-							getFullyQualifiedName().equals("FALSE")) {
+							getFullyQualifiedName().toUpperCase().equals("FALSE")) {
 						parentSet.accept(TRUE);
-						return true;
-					}
-					break;
-				case "dep.classid":
-					if (right instanceof Column && ((Column) right).
-							getFullyQualifiedName().equals("ci.tableoid")) {
-						parentSet.accept(FALSE);
-						return true;
-					}
-					break;
-				case "con.tableoid":
-					if (right instanceof Column && ((Column) right).
-							getFullyQualifiedName().equals("dep.refclassid")) {
-						parentSet.accept(FALSE);
 						return true;
 					}
 					break;
@@ -383,23 +404,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 			}
 		} else if (be instanceof NotEqualsTo) {
-			if (left instanceof Column) {
-				Column col = (Column) left;
-				String columnName = col.getColumnName();
-				Table colTable = col.getTable();
-				if (colTable != null) {
-					columnName = colTable.getName() + "." + columnName;
-				}
-				switch (columnName) {
-				case "T.typcategory":
-					if (right instanceof StringValue &&
-							((StringValue) right).getValue().equals("A")) {
-						parentSet.accept(TRUE);
-						return true;
-					}
-					break;
-				default:
-				}
+			switch (be.toString()) {
+			case "T.typcategory != 'A'":
+				parentSet.accept(TRUE);
+				return true;
+			default:
 			}
 		}
 		// Use `|` instead of `||` to avoid short-circuit
@@ -410,7 +419,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static boolean replace(FromItem fi,
 			Consumer<FromItem> parentSet, String[] table) {
 		if (fi instanceof Table) {
-			String name = ((Table) fi).getName();
+			String name = ((Table) fi).getFullyQualifiedName();
 			SelectBody sb = TABLE_MAP.get(name);
 			if (sb != null) {
 				SubSelect ss = new SubSelect();
@@ -455,7 +464,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		for (SelectItem si : ps.getSelectItems()) {
 			if (si instanceof SelectExpressionItem) {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
-				Alias alias = sei.getAlias();
 				Expression exp = sei.getExpression();
 				if (exp instanceof Function &&
 						((Function) exp).getName().equals("generate_series") &&
@@ -468,12 +476,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replaced = true;
 					break;
 				}
-				replaced |= replace(exp, alias == null ? null : alias.getName(),
-						table[0], e -> {
+				replaced |= replace(exp, table[0], e -> {
 					sei.setExpression(e);
 					if (e == PG_LISTENING_CHANNELS) {
 						sei.setAlias(PG_LISTENING_CHANNELS_ALIAS);
 						ps.setWhere(FALSE);
+					} else if (sei.getAlias() == null && exp instanceof Column) {
+						sei.setAlias(new Alias(((Column) exp).getColumnName()));
 					}
 				});
 			}
@@ -553,6 +562,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (st instanceof Select) {
 				if (replace(((Select) st).getSelectBody())) {
 					return st.toString();
+				}
+			} else if (st instanceof Insert) {
+				Insert ins = ((Insert) st);
+				if (ins.getReturningExpressionList() != null) {
+					ins.setReturningExpressionList(null);
+					return ins.toString();
 				}
 			} else if (st instanceof ShowStatement) {
 				ShowStatement ss = (ShowStatement) st;
