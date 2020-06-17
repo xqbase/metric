@@ -49,6 +49,7 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.create.table.ColDataType;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
@@ -101,6 +102,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
 			new Alias("pg_listening_channels");
 	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
+	private static final Column OID_COLUMN = new Column("oid");
+	private static final Table PG_CLASS = new Table("pg_catalog.pg_class");
+	private static final SelectExpressionItem RELNAME_COLUMN =
+			new SelectExpressionItem();
+	private static final ColDataType TEXT_TYPE = new ColDataType();
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 
 	static {
@@ -131,6 +137,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		PG_GET_KEYWORDS.setMultiExpressionList(words);
 		PG_GET_KEYWORDS.setColumnNames(Arrays.asList("word"));
 		PG_GET_KEYWORDS.setAlias(new Alias("pg_get_keywords"));
+		TEXT_TYPE.setDataType("text");
+		RELNAME_COLUMN.setExpression(new Column("relname"));
 		TABLE_MAP.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
 		TABLE_MAP.put("pg_depend",
 				select("SELECT '' AS deptype, 0 AS classid, 0 AS refclassid, 0 AS objid, " +
@@ -341,6 +349,28 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			Expression left = oldLeft;
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
+			}
+			// x::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = x, oid::text)
+			if (ce.getType().getDataType().equals("regclass")) {
+				Expression[] ceLeft = {ce.getLeftExpression()};
+				replace(ceLeft[0], e -> ceLeft[0] = e);
+				PlainSelect ps = new PlainSelect();
+				ps.addSelectItems(RELNAME_COLUMN);
+				ps.setFromItem(PG_CLASS);
+				EqualsTo et = new EqualsTo();
+				et.setLeftExpression(OID_COLUMN);
+				et.setRightExpression(ceLeft[0]);
+				ps.setWhere(et);
+				SubSelect ss = new SubSelect();
+				ss.setSelectBody(ps);
+				Function func = new Function();
+				func.setName("IFNULL");
+				CastExpression ceText = new CastExpression();
+				ceText.setType(TEXT_TYPE);
+				ceText.setLeftExpression(ceLeft[0]);
+				func.setParameters(new ExpressionList(ss, ceText));
+				parentSet.accept(func);
+				return true;
 			}
 			ce.setLeftExpression(left);
 			return left != oldLeft | replace(left, ce::setLeftExpression);

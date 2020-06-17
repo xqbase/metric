@@ -637,6 +637,19 @@ public class TestPgClients {
 		} catch (SQLException e) {
 			assertEquals("42001", e.getSQLState());
 		}
+		int oid;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+			rs.next();
+			oid = rs.getInt("oid");
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT " + oid + "::regclass")) {
+			rs.next();
+			assertEquals("test", rs.getString(1));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT 10000001::regclass")) {
+			rs.next();
+			assertEquals("10000001", rs.getString(1));
+		}
 	}
 
 	@AfterEach
