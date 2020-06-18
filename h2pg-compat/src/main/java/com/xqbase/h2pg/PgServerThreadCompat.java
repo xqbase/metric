@@ -350,25 +350,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
 			}
-			// x::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = x, oid::text)
-			if (ce.getType().getDataType().equals("regclass")) {
-				Expression[] ceLeft = {ce.getLeftExpression()};
-				replace(ceLeft[0], e -> ceLeft[0] = e);
+			// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, oid::text)
+			if (left instanceof LongValue && ce.getType().getDataType().equals("regclass")) {
 				PlainSelect ps = new PlainSelect();
 				ps.addSelectItems(RELNAME_COLUMN);
 				ps.setFromItem(PG_CLASS);
 				EqualsTo et = new EqualsTo();
 				et.setLeftExpression(OID_COLUMN);
-				et.setRightExpression(ceLeft[0]);
+				et.setRightExpression(left);
 				ps.setWhere(et);
 				SubSelect ss = new SubSelect();
 				ss.setSelectBody(ps);
 				Function func = new Function();
 				func.setName("IFNULL");
-				CastExpression ceText = new CastExpression();
-				ceText.setType(TEXT_TYPE);
-				ceText.setLeftExpression(ceLeft[0]);
-				func.setParameters(new ExpressionList(ss, ceText));
+				func.setParameters(new ExpressionList(ss, new StringValue(left.toString())));
 				parentSet.accept(func);
 				return true;
 			}
@@ -603,8 +598,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				ShowStatement ss = (ShowStatement) st;
 				switch (ss.getName()) {
 				case "LC_COLLATE":
-					ss.setName("client_encoding");
-					return ss.toString();
+					return "SELECT 'C' lc_collate";
 				default:
 				}
 			}
@@ -627,6 +621,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private Socket socket;
 	private PgServerCompat server;
 	private InputStream ins;
+	private OutputStream outs;
 
 	public PgServerThreadCompat(Socket socket, PgServerCompat server) {
 		super(socket, server);
@@ -724,12 +719,36 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		try {
 			server.trace("Connect");
 			ins = socket.getInputStream();
-			out.set(this, socket.getOutputStream());
+			outs = socket.getOutputStream();
+			/*
+			out.set(this, new ByteArrayOutputStream() {
+				@Override
+				public synchronized void write(int b) {
+					if (b == 'N') {
+						// 'N' is not flushed
+					}
+				}
+
+				@Override
+				public void flush() throws IOException {
+					if (count == 0) {
+						return;
+					}
+					if (buf[0] == 'T') {
+						// fill oid and attnum
+					}
+					outs.write(buf, 0, count);
+					count = 0;
+				}
+			};
+			*/
+			out.set(this, outs);
 			// dataInRaw.set(this, new DataInputStream(ins));
 			while (!stop.getBoolean(this)) {
 				read();
 				process.invoke(this);
-				((OutputStream) out.get(this)).flush();
+				// not necessary to flush SocketOutputStream
+				// outs.flush();
 			}
 		} catch (EOFException e) {
 			// more or less normal disconnect

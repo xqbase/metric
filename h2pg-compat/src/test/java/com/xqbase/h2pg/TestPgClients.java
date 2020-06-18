@@ -251,7 +251,7 @@ public class TestPgClients {
 	public void testAdminer() throws SQLException {
 		try (ResultSet rs = stat.executeQuery("SHOW LC_COLLATE")) {
 			assertTrue(rs.next());
-			assertEquals("UNICODE", rs.getString(1));
+			assertEquals("C", rs.getString(1));
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT specific_name AS \"SPECIFIC_NAME\", " +
 				"routine_type AS \"ROUTINE_TYPE\", routine_name AS \"ROUTINE_NAME\", " +
@@ -649,6 +649,10 @@ public class TestPgClients {
 		try (ResultSet rs = stat.executeQuery("SELECT 10000001::regclass")) {
 			rs.next();
 			assertEquals("10000001", rs.getString(1));
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT x1 FROM test")) {
+			ResultSetMetaData rsmd = rs.getMetaData();
+			assertEquals("test", rsmd.getTableName(1));
 		}
 	}
 
