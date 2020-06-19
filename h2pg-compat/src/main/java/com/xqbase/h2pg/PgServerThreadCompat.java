@@ -12,7 +12,6 @@ import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,9 +38,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
-import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
-import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParser;
 import net.sf.jsqlparser.parser.ParseException;
 import net.sf.jsqlparser.parser.StringProvider;
@@ -139,80 +136,60 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		PG_GET_KEYWORDS.setAlias(new Alias("pg_get_keywords"));
 		TEXT_TYPE.setDataType("text");
 		RELNAME_COLUMN.setExpression(new Column("relname"));
-		TABLE_MAP.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
-		TABLE_MAP.put("pg_depend",
-				select("SELECT '' AS deptype, 0 AS classid, 0 AS refclassid, 0 AS objid, " +
-				"0 AS objsubid, 0 AS refobjid, 0 AS refobjsubid WHERE FALSE"));
+		// add columns
+		TABLE_MAP.put("pg_attribute",
+				select("SELECT *, 0 attndims FROM pg_attribute"));
+		TABLE_MAP.put("pg_class",
+				select("SELECT *, NULL tableoid FROM pg_class"));
+		TABLE_MAP.put("pg_constraint",
+				select("SELECT *, NULL confdeltype, NULL confmatchtype, " +
+				"NULL confupdtype, NULL connamespace, NULL tableoid FROM pg_constraint"));
+		TABLE_MAP.put("pg_database",
+				select("SELECT *, -1 datconnlimit FROM pg_database"));
+		TABLE_MAP.put("pg_index",
+				select("SELECT *, NULL indoption FROM pg_index"));
+		// Does not work?
+		// SELECT * FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'test'
+		/*
+		TABLE_MAP.put("pg_namespace",
+				select("SELECT *, NULL nspowner FROM pg_namespace"));
+		*/
+		TABLE_MAP.put("pg_proc",
+				select("SELECT *, NULL proallargtypes, NULL prolang, " +
+				"0 pronargs, FALSE proisagg FROM pg_proc"));
+		TABLE_MAP.put("pg_catalog.pg_proc",
+				select("SELECT *, NULL proallargtypes, NULL prolang, " +
+				"0 pronargs, FALSE proisagg FROM pg_proc"));
+		TABLE_MAP.put("pg_type",
+				select("SELECT *, NULL typcategory, NULL typcollation, " +
+				"NULL typdefault, 0 typndims FROM pg_type"));
+		TABLE_MAP.put("information_schema.routines",
+				select("SELECT *, NULL type_udt_name FROM information_schema.routines"));
+		TABLE_MAP.put("information_schema.triggers",
+				select("SELECT *, NULL event_object_table FROM information_schema.triggers"));
+		// empty tables
 		TABLE_MAP.put("pg_collation",
-				select("SELECT 0 AS oid, '' AS collnamespace, '' AS collname WHERE FALSE"));
+				select("SELECT 0 oid, '' collnamespace, '' collname WHERE FALSE"));
+		TABLE_MAP.put("pg_depend",
+				select("SELECT '' deptype, 0 classid, 0 refclassid, 0 objid, " +
+				"0 objsubid, 0 refobjid, 0 refobjsubid WHERE FALSE"));
+		TABLE_MAP.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
 		TABLE_MAP.put("pg_language",
-				select("SELECT 0 AS oid, '' AS lanname WHERE FALSE"));
+				select("SELECT 0 oid, '' lanname WHERE FALSE"));
 		TABLE_MAP.put("pg_trigger",
-				select("SELECT 0 AS oid, '' AS tgname, 0 AS tgrelid WHERE FALSE"));
+				select("SELECT 0 oid, '' tgname, 0 tgrelid WHERE FALSE"));
+		// views
 		TABLE_MAP.put("pg_tables",
-				select("SELECT n.nspname AS schemaname, c.relname AS tablename " +
+				select("SELECT n.nspname schemaname, c.relname tablename " +
 				"FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
 				"WHERE c.relkind IN ('r', 'p')"));
 		TABLE_MAP.put("pg_views",
-				select("SELECT n.nspname AS schemaname, c.relname AS viewname FROM pg_class c " +
+				select("SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
 	}
 
 	private static boolean replace(Expression exp, Consumer<Expression> parentSet) {
-		return replace(exp, null, parentSet);
-	}
-
-	private static boolean replace(Expression exp,
-			String table, Consumer<Expression> parentSet) {
 		if (exp instanceof Column) {
-			Column col = (Column) exp;
-			switch (col.getFullyQualifiedName()) {
-			case "att.attndims":
-				if ("pg_attribute".equals(table)) {
-					parentSet.accept(ZERO);
-					return true;
-				}
-				break;
-			case "confdeltype":
-			case "confmatchtype":
-			case "confupdtype":
-				if ("pg_constraint".equals(table)) {
-					parentSet.accept(NULL);
-					return true;
-				}
-				break;
-			case "datconnlimit":
-				if ("pg_database".equals(table)) {
-					parentSet.accept(MINUS_ONE);
-					return true;
-				}
-				break;
-			case "indoption":
-				if ("pg_index".equals(table)) {
-					parentSet.accept(NULL);
-					return true;
-				}
-				break;
-			case "t.typdefault":
-				if ("pg_type".equals(table)) {
-					parentSet.accept(NULL);
-					return true;
-				}
-				break;
-			case "t.typndims":
-				if ("pg_type".equals(table)) {
-					parentSet.accept(ZERO);
-					return true;
-				}
-				break;
-			case "type_udt_name":
-				if ("information_schema.routines".equals(table)) {
-					parentSet.accept(NULL);
-					return true;
-				}
-				break;
-			default:
-			}
 			return false;
 		}
 		if (exp instanceof Function) {
@@ -238,6 +215,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					Expression exp0 = el.getExpressions().get(0);
 					if (exp0 instanceof Column) {
 						// array_upper(p.proargtypes, 1) -> -1
+						// p.pro[all]argtypes in sub-query does not work
 						switch (((Column) exp0).getFullyQualifiedName()) {
 						case "p.proargtypes":
 						case "p.proallargtypes":
@@ -323,17 +301,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			CaseExpression ce = (CaseExpression) exp;
 			replaced |= replace(ce.getSwitchExpression(), ce::setSwitchExpression);
 			for (WhenClause wc : ce.getWhenClauses()) {
-				Expression when = wc.getWhenExpression();
-				if (when instanceof IsNullExpression) {
-					IsNullExpression isNull = (IsNullExpression) when;
-					Expression left = isNull.getLeftExpression();
-					// WHEN p.proallargtypes IS NULL -> WHEN TRUE
-					if (!isNull.isNot() && left instanceof Column && ((Column) left).
-							getFullyQualifiedName().equals("p.proallargtypes")) {
-						wc.setWhenExpression(TRUE);
-						replaced = true;
-					}
-				}
 				replaced |= replace(wc.getWhenExpression(), wc::setWhenExpression) |
 						replace(wc.getThenExpression(), wc::setThenExpression);
 			}
@@ -380,60 +347,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
-		if (be instanceof EqualsTo) {
-			switch (be.toString()) {
-			case "c.oid = t.typcollation":
-			case "con.tableoid = dep.refclassid":
-			case "dep.classid = ci.tableoid":
-			case "ns.oid = c.connamespace":
-			case "p.prolang = l.oid":
-				parentSet.accept(FALSE);
+		// value = ANY(array) -> ARRAY_CONTAINS(array, value)
+		if (be instanceof EqualsTo && right instanceof Function &&
+				((Function) right).getName().toUpperCase().equals("ANY")) {
+			Function func = (Function) right;
+			List<Expression> exps = func.getParameters().getExpressions();
+			if (exps.size() == 1 && !(exps.get(0) instanceof SubSelect)) {
+				ExpressionList el = new ExpressionList(exps.get(0), left);
+				replace(exps.get(0), e -> el.getExpressions().set(0, e));
+				replace(left, e -> el.getExpressions().set(1, e));
+				func.setName("ARRAY_CONTAINS");
+				func.setParameters(el);
+				parentSet.accept(func);
 				return true;
-			case "p.pronargs = 0":
-				parentSet.accept(TRUE);
-				return true;
-			default:
-			}
-			if (left instanceof Column) {
-				switch (((Column) left).getFullyQualifiedName()) {
-				case "event_object_table":
-					if (right instanceof StringValue) {
-						parentSet.accept(FALSE);
-						return true;
-					}
-					break;
-				case "proisagg":
-				case "p.proisagg":
-					if (right instanceof Column && ((Column) right).
-							getFullyQualifiedName().toUpperCase().equals("FALSE")) {
-						parentSet.accept(TRUE);
-						return true;
-					}
-					break;
-				default:
-				}
-			}
-			// value = ANY(array) -> ARRAY_CONTAINS(array, value)
-			if (right instanceof Function &&
-					((Function) right).getName().toUpperCase().equals("ANY")) {
-				Function func = (Function) right;
-				List<Expression> exps = func.getParameters().getExpressions();
-				if (exps.size() == 1 && !(exps.get(0) instanceof SubSelect)) {
-					ExpressionList el = new ExpressionList(exps.get(0), left);
-					replace(exps.get(0), e -> el.getExpressions().set(0, e));
-					replace(left, e -> el.getExpressions().set(1, e));
-					func.setName("ARRAY_CONTAINS");
-					func.setParameters(el);
-					parentSet.accept(func);
-					return true;
-				}
-			}
-		} else if (be instanceof NotEqualsTo) {
-			switch (be.toString()) {
-			case "T.typcategory != 'A'":
-				parentSet.accept(TRUE);
-				return true;
-			default:
 			}
 		}
 		// Use `|` instead of `||` to avoid short-circuit
@@ -441,19 +367,21 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replace(right, be::setRightExpression);
 	}
 
-	private static boolean replace(FromItem fi,
-			Consumer<FromItem> parentSet, String[] table) {
+	private static boolean replace(FromItem fi, Consumer<FromItem> parentSet) {
 		if (fi instanceof Table) {
 			String name = ((Table) fi).getFullyQualifiedName();
 			SelectBody sb = TABLE_MAP.get(name);
 			if (sb != null) {
 				SubSelect ss = new SubSelect();
 				ss.setSelectBody(sb);
-				ss.setAlias(fi.getAlias());
+				Alias alias = fi.getAlias();
+				if (alias == null) {
+					alias = new Alias(((Table) fi).getName());
+				}
+				ss.setAlias(alias);
 				parentSet.accept(ss);
 				return true;
 			}
-			table[0] = name;
 			return false;
 		}
 		if (fi instanceof SubSelect) {
@@ -474,8 +402,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				ti.setFunction((Function) exp);
 			} else {
 				PlainSelect ps1 = new PlainSelect();
-				ps1.setSelectItems(Collections.
-						singletonList(new SelectExpressionItem(exp)));
+				ps1.setSelectItems(Arrays.asList(new SelectExpressionItem(exp)));
 				SubSelect ss = new SubSelect();
 				ss.setSelectBody(ps1);
 				parentSet.accept(ss);
@@ -484,8 +411,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private static boolean replace(PlainSelect ps) {
-		String[] table = {null};
-		boolean replaced = replace(ps.getFromItem(), ps::setFromItem, table);
+		boolean replaced = replace(ps.getFromItem(), ps::setFromItem);
 		for (SelectItem si : ps.getSelectItems()) {
 			if (si instanceof SelectExpressionItem) {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
@@ -501,7 +427,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replaced = true;
 					break;
 				}
-				replaced |= replace(exp, table[0], e -> {
+				replaced |= replace(exp, e -> {
 					sei.setExpression(e);
 					if (e == PG_LISTENING_CHANNELS) {
 						sei.setAlias(PG_LISTENING_CHANNELS_ALIAS);
@@ -515,7 +441,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		List<Join> joins = ps.getJoins();
 		if (joins != null) {
 			for (Join join : ps.getJoins()) {
-				replaced |= replace(join.getRightItem(), join::setRightItem, table) |
+				replaced |= replace(join.getRightItem(), join::setRightItem) |
 						replace(join.getOnExpression(), join::setOnExpression);
 			}
 		}
@@ -556,7 +482,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
-		", 0 AS \"deferrable\", ",
+		", 0 \"deferrable\", ",
 		" '*' ",
 	};
 	private static final int[] REPLACE_FROM_LEN = {
@@ -720,28 +646,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			server.trace("Connect");
 			ins = socket.getInputStream();
 			outs = socket.getOutputStream();
-			/*
-			out.set(this, new ByteArrayOutputStream() {
-				@Override
-				public synchronized void write(int b) {
-					if (b == 'N') {
-						// 'N' is not flushed
-					}
-				}
-
-				@Override
-				public void flush() throws IOException {
-					if (count == 0) {
-						return;
-					}
-					if (buf[0] == 'T') {
-						// fill oid and attnum
-					}
-					outs.write(buf, 0, count);
-					count = 0;
-				}
-			};
-			*/
 			out.set(this, outs);
 			// dataInRaw.set(this, new DataInputStream(ins));
 			while (!stop.getBoolean(this)) {
