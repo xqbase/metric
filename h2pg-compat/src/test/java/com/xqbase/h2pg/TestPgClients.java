@@ -101,8 +101,51 @@ public class TestPgClients {
 			assertEquals("INTEGER", rs.getString(1));
 			assertFalse(rs.next());
 		}
-		// pgAdmin sends `SET LOCAL join_collapse_limit=8`, but `LOCAL` is not supported yet
-		stat.execute("SET join_collapse_limit=8");
+		stat.execute("SET LOCAL join_collapse_limit=8");
+		try (ResultSet rs = stat.executeQuery("SELECT 'session_stats' AS chart_name, " +
+				"row_to_json(t) AS chart_data FROM (SELECT " + 
+				"(SELECT count(*) FROM pg_stat_activity) AS \"Total\", " + 
+				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'active')  AS \"Active\", " + 
+				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'idle')  AS \"Idle\"" + 
+				") t UNION ALL " +
+				"SELECT 'tps_stats' AS chart_name, row_to_json(t) AS chart_data " + 
+				"FROM (SELECT " + 
+				"(SELECT sum(xact_commit) + sum(xact_rollback) FROM pg_stat_database) AS \"Transactions\", " + 
+				"(SELECT sum(xact_commit) FROM pg_stat_database) AS \"Commits\", " + 
+				"(SELECT sum(xact_rollback) FROM pg_stat_database) AS \"Rollbacks\"" + 
+				") t UNION ALL " + 
+				"SELECT 'ti_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " + 
+				"(SELECT sum(tup_inserted) FROM pg_stat_database) AS \"Inserts\", " + 
+				"(SELECT sum(tup_updated) FROM pg_stat_database) AS \"Updates\", " + 
+				"(SELECT sum(tup_deleted) FROM pg_stat_database) AS \"Deletes\"" + 
+				") t UNION ALL " + 
+				"SELECT 'to_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " + 
+				"(SELECT sum(tup_fetched) FROM pg_stat_database) AS \"Fetched\", " + 
+				"(SELECT sum(tup_returned) FROM pg_stat_database) AS \"Returned\"" + 
+				") t UNION ALL " + 
+				"SELECT 'bio_stats' AS chart_name, row_to_json(t) AS chart_data " + 
+				"FROM (SELECT " + 
+				"(SELECT sum(blks_read) FROM pg_stat_database) AS \"Reads\", " + 
+				"(SELECT sum(blks_hit) FROM pg_stat_database) AS \"Hits\"" + 
+				") t")) {
+			assertTrue(rs.next());
+			assertEquals("{}", rs.getString("chart_data"));
+		}
+		// JSqlParser cannot parse SELECT a = b, ...
+		// just replace: nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
+		try (ResultSet rs = stat.executeQuery("SELECT nsp.nspname as schema_name, " + 
+				"(nsp.nspname = 'pg_catalog' AND EXISTS (SELECT 1 FROM pg_class " +
+				"WHERE relname = 'pg_class' AND relnamespace = nsp.oid LIMIT 1)) OR " + 
+				"(nsp.nspname = 'pgagent' AND EXISTS (SELECT 1 FROM pg_class " +
+				"WHERE relname = 'pga_job' AND relnamespace = nsp.oid LIMIT 1)) OR " + 
+				"(nsp.nspname = 'information_schema' AND EXISTS (SELECT 1 FROM pg_class " +
+				"WHERE relname = 'tables' AND relnamespace = nsp.oid LIMIT 1)) AS is_catalog, " + 
+				"CASE WHEN nsp.nspname = ANY('{information_schema}') THEN false ELSE true END " +
+				"AS db_support FROM pg_catalog.pg_namespace nsp WHERE nsp.oid = 0::OID")) {
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("schema_name"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -581,12 +624,18 @@ public class TestPgClients {
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
-				"WHERE id = ANY(SELECT x1 FROM test) ORDER BY id")) {
+				"WHERE id = ANY(SELECT x1 FROM test WHERE row_to_json() = '{}') ORDER BY id")) {
 			assertTrue(rs.next());
 			assertEquals(2, rs.getInt("id"));
 			assertEquals(3, rs.getInt("x1"));
 			assertTrue(rs.next());
 			assertEquals(3, rs.getInt("id"));
+			assertEquals(4, rs.getInt("x1"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT x1 " +
+				"FROM test WHERE id::varchar = ANY('{3,4,5}')")) {
+			assertTrue(rs.next());
 			assertEquals(4, rs.getInt("x1"));
 			assertFalse(rs.next());
 		}

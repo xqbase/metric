@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +26,7 @@ import org.h2.util.ScriptReader;
 import org.h2.util.Utils;
 
 import net.sf.jsqlparser.expression.Alias;
+import net.sf.jsqlparser.expression.AnyComparisonExpression;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.CaseExpression;
 import net.sf.jsqlparser.expression.CastExpression;
@@ -36,12 +38,17 @@ import net.sf.jsqlparser.expression.NullValue;
 import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.WhenClause;
+import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.InExpression;
+import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
 import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParser;
 import net.sf.jsqlparser.parser.ParseException;
 import net.sf.jsqlparser.parser.StringProvider;
+import net.sf.jsqlparser.parser.TokenMgrException;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.ShowStatement;
@@ -93,7 +100,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final NullValue NULL = new NullValue();
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
-	private static final Function CURRENT_USER = new Function();
+	private static final StringValue ROW_TO_JSON = new StringValue("{}");
 	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
 	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
@@ -105,6 +112,24 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			new SelectExpressionItem();
 	private static final ColDataType TEXT_TYPE = new ColDataType();
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
+
+	private static void addColumns(String table, String columns) {
+		addColumns(table, columns, false);
+	}
+
+	private static void addColumns(String table, String columns, boolean pgCatalog) {
+		SelectBody sb = select("SELECT *, " + columns.replace("${owner}",
+				"(SELECT oid FROM pg_user WHERE usename = current_user())") +
+				" FROM " + table);
+		TABLE_MAP.put(table, sb);
+		if (pgCatalog) {
+			TABLE_MAP.put("pg_catalog." + table, sb);
+		}
+	}
+
+	private static void addEmptyTable(String table, String columns) {
+		TABLE_MAP.put(table, select("SELECT " + columns + " WHERE FALSE"));
+	}
 
 	static {
 		String[] tokens;
@@ -121,7 +146,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
-		CURRENT_USER.setName("current_user");
 		MultiExpressionList words = new MultiExpressionList();
 		for (String token : tokens) {
 			if (token != null && !token.isEmpty()) {
@@ -137,52 +161,35 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		TEXT_TYPE.setDataType("text");
 		RELNAME_COLUMN.setExpression(new Column("relname"));
 		// add columns
-		TABLE_MAP.put("pg_attribute",
-				select("SELECT *, 0 attndims FROM pg_attribute"));
-		TABLE_MAP.put("pg_class",
-				select("SELECT *, NULL tableoid FROM pg_class"));
-		TABLE_MAP.put("pg_constraint",
-				select("SELECT *, NULL confdeltype, NULL confmatchtype, " +
-				"NULL confupdtype, NULL connamespace, NULL tableoid FROM pg_constraint"));
-		TABLE_MAP.put("pg_database",
-				select("SELECT *, -1 datconnlimit FROM pg_database"));
-		TABLE_MAP.put("pg_index",
-				select("SELECT *, NULL indoption FROM pg_index"));
-		// Does not work?
-		// SELECT * FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'test'
-		/*
-		TABLE_MAP.put("pg_namespace",
-				select("SELECT *, NULL nspowner FROM pg_namespace"));
-		*/
-		TABLE_MAP.put("pg_proc",
-				select("SELECT *, NULL proallargtypes, NULL prolang, " +
-				"0 pronargs, FALSE proisagg FROM pg_proc"));
-		TABLE_MAP.put("pg_catalog.pg_proc",
-				select("SELECT *, NULL proallargtypes, NULL prolang, " +
-				"0 pronargs, FALSE proisagg FROM pg_proc"));
-		TABLE_MAP.put("pg_type",
-				select("SELECT *, NULL typcategory, NULL typcollation, " +
-				"NULL typdefault, 0 typndims FROM pg_type"));
-		TABLE_MAP.put("information_schema.routines",
-				select("SELECT *, NULL type_udt_name FROM information_schema.routines"));
-		TABLE_MAP.put("information_schema.triggers",
-				select("SELECT *, NULL event_object_table FROM information_schema.triggers"));
+		addColumns("pg_attribute", "0 attndims");
+		addColumns("pg_class", "${owner} relowner, NULL tableoid");
+		addColumns("pg_constraint", "NULL confdeltype, NULL confmatchtype, " +
+				"NULL confupdtype, NULL connamespace, NULL tableoid");
+		addColumns("pg_database", "-1 datconnlimit");
+		addColumns("pg_index", "NULL indoption");
+		addColumns("pg_namespace", "id oid, ${owner} nspowner");
+		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
+				"NULL prolang, 0 pronargs, FALSE proisagg", true);
+		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
+				"NULL typdefault, 0 typndims, ${owner} typowner");
+		addColumns("information_schema.routines", "NULL type_udt_name");
+		addColumns("information_schema.triggers", "NULL event_object_table");
 		// empty tables
-		TABLE_MAP.put("pg_collation",
-				select("SELECT 0 oid, '' collnamespace, '' collname WHERE FALSE"));
-		TABLE_MAP.put("pg_depend",
-				select("SELECT '' deptype, 0 classid, 0 refclassid, 0 objid, " +
-				"0 objsubid, 0 refobjid, 0 refobjsubid WHERE FALSE"));
-		TABLE_MAP.put("pg_event_trigger", select("SELECT 0 WHERE FALSE"));
-		TABLE_MAP.put("pg_language",
-				select("SELECT 0 oid, '' lanname WHERE FALSE"));
-		TABLE_MAP.put("pg_trigger",
-				select("SELECT 0 oid, '' tgname, 0 tgrelid WHERE FALSE"));
+		addEmptyTable("pg_collation", "0 oid, '' collnamespace, '' collname");
+		addEmptyTable("pg_depend", "'' deptype, 0 classid, 0 refclassid, " +
+				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
+		addEmptyTable("pg_event_trigger", "0");
+		addEmptyTable("pg_language", "0 oid, '' lanname");
+		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tgrelid");
+		addEmptyTable("pg_stat_activity", "'' state, '' datname");
+		addEmptyTable("pg_stat_database", "0 xact_commit, 0 xact_rollback, " +
+				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
+				"0 blks_read, 0 blks_hit, '' datname");
+		// addEmptyTable("pg_rewrite", "0 oid, '' rulename, 0 ev_class");
 		// views
 		TABLE_MAP.put("pg_tables",
-				select("SELECT n.nspname schemaname, c.relname tablename " +
-				"FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
-				"WHERE c.relkind IN ('r', 'p')"));
+				select("SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')"));
 		TABLE_MAP.put("pg_views",
 				select("SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
@@ -214,7 +221,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				if (el != null && el.getExpressions().size() > 0) {
 					Expression exp0 = el.getExpressions().get(0);
 					if (exp0 instanceof Column) {
-						// array_upper(p.proargtypes, 1) -> -1
+						// array_upper(p.pro[all]argtypes, 1) -> -1
 						// p.pro[all]argtypes in sub-query does not work
 						switch (((Column) exp0).getFullyQualifiedName()) {
 						case "p.proargtypes":
@@ -228,16 +235,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 				func.setName("array_length");
 				replaced = true;
-				break;
-			case "array_to_string":
-				if (el != null && el.getExpressions().size() > 0) {
-					Expression exp0 = el.getExpressions().get(0);
-					if (exp0 instanceof Column && ((Column) exp0).
-							getFullyQualifiedName().equals("p.proargmodes")) {
-						parentSet.accept(NULL);
-						return true;
-					}
-				}
 				break;
 			case "col_description":
 			case "information_schema._pg_char_max_length":
@@ -253,26 +250,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			case "pg_catalog.pg_function_is_visible":
 				parentSet.accept(TRUE);
 				return true;
-			case "pg_get_userbyid":
-				List<Expression> exps = func.getParameters().getExpressions();
-				if (exps != null && exps.size() == 1 &&
-						exps.get(0) instanceof Column) {
-					// pg_get_userbyid(*owner) -> current_user()
-					switch (((Column) exps.get(0)).getFullyQualifiedName()) {
-					case "nspowner":
-					case "relowner":
-					case "t.typowner":
-						parentSet.accept(CURRENT_USER);
-						return true;
-					default:
-					}
-				}
-				break;
 			case "pg_listening_channels":
 				parentSet.accept(PG_LISTENING_CHANNELS);
 				return true;
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
+				return true;
+			case "row_to_json":
+				parentSet.accept(ROW_TO_JSON);
 				return true;
 			default:
 			}
@@ -341,20 +326,48 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			SelectBody sb = ((SubSelect) exp).getSelectBody();
 			return sb instanceof PlainSelect && replace((PlainSelect) sb);
 		}
+		if (exp instanceof ExistsExpression) {
+			ExistsExpression ee = ((ExistsExpression) exp);
+			return replace(ee.getRightExpression(), ee::setRightExpression);
+		}
+		if (exp instanceof AnyComparisonExpression) {
+			AnyComparisonExpression ace = (AnyComparisonExpression) exp;
+			return replace((Expression) ace.getSubSelect(), null);
+		}
 		if (!(exp instanceof BinaryExpression)) {
 			return false;
 		}
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
-		// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 		if (be instanceof EqualsTo && right instanceof Function &&
 				((Function) right).getName().toUpperCase().equals("ANY")) {
 			Function func = (Function) right;
 			List<Expression> exps = func.getParameters().getExpressions();
-			if (exps.size() == 1 && !(exps.get(0) instanceof SubSelect)) {
-				ExpressionList el = new ExpressionList(exps.get(0), left);
-				replace(exps.get(0), e -> el.getExpressions().set(0, e));
+			if (exps.size() == 1) {
+				Expression exp0 = exps.get(0);
+				// value = ANY('{...}') -> value IN (...)
+				if (exp0 instanceof StringValue) {
+					String ss = ((StringValue) exp0).getValue();
+					int len = ss.length();
+					if (len >= 2 && ss.charAt(0) == '{' && ss.charAt(len - 1) == '}') {
+						ss = ss.substring(1, len - 1);
+					}
+					List<Expression> ins = new ArrayList<>();
+					for (String s : ss.split(",")) {
+						ins.add(new StringValue(s));
+					}
+					InExpression in = new InExpression(left, new ExpressionList(ins));
+					replace(left, in::setLeftExpression);
+					be.setRightExpression(new StringValue(ss));
+					parentSet.accept(in);
+					return true;
+				}
+				// value = ANY(array) -> ARRAY_CONTAINS(array, value)
+				// ANY(SubSelect) is parsed as AnyComparisonExpression
+				// if (!(exp0 instanceof SubSelect)) {
+				ExpressionList el = new ExpressionList(exp0, left);
+				replace(exp0, e -> el.getExpressions().set(0, e));
 				replace(left, e -> el.getExpressions().set(1, e));
 				func.setName("ARRAY_CONTAINS");
 				func.setParameters(el);
@@ -411,7 +424,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private static boolean replace(PlainSelect ps) {
-		boolean replaced = replace(ps.getFromItem(), ps::setFromItem);
+		boolean replaced = false;
+		Expression where = ps.getWhere();
+		// Don't replace pg_* table if `WHERE ... NOT LIKE ...`
+		// See: https://github.com/h2database/h2database/issues/2712
+		boolean notLike = false;
+		if (where instanceof AndExpression) {
+			Expression left = ((AndExpression) where).getLeftExpression();
+			if (left instanceof LikeExpression && ((LikeExpression) left).isNot()) {
+				notLike = true;
+			}
+		}
+		if (!notLike) {
+			replaced |= replace(ps.getFromItem(), ps::setFromItem);
+		}
 		for (SelectItem si : ps.getSelectItems()) {
 			if (si instanceof SelectExpressionItem) {
 				SelectExpressionItem sei = (SelectExpressionItem) si;
@@ -456,7 +482,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (ps.getOffset() != null && ps.getLimit() != null) {
 			replaced = true;
 		}
-		replaced |= replace(ps.getWhere(), ps::setWhere);
+		replaced |= replace(where, ps::setWhere);
 		return replaced;
 	}
 
@@ -479,16 +505,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// "deferrable" is a keyword in JSqlParser
 		", condeferrable::int AS deferrable, ",
 		" CAST('*' AS pg_catalog.text) ",
+		" WHEN nsp.nspname = ANY('{information_schema}')",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
 		" '*' ",
+		" WHEN nsp.nspname = 'information_schema'",
 	};
 	private static final int[] REPLACE_FROM_LEN = {
 		21,
 		36,
 		30,
+		47,
 	};
 
 	private static String getSQL(String s) {
@@ -528,7 +557,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				default:
 				}
 			}
-		} catch (ParseException e) {
+		} catch (ParseException | TokenMgrException e) {
 			// Ignored
 			// System.err.println(s + ": " + e);
 		}
