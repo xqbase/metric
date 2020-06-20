@@ -103,47 +103,148 @@ public class TestPgClients {
 		}
 		stat.execute("SET LOCAL join_collapse_limit=8");
 		try (ResultSet rs = stat.executeQuery("SELECT 'session_stats' AS chart_name, " +
-				"row_to_json(t) AS chart_data FROM (SELECT " + 
-				"(SELECT count(*) FROM pg_stat_activity) AS \"Total\", " + 
-				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'active')  AS \"Active\", " + 
-				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'idle')  AS \"Idle\"" + 
+				"row_to_json(t) AS chart_data FROM (SELECT " +
+				"(SELECT count(*) FROM pg_stat_activity) AS \"Total\", " +
+				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'active')  AS \"Active\", " +
+				"(SELECT count(*) FROM pg_stat_activity WHERE state = 'idle')  AS \"Idle\"" +
 				") t UNION ALL " +
-				"SELECT 'tps_stats' AS chart_name, row_to_json(t) AS chart_data " + 
-				"FROM (SELECT " + 
-				"(SELECT sum(xact_commit) + sum(xact_rollback) FROM pg_stat_database) AS \"Transactions\", " + 
-				"(SELECT sum(xact_commit) FROM pg_stat_database) AS \"Commits\", " + 
-				"(SELECT sum(xact_rollback) FROM pg_stat_database) AS \"Rollbacks\"" + 
-				") t UNION ALL " + 
-				"SELECT 'ti_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " + 
-				"(SELECT sum(tup_inserted) FROM pg_stat_database) AS \"Inserts\", " + 
-				"(SELECT sum(tup_updated) FROM pg_stat_database) AS \"Updates\", " + 
-				"(SELECT sum(tup_deleted) FROM pg_stat_database) AS \"Deletes\"" + 
-				") t UNION ALL " + 
-				"SELECT 'to_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " + 
-				"(SELECT sum(tup_fetched) FROM pg_stat_database) AS \"Fetched\", " + 
-				"(SELECT sum(tup_returned) FROM pg_stat_database) AS \"Returned\"" + 
-				") t UNION ALL " + 
-				"SELECT 'bio_stats' AS chart_name, row_to_json(t) AS chart_data " + 
-				"FROM (SELECT " + 
-				"(SELECT sum(blks_read) FROM pg_stat_database) AS \"Reads\", " + 
-				"(SELECT sum(blks_hit) FROM pg_stat_database) AS \"Hits\"" + 
+				"SELECT 'tps_stats' AS chart_name, row_to_json(t) AS chart_data " +
+				"FROM (SELECT " +
+				"(SELECT sum(xact_commit) + sum(xact_rollback) FROM pg_stat_database) AS \"Transactions\", " +
+				"(SELECT sum(xact_commit) FROM pg_stat_database) AS \"Commits\", " +
+				"(SELECT sum(xact_rollback) FROM pg_stat_database) AS \"Rollbacks\"" +
+				") t UNION ALL " +
+				"SELECT 'ti_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " +
+				"(SELECT sum(tup_inserted) FROM pg_stat_database) AS \"Inserts\", " +
+				"(SELECT sum(tup_updated) FROM pg_stat_database) AS \"Updates\", " +
+				"(SELECT sum(tup_deleted) FROM pg_stat_database) AS \"Deletes\"" +
+				") t UNION ALL " +
+				"SELECT 'to_stats' AS chart_name, row_to_json(t) AS chart_data FROM (SELECT " +
+				"(SELECT sum(tup_fetched) FROM pg_stat_database) AS \"Fetched\", " +
+				"(SELECT sum(tup_returned) FROM pg_stat_database) AS \"Returned\"" +
+				") t UNION ALL " +
+				"SELECT 'bio_stats' AS chart_name, row_to_json(t) AS chart_data " +
+				"FROM (SELECT " +
+				"(SELECT sum(blks_read) FROM pg_stat_database) AS \"Reads\", " +
+				"(SELECT sum(blks_hit) FROM pg_stat_database) AS \"Hits\"" +
 				") t")) {
 			assertTrue(rs.next());
 			assertEquals("{}", rs.getString("chart_data"));
 		}
-		// JSqlParser cannot parse SELECT a = b, ...
-		// just replace: nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
-		try (ResultSet rs = stat.executeQuery("SELECT nsp.nspname as schema_name, " + 
+		try (ResultSet rs = stat.executeQuery("SELECT nsp.nspname as schema_name, " +
 				"(nsp.nspname = 'pg_catalog' AND EXISTS (SELECT 1 FROM pg_class " +
-				"WHERE relname = 'pg_class' AND relnamespace = nsp.oid LIMIT 1)) OR " + 
+				"WHERE relname = 'pg_class' AND relnamespace = nsp.oid LIMIT 1)) OR " +
 				"(nsp.nspname = 'pgagent' AND EXISTS (SELECT 1 FROM pg_class " +
-				"WHERE relname = 'pga_job' AND relnamespace = nsp.oid LIMIT 1)) OR " + 
+				"WHERE relname = 'pga_job' AND relnamespace = nsp.oid LIMIT 1)) OR " +
 				"(nsp.nspname = 'information_schema' AND EXISTS (SELECT 1 FROM pg_class " +
-				"WHERE relname = 'tables' AND relnamespace = nsp.oid LIMIT 1)) AS is_catalog, " + 
+				"WHERE relname = 'tables' AND relnamespace = nsp.oid LIMIT 1)) AS is_catalog, " +
 				"CASE WHEN nsp.nspname = ANY('{information_schema}') THEN false ELSE true END " +
 				"AS db_support FROM pg_catalog.pg_namespace nsp WHERE nsp.oid = 0::OID")) {
 			assertTrue(rs.next());
 			assertEquals("public", rs.getString("schema_name"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT dep.deptype, " +
+				"dep.refclassid, cl.relkind, ad.adbin, ad.adsrc, CASE " +
+				"WHEN cl.relkind IS NOT NULL " +
+				"THEN cl.relkind || COALESCE(dep.refobjsubid::character varying, '') " +
+				"WHEN tg.oid IS NOT NULL THEN 'T'::text " +
+				"WHEN ty.oid IS NOT NULL AND ty.typbasetype = 0 THEN 'y'::text " +
+				"WHEN ty.oid IS NOT NULL AND ty.typbasetype != 0 THEN 'd'::text " +
+				"WHEN ns.oid IS NOT NULL THEN 'n'::text " +
+				"WHEN pr.oid IS NOT NULL AND prtyp.typname = 'trigger' THEN 't'::text " +
+				"WHEN pr.oid IS NOT NULL THEN 'P'::text " +
+				"WHEN la.oid IS NOT NULL THEN 'l'::text " +
+				"WHEN rw.oid IS NOT NULL THEN 'R'::text " +
+				"WHEN co.oid IS NOT NULL THEN 'C'::text || contype " +
+				"WHEN ad.oid IS NOT NULL THEN 'A'::text " +
+				"ELSE '' END AS type, COALESCE(coc.relname, clrw.relname) AS ownertable, " +
+				"CASE WHEN cl.relname IS NOT NULL OR att.attname IS NOT NULL " +
+				"THEN cl.relname || COALESCE('.' || att.attname, '') " +
+				"ELSE COALESCE(cl.relname, co.conname, pr.proname, tg.tgname, " +
+				"ty.typname, la.lanname, rw.rulename, ns.nspname) END AS refname, " +
+				"COALESCE(nsc.nspname, nso.nspname, nsp.nspname, nst.nspname, nsrw.nspname) AS nspname, " +
+				"CASE WHEN inhits.inhparent IS NOT NULL THEN '1' ELSE '0' END AS is_inherits, " +
+				"CASE WHEN inhed.inhparent IS NOT NULL THEN '1' ELSE '0' END AS is_inherited " +
+				"FROM pg_depend dep " +
+				"LEFT JOIN pg_class cl ON dep.refobjid=cl.oid " +
+				"LEFT JOIN pg_attribute att ON dep.refobjid=att.attrelid AND dep.refobjsubid=att.attnum " +
+				"LEFT JOIN pg_namespace nsc ON cl.relnamespace=nsc.oid " +
+				"LEFT JOIN pg_proc pr ON dep.refobjid=pr.oid " +
+				"LEFT JOIN pg_namespace nsp ON pr.pronamespace=nsp.oid " +
+				"LEFT JOIN pg_trigger tg ON dep.refobjid=tg.oid " +
+				"LEFT JOIN pg_type ty ON dep.refobjid=ty.oid " +
+				"LEFT JOIN pg_namespace nst ON ty.typnamespace=nst.oid " +
+				"LEFT JOIN pg_constraint co ON dep.refobjid=co.oid " +
+				"LEFT JOIN pg_class coc ON co.conrelid=coc.oid " +
+				"LEFT JOIN pg_namespace nso ON co.connamespace=nso.oid " +
+				"LEFT JOIN pg_rewrite rw ON dep.refobjid=rw.oid " +
+				"LEFT JOIN pg_class clrw ON clrw.oid=rw.ev_class " +
+				"LEFT JOIN pg_namespace nsrw ON clrw.relnamespace=nsrw.oid " +
+				"LEFT JOIN pg_language la ON dep.refobjid=la.oid " +
+				"LEFT JOIN pg_namespace ns ON dep.refobjid=ns.oid " +
+				"LEFT JOIN pg_attrdef ad ON ad.adrelid=att.attrelid AND ad.adnum=att.attnum " +
+				"LEFT JOIN pg_type prtyp ON prtyp.oid = pr.prorettype " +
+				"LEFT JOIN pg_inherits inhits ON (inhits.inhrelid=dep.refobjid) " +
+				"LEFT JOIN pg_inherits inhed ON (inhed.inhparent=dep.refobjid) " +
+				"WHERE dep.objid=0::oid AND refclassid IN ( SELECT oid FROM pg_class WHERE relname IN " +
+				"('pg_class', 'pg_constraint', 'pg_conversion', 'pg_language', 'pg_proc', " +
+				"'pg_rewrite', 'pg_namespace', 'pg_trigger', 'pg_type', 'pg_attrdef', " +
+				"'pg_event_trigger', 'pg_foreign_server', 'pg_foreign_data_wrapper')) " +
+				"ORDER BY refclassid, cl.relkind")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT rolname AS refname, " +
+				"refclassid, deptype FROM pg_shdepend dep " +
+				"LEFT JOIN pg_roles r ON refclassid=1260 AND refobjid=r.oid " +
+				"WHERE dep.objid=0::oid ORDER BY 1")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT rel.oid, rel.relname AS name, " +
+				"(SELECT count(*) FROM pg_trigger WHERE tgrelid=rel.oid) AS triggercount, " +
+				"(SELECT count(*) FROM pg_trigger WHERE tgrelid=rel.oid AND tgenabled = 'O') " +
+				"AS has_enable_triggers, " +
+				"(SELECT count(1) FROM pg_inherits WHERE inhrelid=rel.oid LIMIT 1) as is_inherits, " +
+				"(SELECT count(1) FROM pg_inherits WHERE inhparent=rel.oid LIMIT 1) as is_inherited " +
+				"FROM pg_class rel WHERE rel.relkind IN ('r','s','t') AND rel.relnamespace = 0::oid " +
+				"ORDER BY rel.relname")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("name"));
+			assertFalse(rs.next());
+		}
+		int oid;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+			rs.next();
+			oid = rs.getInt("oid");
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT nsp.nspname AS schema ," +
+				"rel.relname AS table FROM pg_class rel " +
+				"JOIN pg_namespace nsp ON rel.relnamespace = nsp.oid::oid " +
+				"WHERE rel.oid = " + oid + "::oid")) {
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("schema"));
+			assertEquals("test", rs.getString("table"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT att.attname as name, att.attnum as OID, " +
+				"format_type(ty.oid,NULL) AS datatype, att.attnotnull as not_null, " +
+				"att.atthasdef as has_default_val FROM pg_attribute att " +
+				"JOIN pg_type ty ON ty.oid=atttypid " +
+				"JOIN pg_namespace tn ON tn.oid=ty.typnamespace " +
+				"JOIN pg_class cl ON cl.oid=att.attrelid " +
+				"JOIN pg_namespace na ON na.oid=cl.relnamespace " +
+				"LEFT OUTER JOIN pg_type et ON et.oid=ty.typelem " +
+				"LEFT OUTER JOIN pg_attrdef def ON adrelid=att.attrelid AND adnum=att.attnum " +
+				"LEFT OUTER JOIN (pg_depend JOIN pg_class cs ON classid='pg_class'::regclass " +
+				"AND objid=cs.oid AND cs.relkind='S') ON refobjid=att.attrelid AND refobjsubid=att.attnum " +
+				"LEFT OUTER JOIN pg_namespace ns ON ns.oid=cs.relnamespace " +
+				"LEFT OUTER JOIN pg_index pi ON pi.indrelid=att.attrelid AND indisprimary " +
+				"WHERE att.attrelid = " + oid + "::oid AND att.attnum > 0 AND att.attisdropped IS FALSE " +
+				"ORDER BY att.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("name"));
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("name"));
 			assertFalse(rs.next());
 		}
 	}

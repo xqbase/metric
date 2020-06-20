@@ -447,7 +447,7 @@ $("#btnSubmit").click(function() {
 			"&_interval=" + INTERVAL[selectedInterval];
 	if (!selectedNow) {
 		var ymd = $("#txtDate").val().split("-");
-		var time = (ymd.length == 3 ? new Date(ymd[0], ymd[1] - 1, ymd[2]) : new Date()).getTime(); 
+		var time = (ymd.length == 3 ? new Date(ymd[0], ymd[1] - 1, ymd[2]) : new Date()).getTime();
 		hash += "&_until=" + (Math.floor(time / MINUTE) +
 				selectedHour * 60 + selectedMinute * 15);
 	}
