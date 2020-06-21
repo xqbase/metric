@@ -247,6 +247,15 @@ public class TestPgClients {
 			assertEquals("x1", rs.getString("name"));
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT at.attname, at.attnum, ty.typname " +
+				"FROM pg_attribute at LEFT JOIN pg_type ty ON (ty.oid = at.atttypid) " +
+				"WHERE attrelid=" + oid + "::oid AND attnum = ANY ((SELECT con.conkey FROM pg_class rel " +
+				"LEFT OUTER JOIN pg_constraint con ON con.conrelid=rel.oid AND con.contype='p' " +
+				"WHERE rel.relkind IN ('r','s','t') AND rel.oid = " + oid + "::oid)::oid[])\r\n")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("attname"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -787,14 +796,19 @@ public class TestPgClients {
 		} catch (SQLException e) {
 			assertEquals("42001", e.getSQLState());
 		}
-		int oid;
-		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+		int oidPgClass, oidTest;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class " +
+				"WHERE relname IN ('pg_class', 'test') ORDER BY oid")) {
 			rs.next();
-			oid = rs.getInt("oid");
+			oidPgClass = rs.getInt("oid");
+			rs.next();
+			oidTest = rs.getInt("oid");
 		}
-		try (ResultSet rs = stat.executeQuery("SELECT " + oid + "::regclass")) {
+		try (ResultSet rs = stat.executeQuery("SELECT " + (oidPgClass & 0xFFFFFFFFL) +
+				"::regclass, " + oidTest + "::regclass")) {
 			rs.next();
-			assertEquals("test", rs.getString(1));
+			assertEquals("pg_class", rs.getString(1));
+			assertEquals("test", rs.getString(2));
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT 10000001::regclass")) {
 			rs.next();

@@ -313,7 +313,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				ps.setFromItem(PG_CLASS);
 				EqualsTo et = new EqualsTo();
 				et.setLeftExpression(OID_COLUMN);
-				et.setRightExpression(left);
+				et.setRightExpression(new LongValue((int) ((LongValue) left).getValue()));
 				ps.setWhere(et);
 				SubSelect ss = new SubSelect();
 				ss.setSelectBody(ps);
@@ -570,6 +570,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		} else if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
 			sql = "SET join_collapse_limit=" + sql.substring(30);
 			replaced = true;
+		} else if (sql.endsWith(")::oid[])")) {
+			sql = sql.substring(0, sql.length() - 8) + ")";
+			replaced = true;
 		}
 		for (int i = 0; i < REPLACE_FROM.length; i ++) {
 			int index;
@@ -668,7 +671,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			int z1 = findZero(data, 5, data.length) + 1;
 			int z2 = findZero(data, z1, data.length);
 			Charset charset = (Charset) getEncoding.invoke(this);
-			String sql = getSQL(new String(data, z1, z2 - z1, charset));
+			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());
 			if (sql != null) {
 				byte[] sqlb = sql.getBytes(charset);
 				byte[] data_ = new byte[data.length - z2 + z1 + sqlb.length];
@@ -689,6 +692,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					InputStreamReader(new ByteArrayInputStream(data, 5, z1 - 5), charset))) {
 				String line;
 				while ((line = reader.readStatement()) != null) {
+					line = line.trim();
+					if (line.isEmpty()) {
+						replaced = true;
+						continue;
+					}
 					sql = getSQL(line);
 					if (sql == null) {
 						sb.append(line).append(';');
