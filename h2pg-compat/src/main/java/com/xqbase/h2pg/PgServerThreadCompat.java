@@ -199,14 +199,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
 	}
 
-	private static boolean replace(Expression exp, Consumer<Expression> parentSet) {
+	private boolean replaced = false;
+	private boolean anyArray = false;
+
+	private void replace(Expression exp, Consumer<Expression> parentSet) {
 		if (exp instanceof Column) {
-			return false;
+			return;
 		}
 		if (exp instanceof Function) {
 			Function func = (Function) exp;
 			ExpressionList el = func.getParameters();
-			boolean replaced = false;
 			switch (func.getName()) {
 			case "array_length":
 				if (el != null) {
@@ -219,7 +221,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				break;
 			case "array_lower":
 				parentSet.accept(ONE);
-				return true;
+				replaced = true;
+				return;
 			case "array_upper":
 			case "pg_catalog.array_upper":
 				if (el != null && el.getExpressions().size() > 0) {
@@ -231,7 +234,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 						case "p.proargtypes":
 						case "p.proallargtypes":
 							parentSet.accept(MINUS_ONE);
-							return true;
+							replaced = true;
+							return;
 						default:
 						}
 					}
@@ -250,30 +254,35 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			case "pg_get_viewdef":
 			case "shobj_description":
 				parentSet.accept(NULL);
-				return true;
+				replaced = true;
+				return;
+			case "pg_cancel_backend":
 			case "pg_catalog.pg_function_is_visible":
 				parentSet.accept(TRUE);
-				return true;
+				replaced = true;
+				return;
 			case "pg_listening_channels":
 				parentSet.accept(PG_LISTENING_CHANNELS);
-				return true;
+				replaced = true;
+				return;
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
-				return true;
+				replaced = true;
+				return;
 			case "row_to_json":
 				parentSet.accept(ROW_TO_JSON);
-				return true;
+				replaced = true;
+				return;
 			default:
 			}
 			if (el != null) {
 				List<Expression> exps = el.getExpressions();
 				for (int i = 0; i < exps.size(); i ++) {
-					Expression ei = exps.get(i);
 					int i_ = i;
-					replaced |= replace(ei, e -> exps.set(i_, e));
+					replace(exps.get(i), e -> exps.set(i_, e));
 				}
 			}
-			return replaced;
+			return;
 		}
 		if (exp instanceof NotExpression) {
 			NotExpression ne = (NotExpression) exp;
@@ -281,23 +290,26 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (exp1 instanceof Column && ((Column) exp1).
 					getFullyQualifiedName().equals("datistemplate")) {
 				parentSet.accept(TRUE);
-				return true;
+				replaced = true;
+			} else {
+				replace(exp1, ne::setExpression);
 			}
-			return replace(exp1, ne::setExpression);
+			return;
 		}
 		if (exp instanceof CaseExpression) {
-			boolean replaced = false;
 			CaseExpression ce = (CaseExpression) exp;
-			replaced |= replace(ce.getSwitchExpression(), ce::setSwitchExpression);
+			replace(ce.getSwitchExpression(), ce::setSwitchExpression);
 			for (WhenClause wc : ce.getWhenClauses()) {
-				replaced |= replace(wc.getWhenExpression(), wc::setWhenExpression) |
-						replace(wc.getThenExpression(), wc::setThenExpression);
+				replace(wc.getWhenExpression(), wc::setWhenExpression);
+				replace(wc.getThenExpression(), wc::setThenExpression);
 			}
-			return replaced | replace(ce.getElseExpression(), ce::setElseExpression);
+			replace(ce.getElseExpression(), ce::setElseExpression);
+			return;
 		}
 		if (exp instanceof Parenthesis) {
 			Parenthesis parenth = (Parenthesis) exp;
-			return replace(parenth.getExpression(), parenth::setExpression);
+			replace(parenth.getExpression(), parenth::setExpression);
+			return;
 		}
 		if (exp instanceof CastExpression) {
 			CastExpression ce = (CastExpression) exp;
@@ -306,8 +318,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
 			}
-			// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, oid::text)
 			if (left instanceof LongValue && ce.getType().getDataType().equals("regclass")) {
+				// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, oid::text)
 				PlainSelect ps = new PlainSelect();
 				ps.addSelectItems(RELNAME_COLUMN);
 				ps.setFromItem(PG_CLASS);
@@ -321,107 +333,131 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				func.setName("IFNULL");
 				func.setParameters(new ExpressionList(ss, new StringValue(left.toString())));
 				parentSet.accept(func);
-				return true;
+				replaced = true;
+			} else {
+				ce.setLeftExpression(left);
+				replaced |= left != oldLeft;
+				replace(left, ce::setLeftExpression);
 			}
-			ce.setLeftExpression(left);
-			return left != oldLeft | replace(left, ce::setLeftExpression);
+			return;
 		}
 		if (exp instanceof SubSelect) {
 			SelectBody sb = ((SubSelect) exp).getSelectBody();
-			return sb instanceof PlainSelect && replace((PlainSelect) sb);
+			if (sb instanceof PlainSelect) {
+				replace((PlainSelect) sb);
+			}
+			return;
 		}
 		if (exp instanceof ExistsExpression) {
 			ExistsExpression ee = ((ExistsExpression) exp);
-			return replace(ee.getRightExpression(), ee::setRightExpression);
+			replace(ee.getRightExpression(), ee::setRightExpression);
+			return;
 		}
 		if (exp instanceof InExpression) {
 			InExpression ie = (InExpression) exp;
-			boolean replaced = replace(ie.getLeftExpression(), ie::setLeftExpression);
+			replace(ie.getLeftExpression(), ie::setLeftExpression);
 			ItemsList il = ie.getRightItemsList();
 			if (il instanceof ExpressionList) {
 				List<Expression> exps = ((ExpressionList) il).getExpressions();
 				for (int i = 0; i < exps.size(); i ++) {
-					Expression ei = exps.get(i);
 					int i_ = i;
-					replaced |= replace(ei, e -> exps.set(i_, e));
+					replace(exps.get(i), e -> exps.set(i_, e));
 				}
-				return replaced;
+			} else if (il instanceof SubSelect) {
+				replace((Expression) il, null);
 			}
-			if (il instanceof SubSelect) {
-				return replaced | replace((Expression) il, null);
-			}
-			return replaced;
+			return;
 		}
 		if (exp instanceof AnyComparisonExpression) {
 			AnyComparisonExpression ace = (AnyComparisonExpression) exp;
-			return replace((Expression) ace.getSubSelect(), null);
+			replace((Expression) ace.getSubSelect(), null);
+			return;
 		}
 		if (!(exp instanceof BinaryExpression)) {
-			return false;
+			return;
 		}
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
+		// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
+		// ARRAY_CONTAINS(SELECT con.conkey ..., attnum)
+		if (anyArray && be instanceof EqualsTo &&
+				right instanceof AnyComparisonExpression) {
+			SubSelect ss = ((AnyComparisonExpression) right).getSubSelect();
+			Function func = new Function();
+			ExpressionList el = new ExpressionList(ss, left);
+			replace(ss, (Consumer<Expression>) e -> el.getExpressions().set(0, e));
+			replace(left, e -> el.getExpressions().set(1, e));
+			func.setName("ARRAY_CONTAINS");
+			func.setParameters(el);
+			parentSet.accept(func);
+			replaced = true;
+			return;
+		}
 		if (be instanceof EqualsTo && right instanceof Function &&
 				((Function) right).getName().toUpperCase().equals("ANY")) {
 			Function func = (Function) right;
 			List<Expression> exps = func.getParameters().getExpressions();
 			if (exps.size() == 1) {
 				Expression exp0 = exps.get(0);
-				// value = ANY('{...}') -> value IN (...)
 				if (exp0 instanceof StringValue) {
+					// value = ANY('{...}') -> value IN (...)
 					String ss = ((StringValue) exp0).getValue();
 					int len = ss.length();
 					if (len >= 2 && ss.charAt(0) == '{' && ss.charAt(len - 1) == '}') {
 						ss = ss.substring(1, len - 1);
 					}
-					List<Expression> ins = new ArrayList<>();
+					List<Expression> inExps = new ArrayList<>();
 					for (String s : ss.split(",")) {
-						ins.add(new StringValue(s));
+						inExps.add(new StringValue(s));
 					}
-					InExpression in = new InExpression(left, new ExpressionList(ins));
+					InExpression in = new InExpression(left, new ExpressionList(inExps));
 					replace(left, in::setLeftExpression);
 					be.setRightExpression(new StringValue(ss));
 					parentSet.accept(in);
-					return true;
+				} else {
+					// value = ANY(array) -> ARRAY_CONTAINS(array, value)
+					// ANY(SubSelect) is parsed as AnyComparisonExpression
+					// if (!(exp0 instanceof SubSelect)) {
+					ExpressionList el = new ExpressionList(exp0, left);
+					replace(exp0, e -> el.getExpressions().set(0, e));
+					replace(left, e -> el.getExpressions().set(1, e));
+					func.setName("ARRAY_CONTAINS");
+					func.setParameters(el);
+					parentSet.accept(func);
 				}
-				// value = ANY(array) -> ARRAY_CONTAINS(array, value)
-				// ANY(SubSelect) is parsed as AnyComparisonExpression
-				// if (!(exp0 instanceof SubSelect)) {
-				ExpressionList el = new ExpressionList(exp0, left);
-				replace(exp0, e -> el.getExpressions().set(0, e));
-				replace(left, e -> el.getExpressions().set(1, e));
-				func.setName("ARRAY_CONTAINS");
-				func.setParameters(el);
-				parentSet.accept(func);
-				return true;
+				replaced = true;
+				return;
 			}
 		}
-		// Use `|` instead of `||` to avoid short-circuit
-		return replace(left, be::setLeftExpression) |
-				replace(right, be::setRightExpression);
+		replace(left, be::setLeftExpression);
+		replace(right, be::setRightExpression);
 	}
 
-	private static boolean replace(FromItem fi, Consumer<FromItem> parentSet) {
+	private void replace(FromItem fi, Consumer<FromItem> parentSet) {
 		if (fi instanceof Table) {
 			String name = ((Table) fi).getFullyQualifiedName();
 			SelectBody sb = TABLE_MAP.get(name);
-			if (sb != null) {
-				SubSelect ss = new SubSelect();
-				ss.setSelectBody(sb);
-				Alias alias = fi.getAlias();
-				if (alias == null) {
-					alias = new Alias(((Table) fi).getName());
-				}
-				ss.setAlias(alias);
-				parentSet.accept(ss);
-				return true;
+			if (sb == null) {
+				return;
 			}
-			return false;
+			SubSelect ss = new SubSelect();
+			ss.setSelectBody(sb);
+			Alias alias = fi.getAlias();
+			if (alias == null) {
+				alias = new Alias(((Table) fi).getName());
+			}
+			ss.setAlias(alias);
+			parentSet.accept(ss);
+			replaced = true;
+			return;
 		}
 		if (fi instanceof SubSelect) {
 			SelectBody sb = ((SubSelect) fi).getSelectBody();
-			return sb instanceof PlainSelect && replace((PlainSelect) sb);
+			if (sb instanceof PlainSelect) {
+				replace((PlainSelect) sb);
+			}
+			return;
 		}
 		if (fi instanceof SubJoin) {
 			SubJoin si = (SubJoin) fi;
@@ -446,18 +482,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			ss.setAlias(alias);
 			ss.setSelectBody(ps);
 			parentSet.accept(ss);
-			return true;
+			replaced = true;
+			return;
 		}
 		if (!(fi instanceof TableFunction)) {
-			return false;
+			return;
 		}
 		TableFunction ti = (TableFunction) fi;
 		Function func = ti.getFunction();
 		if (func.getName().equals("pg_get_keywords")) {
 			parentSet.accept(PG_GET_KEYWORDS);
-			return true;
+			replaced = true;
+			return;
 		}
-		return replace(func, exp -> {
+		replace(func, exp -> {
 			if (exp instanceof Function) {
 				ti.setFunction((Function) exp);
 			} else {
@@ -470,8 +508,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		});
 	}
 
-	private static boolean replace(PlainSelect ps) {
-		boolean replaced = replace(ps.getFromItem(), ps::setFromItem);
+	private void replace(PlainSelect ps) {
+		replace(ps.getFromItem(), ps::setFromItem);
 		for (SelectItem si : ps.getSelectItems()) {
 			if (!(si instanceof SelectExpressionItem)) {
 				continue;
@@ -489,7 +527,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replaced = true;
 				break;
 			}
-			replaced |= replace(exp, e -> {
+			replace(exp, e -> {
 				sei.setExpression(e);
 				if (e == PG_LISTENING_CHANNELS) {
 					sei.setAlias(PG_LISTENING_CHANNELS_ALIAS);
@@ -506,8 +544,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		List<Join> joins = ps.getJoins();
 		if (joins != null) {
 			for (Join join : ps.getJoins()) {
-				replaced |= replace(join.getRightItem(), join::setRightItem) |
-						replace(join.getOnExpression(), join::setOnExpression);
+				replace(join.getRightItem(), join::setRightItem);
+				replace(join.getOnExpression(), join::setOnExpression);
 			}
 		}
 		// ORDER BY (SELECT ...) -> ORDER BY 1
@@ -521,22 +559,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (ps.getOffset() != null && ps.getLimit() != null) {
 			replaced = true;
 		}
-		replaced |= replace(ps.getWhere(), ps::setWhere);
-		return replaced;
+		replace(ps.getWhere(), ps::setWhere);
 	}
 
-	private static boolean replace(SelectBody sb) {
+	private void replace(SelectBody sb) {
 		if (sb instanceof PlainSelect) {
-			return replace((PlainSelect) sb);
+			replace((PlainSelect) sb);
+		} else if (sb instanceof SetOperationList) {
+			for (SelectBody sbi : ((SetOperationList) sb).getSelects()) {
+				replace(sbi);
+			}
 		}
-		if (!(sb instanceof SetOperationList)) {
-			return false;
-		}
-		boolean replaced = false;
-		for (SelectBody sbi : ((SetOperationList) sb).getSelects()) {
-			replaced |= replace(sbi);
-		}
-		return replaced;
 	}
 
 	private static final String[] REPLACE_FROM = {
@@ -561,8 +594,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		47,
 	};
 
-	private static String getSQL(String s) {
-		boolean replaced = false;
+	private String getSQL(String s) {
+		replaced = false;
+		anyArray = false;
 		String sql = s;
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			sql = "EXPLAIN " + sql.substring(16);
@@ -570,9 +604,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		} else if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
 			sql = "SET join_collapse_limit=" + sql.substring(30);
 			replaced = true;
-		} else if (sql.endsWith(")::oid[])")) {
-			sql = sql.substring(0, sql.length() - 8) + ")";
+		} else if (sql.endsWith("::oid)::oid[])")) {
+			// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
+			// ARRAY_CONTAINS(SELECT con.conkey ..., attnum)
+			sql = sql.substring(0, sql.length() - 14) + "))";
 			replaced = true;
+			anyArray = true;
 		}
 		for (int i = 0; i < REPLACE_FROM.length; i ++) {
 			int index;
@@ -587,19 +624,22 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
-				if (replace(((Select) st).getSelectBody())) {
+				replace(((Select) st).getSelectBody());
+				if (replaced) {
 					return st.toString();
 				}
 			} else if (st instanceof Insert) {
-				Insert ins = ((Insert) st);
-				if (ins.getReturningExpressionList() != null) {
-					ins.setReturningExpressionList(null);
-					return ins.toString();
+				Insert insert = ((Insert) st);
+				if (insert.getReturningExpressionList() != null) {
+					insert.setReturningExpressionList(null);
+					replaced = true;
+					return insert.toString();
 				}
 			} else if (st instanceof ShowStatement) {
 				ShowStatement ss = (ShowStatement) st;
 				switch (ss.getName()) {
 				case "LC_COLLATE":
+					replaced = true;
 					return "SELECT 'C' lc_collate";
 				default:
 				}
@@ -608,7 +648,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			// Ignored
 			// System.err.println(s + ": " + e);
 		}
-		return replaced ? sql : null;
+		return sql;
 	}
 
 	private static int findZero(byte[] b, int left, int right) throws EOFException {
@@ -687,7 +727,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			z1 = findZero(data, 5, data.length);
 			charset = (Charset) getEncoding.invoke(this);
 			StringBuilder sb = new StringBuilder();
-			boolean replaced = false;
 			try (ScriptReader reader = new ScriptReader(new
 					InputStreamReader(new ByteArrayInputStream(data, 5, z1 - 5), charset))) {
 				String line;
@@ -695,26 +734,21 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					line = line.trim();
 					if (line.isEmpty()) {
 						replaced = true;
-						continue;
-					}
-					sql = getSQL(line);
-					if (sql == null) {
-						sb.append(line).append(';');
 					} else {
-						sb.append(sql).append(';');
-						replaced = true;
+						sb.append(getSQL(line)).append(';');
 					}
 				}
 			}
-			if (replaced) {
-				byte[] sqlb = sb.substring(0, sb.length() - 1).getBytes(charset);
-				byte[] data_ = new byte[data.length - z1 + 5 + sqlb.length];
-				data_[0] = 'Q';
-				Bits.writeInt(data_, 1, data_.length - 1);
-				System.arraycopy(sqlb, 0, data_, 5, sqlb.length);
-				System.arraycopy(data, z1, data_, 5 + sqlb.length, data.length - z1);
-				data = data_;
+			if (!replaced || sb.length() == 0) {
+				break;
 			}
+			byte[] sqlb = sb.substring(0, sb.length() - 1).getBytes(charset);
+			byte[] data_ = new byte[data.length - z1 + 5 + sqlb.length];
+			data_[0] = 'Q';
+			Bits.writeInt(data_, 1, data_.length - 1);
+			System.arraycopy(sqlb, 0, data_, 5, sqlb.length);
+			System.arraycopy(data, z1, data_, 5 + sqlb.length, data.length - z1);
+			data = data_;
 			break;
 		default:
 		}

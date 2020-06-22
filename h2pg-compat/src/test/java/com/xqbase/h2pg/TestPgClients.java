@@ -212,10 +212,14 @@ public class TestPgClients {
 			assertEquals("test", rs.getString("name"));
 			assertFalse(rs.next());
 		}
-		int oid;
-		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
+		int oid, oid2;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class " +
+				"WHERE relname IN ('test', 'test2') ORDER BY relname")) {
 			rs.next();
 			oid = rs.getInt("oid");
+			rs.next();
+			oid2 = rs.getInt("oid");
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT nsp.nspname AS schema ," +
 				"rel.relname AS table FROM pg_class rel " +
@@ -247,14 +251,30 @@ public class TestPgClients {
 			assertEquals("x1", rs.getString("name"));
 			assertFalse(rs.next());
 		}
-		try (ResultSet rs = stat.executeQuery("SELECT at.attname, at.attnum, ty.typname " +
-				"FROM pg_attribute at LEFT JOIN pg_type ty ON (ty.oid = at.atttypid) " +
-				"WHERE attrelid=" + oid + "::oid AND attnum = ANY ((SELECT con.conkey FROM pg_class rel " +
+		try (PreparedStatement ps = conn.prepareStatement("SELECT at.attname, at.attnum, " +
+				"ty.typname FROM pg_attribute at LEFT JOIN pg_type ty ON (ty.oid = at.atttypid) " +
+				"WHERE attrelid=?::oid AND attnum = ANY ((SELECT con.conkey FROM pg_class rel " +
 				"LEFT OUTER JOIN pg_constraint con ON con.conrelid=rel.oid AND con.contype='p' " +
-				"WHERE rel.relkind IN ('r','s','t') AND rel.oid = " + oid + "::oid)::oid[])\r\n")) {
-			assertTrue(rs.next());
-			assertEquals("id", rs.getString("attname"));
-			assertFalse(rs.next());
+				"WHERE rel.relkind IN ('r','s','t') AND rel.oid = ?::oid)::oid[])\r\n")) {
+			ps.setInt(1, oid);
+			ps.setInt(2, oid);
+			try (ResultSet rs = ps.executeQuery()) {
+				assertTrue(rs.next());
+				assertEquals("id", rs.getString("attname"));
+				assertEquals(1, rs.getInt("attnum"));
+				assertFalse(rs.next());
+			}
+			ps.setInt(1, oid2);
+			ps.setInt(2, oid2);
+			try (ResultSet rs = ps.executeQuery()) {
+				assertTrue(rs.next());
+				assertEquals("x1", rs.getString("attname"));
+				assertEquals(1, rs.getInt("attnum"));
+				assertTrue(rs.next());
+				assertEquals("x2", rs.getString("attname"));
+				assertEquals(2, rs.getInt("attnum"));
+				assertFalse(rs.next());
+			}
 		}
 	}
 
