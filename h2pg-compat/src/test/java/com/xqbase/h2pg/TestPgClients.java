@@ -15,9 +15,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 import org.h2.tools.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
 
 public class TestPgClients {
 	private Server server;
@@ -32,7 +32,7 @@ public class TestPgClients {
 		}
 	}
 
-	@BeforeEach
+	@Before
 	public void before() throws SQLException {
 		server = new Server(new PgServerCompat(), "-ifNotExists",
 				"-pgPort", "5535", "-key", "pgserver", "mem:pgserver");
@@ -751,6 +751,40 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testPhpPgAdmin() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT pdb.datname AS datname, " +
+				"pr.rolname AS datowner, pg_encoding_to_char(encoding) AS datencoding, " +
+				"(SELECT description FROM pg_catalog.pg_shdescription pd " +
+				"WHERE pdb.oid=pd.objoid AND pd.classoid='pg_database'::regclass) AS datcomment, " +
+				"(SELECT spcname FROM pg_catalog.pg_tablespace pt " +
+				"WHERE pt.oid=pdb.dattablespace) AS tablespace, " +
+				"pg_catalog.pg_database_size(pdb.oid) as dbsize " +
+				"FROM pg_catalog.pg_database pdb " +
+				"LEFT JOIN pg_catalog.pg_roles pr ON (pdb.datdba = pr.oid) " +
+				"WHERE true AND NOT pdb.datistemplate ORDER BY pdb.datname")) {
+			assertTrue(rs.next());
+			assertEquals("pgserver", rs.getString("datname"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT current_schemas(false) AS search_path")) {
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("search_path"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.relname, " +
+				"pg_catalog.pg_get_userbyid(c.relowner) AS relowner, " +
+				"pg_catalog.obj_description(c.oid, 'pg_class') AS relcomment, reltuples::bigint, " +
+				"(SELECT spcname FROM pg_catalog.pg_tablespace pt WHERE pt.oid=c.reltablespace) " +
+				"AS tablespace FROM pg_catalog.pg_class c " +
+				"LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
+				"WHERE c.relkind = 'r' AND nspname='public' ORDER BY c.relname")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("relname"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
@@ -840,7 +874,7 @@ public class TestPgClients {
 		}
 	}
 
-	@AfterEach
+	@After
 	public void after() throws SQLException {
 		stat.close();
 		conn.close();

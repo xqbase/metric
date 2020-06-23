@@ -42,6 +42,7 @@ import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
+import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.expression.operators.relational.ItemsList;
 import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParser;
@@ -102,6 +103,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
 	private static final StringValue ROW_TO_JSON = new StringValue("{}");
+	private static final StringValue CURRENT_SCHEMAS = new StringValue("public");
 	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
 	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
@@ -115,22 +117,51 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final ColDataType TEXT_TYPE = new ColDataType();
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 
-	private static void addColumns(String table, String columns) {
-		addColumns(table, columns, false);
-	}
+	private static final String[] REPLACE_FROM = {
+		"(indpred IS NOT NULL)",
+		// "deferrable" and "tablespace" are keywords in JSqlParser
+		", condeferrable::int AS deferrable, ",
+		"tablespace) AS tablespace",
+		" CAST('*' AS pg_catalog.text) ",
+		// JSqlParser cannot parse SELECT a = b, ... Just replace:
+		// nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
+		" WHEN nsp.nspname = ANY('{information_schema}')",
+		// https://github.com/JSQLParser/JSqlParser/issues/720
+		") IS NOT NULL AS attisserial,",
+	};
+	private static final String[] REPLACE_TO = {
+		"(NVL2(indpred, TRUE, FALSE))",
+		", 0 \"deferrable\", ",
+		"tablespace) AS \"tablespace\"",
+		" '*' ",
+		" WHEN nsp.nspname = 'information_schema'",
+		")::IS_NOT_NULL AS attisserial,",
+	};
+	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
-	private static void addColumns(String table, String columns, boolean pgCatalog) {
-		SelectBody sb = select("SELECT *, " + columns.replace("${owner}",
-				"(SELECT oid FROM pg_user WHERE usename = current_user())") +
-				" FROM " + table);
+	private static void addTable(String table, SelectBody sb, boolean pgCatalog) {
 		TABLE_MAP.put(table, sb);
 		if (pgCatalog) {
 			TABLE_MAP.put("pg_catalog." + table, sb);
 		}
 	}
 
+	private static void addColumns(String table, String columns) {
+		addColumns(table, columns, false);
+	}
+
+	private static void addColumns(String table, String columns, boolean pgCatalog) {
+		addTable(table, select("SELECT *, " + columns.replace("${owner}",
+				"(SELECT oid FROM pg_user WHERE usename = current_user())") +
+				" FROM " + table), pgCatalog);
+	}
+
 	private static void addEmptyTable(String table, String columns) {
-		TABLE_MAP.put(table, select("SELECT " + columns + " WHERE FALSE"));
+		addEmptyTable(table, columns, false);
+	}
+
+	private static void addEmptyTable(String table, String columns, boolean pgCatalog) {
+		addTable(table, select("SELECT " + columns + " WHERE FALSE"), pgCatalog);
 	}
 
 	static {
@@ -164,12 +195,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		RELNAME_COLUMN.setExpression(new Column("relname"));
 		// add columns
 		addColumns("pg_attribute", "0 attndims");
-		addColumns("pg_class", "${owner} relowner, NULL tableoid");
+		addColumns("pg_class", "${owner} relowner, NULL tableoid", true);
 		addColumns("pg_constraint", "NULL confdeltype, NULL confmatchtype, " +
 				"NULL confupdtype, NULL connamespace, NULL tableoid");
-		addColumns("pg_database", "-1 datconnlimit");
+		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate", true);
 		addColumns("pg_index", "NULL indoption");
-		addColumns("pg_namespace", "id oid, ${owner} nspowner");
+		addColumns("pg_namespace", "id oid, ${owner} nspowner", true);
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
 				"NULL prolang, 0 pronargs, FALSE proisagg", true);
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
@@ -179,7 +210,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// empty tables
 		addEmptyTable("pg_collation", "0 oid, '' collnamespace, '' collname");
 		addEmptyTable("pg_depend", "'' deptype, 0 classid, 0 refclassid, " +
-				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
+				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid", true);
 		addEmptyTable("pg_event_trigger", "0");
 		addEmptyTable("pg_language", "0 oid, '' lanname");
 		addEmptyTable("pg_rewrite", "0 oid, '' rulename, 0 ev_class");
@@ -197,6 +228,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		TABLE_MAP.put("pg_views",
 				select("SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
+
+		for (int i = 0; i < REPLACE_FROM.length; i ++) {
+			REPLACE_FROM_LEN[i] = REPLACE_FROM[i].length();
+		}
 	}
 
 	private boolean replaced = false;
@@ -244,6 +279,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				func.setName("array_length");
 				replaced = true;
 				break;
+			case "current_schemas":
+				parentSet.accept(CURRENT_SCHEMAS);
+				replaced = true;
+				return;
 			case "col_description":
 			case "information_schema._pg_char_max_length":
 			case "information_schema._pg_numeric_precision":
@@ -261,12 +300,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				parentSet.accept(TRUE);
 				replaced = true;
 				return;
-			case "pg_listening_channels":
-				parentSet.accept(PG_LISTENING_CHANNELS);
-				replaced = true;
-				return;
+			case "pg_catalog.pg_database_size":
 			case "pg_total_relation_size":
 				parentSet.accept(ZERO);
+				replaced = true;
+				return;
+			case "pg_listening_channels":
+				parentSet.accept(PG_LISTENING_CHANNELS);
 				replaced = true;
 				return;
 			case "row_to_json":
@@ -286,14 +326,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (exp instanceof NotExpression) {
 			NotExpression ne = (NotExpression) exp;
-			Expression exp1 = ne.getExpression();
-			if (exp1 instanceof Column && ((Column) exp1).
-					getFullyQualifiedName().equals("datistemplate")) {
-				parentSet.accept(TRUE);
-				replaced = true;
-			} else {
-				replace(exp1, ne::setExpression);
-			}
+			replace(ne.getExpression(), ne::setExpression);
+			return;
+		}
+		if (exp instanceof IsNullExpression) {
+			IsNullExpression ine = (IsNullExpression) exp;
+			replace(ine.getLeftExpression(), ine::setLeftExpression);
 			return;
 		}
 		if (exp instanceof CaseExpression) {
@@ -436,16 +474,21 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private void replace(FromItem fi, Consumer<FromItem> parentSet) {
 		if (fi instanceof Table) {
-			String name = ((Table) fi).getFullyQualifiedName();
+			Table table = (Table) fi;
+			String name = table.getFullyQualifiedName();
 			SelectBody sb = TABLE_MAP.get(name);
 			if (sb == null) {
+				if (name.equals("pg_catalog.pg_shdescription")) {
+					table.setName("pg_description");
+					replaced = true;
+				}
 				return;
 			}
 			SubSelect ss = new SubSelect();
 			ss.setSelectBody(sb);
 			Alias alias = fi.getAlias();
 			if (alias == null) {
-				alias = new Alias(((Table) fi).getName());
+				alias = new Alias(table.getName());
 			}
 			ss.setAlias(alias);
 			parentSet.accept(ss);
@@ -571,28 +614,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 		}
 	}
-
-	private static final String[] REPLACE_FROM = {
-		"(indpred IS NOT NULL)",
-		// "deferrable" is a keyword in JSqlParser
-		", condeferrable::int AS deferrable, ",
-		" CAST('*' AS pg_catalog.text) ",
-		// JSqlParser cannot parse SELECT a = b, ... Just replace:
-		// nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
-		" WHEN nsp.nspname = ANY('{information_schema}')",
-	};
-	private static final String[] REPLACE_TO = {
-		"(NVL2(indpred, TRUE, FALSE))",
-		", 0 \"deferrable\", ",
-		" '*' ",
-		" WHEN nsp.nspname = 'information_schema'",
-	};
-	private static final int[] REPLACE_FROM_LEN = {
-		21,
-		36,
-		30,
-		47,
-	};
 
 	private String getSQL(String s) {
 		replaced = false;
