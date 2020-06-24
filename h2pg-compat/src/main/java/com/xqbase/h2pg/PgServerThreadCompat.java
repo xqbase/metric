@@ -223,7 +223,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addEmptyTable("pg_stat_database", "0 xact_commit, 0 xact_rollback, " +
 				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
 				"0 blks_read, 0 blks_hit, '' datname");
-		addEmptyTable("pg_trigger", "0 oid, '' tgname, " +
+		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, " +
 				"0 tgrelid, '' tgenabled, FALSE tgisconstraint", true);
 		// views
 		TABLE_MAP.put("pg_tables",
