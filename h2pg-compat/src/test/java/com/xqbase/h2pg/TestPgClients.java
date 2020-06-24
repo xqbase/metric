@@ -782,6 +782,38 @@ public class TestPgClients {
 			assertEquals("test", rs.getString("relname"));
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT a.attname, a.attnum, " +
+				"pg_catalog.format_type(a.atttypid, a.atttypmod) as type, a.atttypmod, a.attnotnull, " +
+				"a.atthasdef, pg_catalog.pg_get_expr(adef.adbin, adef.adrelid, true) as adsrc, " +
+				"a.attstattarget, a.attstorage, t.typstorage, " +
+				"(SELECT 1 FROM pg_catalog.pg_depend pd, pg_catalog.pg_class pc " +
+				"WHERE pd.objid=pc.oid AND pd.classid=pc.tableoid AND pd.refclassid=pc.tableoid " +
+				"AND pd.refobjid=a.attrelid AND pd.refobjsubid=a.attnum AND pd.deptype='i' " +
+				"AND pc.relkind='S') IS NOT NULL AS attisserial, " +
+				"pg_catalog.col_description(a.attrelid, a.attnum) AS comment " +
+				"FROM pg_catalog.pg_attribute a " +
+				"LEFT JOIN pg_catalog.pg_attrdef adef ON a.attrelid=adef.adrelid AND a.attnum=adef.adnum " +
+				"LEFT JOIN pg_catalog.pg_type t ON a.atttypid=t.oid " +
+				"WHERE a.attrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname='test' " +
+				"AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')) " +
+				"AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("attname"));
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("attname"));
+			assertFalse(rs.next());
+		}
+		stat.execute("SET TRANSACTION READ ONLY");
+		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT " +
+				"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb " +
+				"FROM pg_catalog.pg_constraint AS c " +
+				"JOIN pg_catalog.pg_class AS r ON (c.conrelid=r.oid) " +
+				"JOIN pg_catalog.pg_namespace AS ns ON (r.relnamespace=ns.oid) " +
+				"WHERE r.relname = 'test' AND ns.nspname='public'")) {
+			assertTrue(rs.next());
+			assertNull(rs.getObject("nb"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test

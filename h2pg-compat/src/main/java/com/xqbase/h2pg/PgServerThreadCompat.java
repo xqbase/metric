@@ -128,6 +128,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" WHEN nsp.nspname = ANY('{information_schema}')",
 		// https://github.com/JSQLParser/JSqlParser/issues/720
 		") IS NOT NULL AS attisserial,",
+		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
@@ -135,7 +136,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"tablespace) AS \"tablespace\"",
 		" '*' ",
 		" WHEN nsp.nspname = 'information_schema'",
-		")::IS_NOT_NULL AS attisserial,",
+		")::CAST_TO_FALSE AS attisserial,",
+		"NULL as nb",
 	};
 	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
@@ -194,17 +196,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		TEXT_TYPE.setDataType("text");
 		RELNAME_COLUMN.setExpression(new Column("relname"));
 		// add columns
-		addColumns("pg_attribute", "0 attndims");
-		addColumns("pg_class", "${owner} relowner, NULL tableoid", true);
+		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage", true);
+		addColumns("pg_class", "NULL relacl, ${owner} relowner, NULL tableoid", true);
 		addColumns("pg_constraint", "NULL confdeltype, NULL confmatchtype, " +
-				"NULL confupdtype, NULL connamespace, NULL tableoid");
+				"NULL confupdtype, NULL connamespace, NULL tableoid", true);
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate", true);
 		addColumns("pg_index", "NULL indoption");
 		addColumns("pg_namespace", "id oid, ${owner} nspowner", true);
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
 				"NULL prolang, 0 pronargs, FALSE proisagg", true);
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
-				"NULL typdefault, 0 typndims, ${owner} typowner");
+				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage", true);
+		addColumns("pg_user", "oid usesysid", true);
 		addColumns("information_schema.routines", "NULL type_udt_name");
 		addColumns("information_schema.triggers", "NULL event_object_table");
 		// empty tables
@@ -220,7 +223,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addEmptyTable("pg_stat_database", "0 xact_commit, 0 xact_rollback, " +
 				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
 				"0 blks_read, 0 blks_hit, '' datname");
-		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tgrelid, '' tgenabled");
+		addEmptyTable("pg_trigger", "0 oid, '' tgname, " +
+				"0 tgrelid, '' tgenabled, FALSE tgisconstraint", true);
 		// views
 		TABLE_MAP.put("pg_tables",
 				select("SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
@@ -284,13 +288,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replaced = true;
 				return;
 			case "col_description":
+			case "pg_catalog.col_description":
 			case "information_schema._pg_char_max_length":
 			case "information_schema._pg_numeric_precision":
 			case "information_schema._pg_numeric_scale":
 			case "information_schema._pg_datetime_precision":
+			case "oidvectortypes":
+			case "pg_catalog.oidvectortypes":
 			case "pg_get_constraintdef":
+			case "pg_catalog.pg_get_constraintdef":
 			case "pg_get_functiondef":
 			case "pg_get_viewdef":
+			case "pg_get_triggerdef":
+			case "pg_catalog.pg_get_triggerdef":
 			case "shobj_description":
 				parentSet.accept(NULL);
 				replaced = true;
@@ -351,12 +361,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (exp instanceof CastExpression) {
 			CastExpression ce = (CastExpression) exp;
+			String type = ce.getType().getDataType();
+			if (type.equals("CAST_TO_FALSE")) {
+				parentSet.accept(FALSE);
+				replaced = true;
+				return;
+			}
 			Expression oldLeft = ce.getLeftExpression();
 			Expression left = oldLeft;
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
 			}
-			if (left instanceof LongValue && ce.getType().getDataType().equals("regclass")) {
+			if (left instanceof LongValue && type.equals("regclass")) {
 				// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, oid::text)
 				PlainSelect ps = new PlainSelect();
 				ps.addSelectItems(RELNAME_COLUMN);
@@ -616,9 +632,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private String getSQL(String s) {
-		replaced = false;
 		anyArray = false;
 		String sql = s;
+		if (sql.equals("SET TRANSACTION READ ONLY")) {
+			replaced = true;
+			return "SET AUTOCOMMIT FALSE";
+		}
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			sql = "EXPLAIN " + sql.substring(16);
 			replaced = true;
@@ -657,17 +676,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return insert.toString();
 				}
 			} else if (st instanceof ShowStatement) {
-				ShowStatement ss = (ShowStatement) st;
-				switch (ss.getName()) {
-				case "LC_COLLATE":
+				if (((ShowStatement) st).getName().equals("LC_COLLATE")) {
 					replaced = true;
 					return "SELECT 'C' lc_collate";
-				default:
 				}
 			}
 		} catch (ParseException | TokenMgrException e) {
 			// Ignored
-			// System.err.println(s + ": " + e);
+			// System.err.println(sql + ": " + e);
 		}
 		return sql;
 	}
@@ -732,21 +748,24 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			int z1 = findZero(data, 5, data.length) + 1;
 			int z2 = findZero(data, z1, data.length);
 			Charset charset = (Charset) getEncoding.invoke(this);
+			replaced = false;
 			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());
-			if (sql != null) {
-				byte[] sqlb = sql.getBytes(charset);
-				byte[] data_ = new byte[data.length - z2 + z1 + sqlb.length];
-				data_[0] = 'P';
-				Bits.writeInt(data_, 1, data_.length - 1);
-				System.arraycopy(data, 5, data_, 5, z1 - 5);
-				System.arraycopy(sqlb, 0, data_, z1, sqlb.length);
-				System.arraycopy(data, z2, data_, z1 + sqlb.length, data.length - z2);
-				data = data_;
+			if (!replaced) {
+				break;
 			}
+			byte[] sqlb = sql.getBytes(charset);
+			byte[] data_ = new byte[data.length - z2 + z1 + sqlb.length];
+			data_[0] = 'P';
+			Bits.writeInt(data_, 1, data_.length - 1);
+			System.arraycopy(data, 5, data_, 5, z1 - 5);
+			System.arraycopy(sqlb, 0, data_, z1, sqlb.length);
+			System.arraycopy(data, z2, data_, z1 + sqlb.length, data.length - z2);
+			data = data_;
 			break;
 		case 'Q':
 			z1 = findZero(data, 5, data.length);
 			charset = (Charset) getEncoding.invoke(this);
+			replaced = false;
 			StringBuilder sb = new StringBuilder();
 			try (ScriptReader reader = new ScriptReader(new
 					InputStreamReader(new ByteArrayInputStream(data, 5, z1 - 5), charset))) {
@@ -763,8 +782,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (!replaced || sb.length() == 0) {
 				break;
 			}
-			byte[] sqlb = sb.substring(0, sb.length() - 1).getBytes(charset);
-			byte[] data_ = new byte[data.length - z1 + 5 + sqlb.length];
+			sqlb = sb.substring(0, sb.length() - 1).getBytes(charset);
+			data_ = new byte[data.length - z1 + 5 + sqlb.length];
 			data_[0] = 'Q';
 			Bits.writeInt(data_, 1, data_.length - 1);
 			System.arraycopy(sqlb, 0, data_, 5, sqlb.length);
