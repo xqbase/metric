@@ -103,7 +103,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
 	private static final StringValue ROW_TO_JSON = new StringValue("{}");
-	private static final StringValue CURRENT_SCHEMAS = new StringValue("public");
+	private static final StringValue CURRENT_SCHEMAS = new StringValue("{public}");
 	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
 	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =

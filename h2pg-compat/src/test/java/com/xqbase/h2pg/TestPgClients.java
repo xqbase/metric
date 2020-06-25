@@ -769,7 +769,7 @@ public class TestPgClients {
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT current_schemas(false) AS search_path")) {
 			assertTrue(rs.next());
-			assertEquals("public", rs.getString("search_path"));
+			assertEquals("{public}", rs.getString("search_path"));
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.relname, " +
