@@ -480,6 +480,7 @@ public class TestPgClients {
 				"WHERE event_object_table = 'test'")) {
 			assertFalse(rs.next());
 		}
+		stat.execute("RESET statement_timeout");
 	}
 
 	@Test
@@ -812,6 +813,15 @@ public class TestPgClients {
 				"WHERE r.relname = 'test' AND ns.nspname='public'")) {
 			assertTrue(rs.next());
 			assertNull(rs.getObject("nb"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.relname, " +
+				"pg_catalog.pg_get_userbyid(c.relowner)  AS relowner, " +
+				"pg_catalog.obj_description(c.oid, 'pg_class') AS relcomment\r\n" +
+				"FROM pg_catalog.pg_class c " +
+				"LEFT JOIN pg_catalog.pg_namespace n ON (n.oid = c.relnamespace) " +
+				"WHERE (n.nspname='public') AND (c.relkind = 'v'::\"char\") " +
+				"ORDER BY relname\r\n")) {
 			assertFalse(rs.next());
 		}
 	}

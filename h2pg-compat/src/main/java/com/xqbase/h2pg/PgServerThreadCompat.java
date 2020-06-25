@@ -129,6 +129,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// https://github.com/JSQLParser/JSqlParser/issues/720
 		") IS NOT NULL AS attisserial,",
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
+		"(c.relkind = 'v'::\"char\")",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
@@ -138,6 +139,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" WHEN nsp.nspname = 'information_schema'",
 		")::CAST_TO_FALSE AS attisserial,",
 		"NULL as nb",
+		"(c.relkind = 'v')",
 	};
 	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
@@ -637,6 +639,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (sql.equals("SET TRANSACTION READ ONLY")) {
 			replaced = true;
 			return "SET AUTOCOMMIT FALSE";
+		}
+		if (sql.equals("RESET statement_timeout")) {
+			replaced = true;
+			return "SET NETWORK_TIMEOUT 0";
 		}
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			sql = "EXPLAIN " + sql.substring(16);
