@@ -644,6 +644,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 			return "SET NETWORK_TIMEOUT 0";
 		}
+		/*
+		if (sql.equals("select oid,typname from pg_type")) {
+			replaced = true;
+			return "ERR0R";
+		}
+		*/
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			sql = "EXPLAIN " + sql.substring(16);
 			replaced = true;

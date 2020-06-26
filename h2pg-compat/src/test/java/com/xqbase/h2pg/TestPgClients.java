@@ -824,6 +824,23 @@ public class TestPgClients {
 				"ORDER BY relname\r\n")) {
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.oid AS conid, c.contype, " +
+				"c.conname, pg_catalog.pg_get_constraintdef(c.oid, true) AS consrc, " +
+				"ns1.nspname as p_schema, r1.relname as p_table, ns2.nspname as f_schema, " +
+				"r2.relname as f_table, f1.attname as p_field, f1.attnum AS p_attnum, " +
+				"f2.attname as f_field, f2.attnum AS f_attnum, " +
+				"pg_catalog.obj_description(c.oid, 'pg_constraint') AS constcomment, " +
+				"c.conrelid, c.confrelid FROM pg_catalog.pg_constraint AS c " +
+				"JOIN pg_catalog.pg_class AS r1 ON (c.conrelid=r1.oid) " +
+				"JOIN pg_catalog.pg_attribute AS f1 ON (f1.attrelid=r1.oid AND (f1.attnum=c.conkey[1])) " +
+				"JOIN pg_catalog.pg_namespace AS ns1 ON r1.relnamespace=ns1.oid " +
+				"LEFT JOIN (pg_catalog.pg_class AS r2 JOIN pg_catalog.pg_namespace AS ns2 " +
+				"ON (r2.relnamespace=ns2.oid)) ON (c.confrelid=r2.oid) " +
+				"LEFT JOIN pg_catalog.pg_attribute AS f2 ON (f2.attrelid=r2.oid AND " +
+				"((c.confkey[1]=f2.attnum AND c.conkey[1]=f1.attnum))) " +
+				"WHERE r1.relname = 'test' AND ns1.nspname='public' ORDER BY 1")) {
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
