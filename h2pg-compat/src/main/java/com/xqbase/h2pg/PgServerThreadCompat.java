@@ -120,7 +120,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" WHEN nsp.nspname = ANY('{information_schema}')",
 		// https://github.com/JSQLParser/JSqlParser/issues/720
 		") IS NOT NULL AS attisserial,",
+		// For phpPgAdmin 7.12.1
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
+		// For phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
+		"max(SUBSTRING(array_dims(c.conkey) FROM  $patern$^\\[.*:(.*)\\]$$patern$)) as nb",
 		"(c.relkind = 'v'::\"char\")",
 	};
 	private static final String[] REPLACE_TO = {
@@ -130,6 +133,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" '*' ",
 		" WHEN nsp.nspname = 'information_schema'",
 		")::CAST_TO_FALSE attisserial,",
+		"MAX(array_length(c.conkey)) nb",
 		"MAX(array_length(c.conkey)) nb",
 		"(c.relkind = 'v')",
 	};

@@ -2,14 +2,14 @@
 
 PgAdmin 4.16 tested.
 
-Supported Operations:
+Supported operations:
 
 - List Databases, Schemas, Tables, Columns
 - Query
 - View/Edit Data
 - Update/Delete on Data Output
 
-Unsupported Operations:
+Unsupported operations:
 
 - Insert on Data Output, due to uncommitted `INSERT INTO ... RETURNING ...`
 
@@ -33,10 +33,13 @@ Valentina Studio 10.0 tested.
 
 #### phpPgAdmin
 
-phpPgAdmin 7.12.1 tested.
+phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin) and 7.12.1 tested.
 
-Unsupported Operations:
+Unsupported operations:
 
-- Columns, Browse: for tables with composite primary key
 - Indexes (due to incomplete implementation of `pg_index`)
 - Rules, Admin, Info
+
+Unsupported operations with 7.12.1:
+
+- Columns, Browse: for tables with composite primary key
