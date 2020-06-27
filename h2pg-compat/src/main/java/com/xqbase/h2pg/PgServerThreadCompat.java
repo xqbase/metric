@@ -87,15 +87,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		return method;
 	}
 
-	private static SelectBody select(String sql) {
-		CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
-		try {
-			return ((Select) parser.Statement()).getSelectBody();
-		} catch (ParseException e) {
-			throw new RuntimeException(e);
-		}
-	}
-
 	private static final LongValue ZERO = new LongValue(0);
 	private static final LongValue ONE = new LongValue(1);
 	private static final LongValue MINUS_ONE = new LongValue(-1);
@@ -116,6 +107,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			new SelectExpressionItem();
 	private static final ColDataType TEXT_TYPE = new ColDataType();
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
+	private static final Map<String, Expression> FUNCTION_MAP = new HashMap<>();
 
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
@@ -134,38 +126,44 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
-		"tablespace) AS \"tablespace\"",
+		"tablespace) \"tablespace\"",
 		" '*' ",
 		" WHEN nsp.nspname = 'information_schema'",
-		")::CAST_TO_FALSE AS attisserial,",
-		"NULL as nb",
+		")::CAST_TO_FALSE attisserial,",
+		"MAX(array_length(c.conkey)) nb",
 		"(c.relkind = 'v')",
 	};
 	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
-	private static void addTable(String table, SelectBody sb, boolean pgCatalog) {
-		TABLE_MAP.put(table, sb);
-		if (pgCatalog) {
-			TABLE_MAP.put("pg_catalog." + table, sb);
+	private static void addTable(String name, String sql) {
+		CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
+		SelectBody sb;
+		try {
+			sb = ((Select) parser.Statement()).getSelectBody();
+		} catch (ParseException e) {
+			throw new RuntimeException(e);
+		}
+		TABLE_MAP.put(name, sb);
+		if (!name.startsWith("information_schema.")) {
+			TABLE_MAP.put("pg_catalog." + name, sb);
 		}
 	}
 
-	private static void addColumns(String table, String columns) {
-		addColumns(table, columns, false);
-	}
-
-	private static void addColumns(String table, String columns, boolean pgCatalog) {
-		addTable(table, select("SELECT *, " + columns.replace("${owner}",
+	private static void addColumns(String name, String columns) {
+		addTable(name, "SELECT *, " + columns.replace("${owner}",
 				"(SELECT oid FROM pg_user WHERE usename = current_user())") +
-				" FROM " + table), pgCatalog);
+				" FROM " + name);
 	}
 
-	private static void addEmptyTable(String table, String columns) {
-		addEmptyTable(table, columns, false);
+	private static void addEmptyTable(String name, String columns) {
+		addTable(name, "SELECT " + columns + " WHERE FALSE");
 	}
 
-	private static void addEmptyTable(String table, String columns, boolean pgCatalog) {
-		addTable(table, select("SELECT " + columns + " WHERE FALSE"), pgCatalog);
+	private static void addFunction(String name, Expression exp) {
+		FUNCTION_MAP.put(name, exp);
+		if (!name.startsWith("information_schema.")) {
+			FUNCTION_MAP.put("pg_catalog." + name, exp);
+		}
 	}
 
 	static {
@@ -197,25 +195,23 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		PG_GET_KEYWORDS.setAlias(new Alias("pg_get_keywords"));
 		TEXT_TYPE.setDataType("text");
 		RELNAME_COLUMN.setExpression(new Column("relname"));
-		// add columns
-		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage", true);
-		addColumns("pg_class", "NULL relacl, ${owner} relowner, NULL tableoid", true);
-		addColumns("pg_constraint", "NULL confdeltype, NULL confmatchtype, " +
-				"NULL confupdtype, NULL connamespace, NULL tableoid", true);
-		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate", true);
-		addColumns("pg_index", "NULL indoption");
-		addColumns("pg_namespace", "id oid, ${owner} nspowner", true);
+
+		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage");
+		addColumns("pg_class", "NULL relacl, ${owner} relowner, NULL tableoid");
+		addColumns("pg_constraint", "NULL confkey, NULL confdeltype, NULL confmatchtype, " +
+				"NULL confupdtype, NULL connamespace, NULL tableoid");
+		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
+		addColumns("pg_namespace", "id oid, ${owner} nspowner");
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
-				"NULL prolang, 0 pronargs, FALSE proisagg", true);
+				"NULL prolang, 0 pronargs, FALSE proisagg");
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
-				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage", true);
-		addColumns("pg_user", "oid usesysid", true);
+				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
+		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.routines", "NULL type_udt_name");
 		addColumns("information_schema.triggers", "NULL event_object_table");
-		// empty tables
 		addEmptyTable("pg_collation", "0 oid, '' collnamespace, '' collname");
 		addEmptyTable("pg_depend", "'' deptype, 0 classid, 0 refclassid, " +
-				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid", true);
+				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
 		addEmptyTable("pg_event_trigger", "0");
 		addEmptyTable("pg_language", "0 oid, '' lanname");
 		addEmptyTable("pg_rewrite", "0 oid, '' rulename, 0 ev_class");
@@ -226,18 +222,52 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
 				"0 blks_read, 0 blks_hit, '' datname");
 		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, " +
-				"0 tgrelid, '' tgenabled, FALSE tgisconstraint", true);
-		// views
-		TABLE_MAP.put("pg_tables",
-				select("SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
-				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')"));
-		TABLE_MAP.put("pg_views",
-				select("SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
-				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'"));
+				"0 tgfoid, 0 tgrelid, '' tgenabled, FALSE tgisconstraint");
+		addTable("pg_index", "SELECT NULL indexrelid, conrelid indrelid, " +
+				"(CASE contype WHEN 'p' THEN TRUE ELSE FALSE END) indisclustered, TRUE indisunique, " +
+				"(CASE contype WHEN 'p' THEN TRUE ELSE FALSE END) indisprimary, " +
+				"NULL indexprs, conkey indkey, NULL indpred, NULL indoption FROM pg_constraint");
+		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
+		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'");
+
+		addFunction("information_schema._pg_char_max_length", NULL);
+		addFunction("information_schema._pg_numeric_precision", NULL);
+		addFunction("information_schema._pg_numeric_scale", NULL);
+		addFunction("information_schema._pg_datetime_precision", NULL);
+		addFunction("col_description", NULL);
+		addFunction("oidvectortypes", NULL);
+		addFunction("pg_get_constraintdef", NULL);
+		addFunction("pg_get_triggerdef", NULL);
+		addFunction("pg_get_functiondef", NULL);
+		addFunction("pg_get_viewdef", NULL);
+		addFunction("shobj_description", NULL);
+		addFunction("pg_cancel_backend", TRUE);
+		addFunction("pg_function_is_visible", TRUE);
+		addFunction("pg_database_size", ZERO);
+		addFunction("pg_total_relation_size", ZERO);
+		addFunction("array_lower", ONE);
+		addFunction("current_schemas", CURRENT_SCHEMAS);
+		addFunction("pg_listening_channels", PG_LISTENING_CHANNELS);
+		addFunction("row_to_json", ROW_TO_JSON);
 
 		for (int i = 0; i < REPLACE_FROM.length; i ++) {
 			REPLACE_FROM_LEN[i] = REPLACE_FROM[i].length();
 		}
+	}
+
+	private static ExpressionList getExpressionList(String value) {
+		String ss = value;
+		int len = ss.length();
+		if (len >= 2 && ss.charAt(0) == '{' && ss.charAt(len - 1) == '}') {
+			ss = ss.substring(1, len - 1);
+		}
+		List<Expression> inExps = new ArrayList<>();
+		for (String s : ss.split(",")) {
+			inExps.add(new StringValue(s));
+		}
+		return new ExpressionList(inExps);
 	}
 
 	private boolean replaced = false;
@@ -250,8 +280,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (exp instanceof Function) {
 			Function func = (Function) exp;
 			ExpressionList el = func.getParameters();
+			Expression result = FUNCTION_MAP.get(func.getName());
+			if (result != null) {
+				parentSet.accept(result);
+				replaced = true;
+				return;
+			}
 			switch (func.getName()) {
 			case "array_length":
+			case "pg_catalog.array_length":
 				if (el != null) {
 					List<Expression> exps = el.getExpressions();
 					if (exps.size() > 1) {
@@ -260,71 +297,25 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					}
 				}
 				break;
-			case "array_lower":
-				parentSet.accept(ONE);
-				replaced = true;
-				return;
 			case "array_upper":
 			case "pg_catalog.array_upper":
 				if (el != null && el.getExpressions().size() > 0) {
 					Expression exp0 = el.getExpressions().get(0);
-					if (exp0 instanceof Column) {
-						// array_upper(p.pro[all]argtypes, 1) -> -1
-						// p.pro[all]argtypes in sub-query does not work
-						switch (((Column) exp0).getFullyQualifiedName()) {
-						case "p.proargtypes":
-						case "p.proallargtypes":
-							parentSet.accept(MINUS_ONE);
-							replaced = true;
-							return;
-						default:
-						}
+					// array_upper(p.pro[all]argtypes, 1) -> -1
+					// p.pro[all]argtypes in sub-query does not work
+					switch (exp0.toString()) {
+					case "p.proargtypes":
+					case "p.proallargtypes":
+						parentSet.accept(MINUS_ONE);
+						replaced = true;
+						return;
+					default:
 					}
 					el.setExpressions(Arrays.asList(exp0));
 				}
 				func.setName("array_length");
 				replaced = true;
 				break;
-			case "current_schemas":
-				parentSet.accept(CURRENT_SCHEMAS);
-				replaced = true;
-				return;
-			case "col_description":
-			case "pg_catalog.col_description":
-			case "information_schema._pg_char_max_length":
-			case "information_schema._pg_numeric_precision":
-			case "information_schema._pg_numeric_scale":
-			case "information_schema._pg_datetime_precision":
-			case "oidvectortypes":
-			case "pg_catalog.oidvectortypes":
-			case "pg_get_constraintdef":
-			case "pg_catalog.pg_get_constraintdef":
-			case "pg_get_functiondef":
-			case "pg_get_viewdef":
-			case "pg_get_triggerdef":
-			case "pg_catalog.pg_get_triggerdef":
-			case "shobj_description":
-				parentSet.accept(NULL);
-				replaced = true;
-				return;
-			case "pg_cancel_backend":
-			case "pg_catalog.pg_function_is_visible":
-				parentSet.accept(TRUE);
-				replaced = true;
-				return;
-			case "pg_catalog.pg_database_size":
-			case "pg_total_relation_size":
-				parentSet.accept(ZERO);
-				replaced = true;
-				return;
-			case "pg_listening_channels":
-				parentSet.accept(PG_LISTENING_CHANNELS);
-				replaced = true;
-				return;
-			case "row_to_json":
-				parentSet.accept(ROW_TO_JSON);
-				replaced = true;
-				return;
 			default:
 			}
 			if (el != null) {
@@ -415,6 +406,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			ItemsList il = ie.getRightItemsList();
 			if (il instanceof ExpressionList) {
 				List<Expression> exps = ((ExpressionList) il).getExpressions();
+				// attnum IN ('') -> FALSE
+				// attnum IN ('{1,2,3}') -> attnum IN (1, 2, 3)
+				if (exps.size() == 1 && exps.get(0) instanceof StringValue &&
+						ie.getLeftExpression().toString().equals("attnum")) {
+					String value = ((StringValue) exps.get(0)).getValue();
+					if (value.isEmpty()) {
+						parentSet.accept(FALSE);
+					} else {
+						ie.setRightItemsList(getExpressionList(value));
+					}
+					replaced = true;
+					return;
+				}
 				for (int i = 0; i < exps.size(); i ++) {
 					int i_ = i;
 					replace(exps.get(i), e -> exps.set(i_, e));
@@ -458,18 +462,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				Expression exp0 = exps.get(0);
 				if (exp0 instanceof StringValue) {
 					// value = ANY('{...}') -> value IN (...)
-					String ss = ((StringValue) exp0).getValue();
-					int len = ss.length();
-					if (len >= 2 && ss.charAt(0) == '{' && ss.charAt(len - 1) == '}') {
-						ss = ss.substring(1, len - 1);
-					}
-					List<Expression> inExps = new ArrayList<>();
-					for (String s : ss.split(",")) {
-						inExps.add(new StringValue(s));
-					}
-					InExpression in = new InExpression(left, new ExpressionList(inExps));
+					InExpression in = new InExpression(left,
+							getExpressionList(((StringValue) exp0).getValue()));
 					replace(left, in::setLeftExpression);
-					be.setRightExpression(new StringValue(ss));
 					parentSet.accept(in);
 				} else {
 					// value = ANY(array) -> ARRAY_CONTAINS(array, value)
@@ -522,8 +517,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (fi instanceof SubJoin) {
 			SubJoin si = (SubJoin) fi;
-			PlainSelect ps = new PlainSelect();
 			FromItem left = si.getLeft();
+			// H2 cannot use alias in sub-query in join, so keep sub-join and 
+			// avoid extracting table to sub-query in this case
+			if (left.toString().equals("pg_catalog.pg_class AS r2")) {
+				List<Join> joins = si.getJoinList();
+				if (joins != null) {
+					for (Join join : joins) {
+						replace(join.getRightItem(), join::setRightItem);
+						replace(join.getOnExpression(), join::setOnExpression);
+					}
+				}
+				return;
+			}
+			PlainSelect ps = new PlainSelect();
 			ps.setFromItem(left);
 			ps.setSelectItems(ALL_COLUMNS);
 			replace(left, ps::setFromItem);
@@ -644,12 +651,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 			return "SET NETWORK_TIMEOUT 0";
 		}
-		/*
+		// The result for `select oid,typname from pg_type` is different from PostgreSQL,
+		// which may lead `pg_fieldtype` crash. Just make it fail.
 		if (sql.equals("select oid,typname from pg_type")) {
 			replaced = true;
-			return "ERR0R";
+			return "SET NETWORK_TIMEOUT 0";
 		}
-		*/
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			sql = "EXPLAIN " + sql.substring(16);
 			replaced = true;

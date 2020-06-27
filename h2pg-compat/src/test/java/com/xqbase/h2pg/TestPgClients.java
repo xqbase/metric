@@ -13,6 +13,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 
 import org.h2.tools.Server;
 import org.junit.After;
@@ -620,7 +621,7 @@ public class TestPgClients {
 				"LEFT JOIN pg_constraint con ON con.tableoid = dep.refclassid AND con.oid = dep.refobjid " +
 				"WHERE conname IS NULL AND tns.nspname = 'public' AND ct.relname = 'test'")) {
 			assertTrue(rs.next());
-			assertEquals(0, rs.getLong(1));
+			assertEquals(1, rs.getLong(1));
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT ( SELECT CASE " +
 				"WHEN ( reltuples IS NOT NULL AND reltuples > 1000 ) " +
@@ -805,14 +806,15 @@ public class TestPgClients {
 			assertFalse(rs.next());
 		}
 		stat.execute("SET TRANSACTION READ ONLY");
+		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
 		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT " +
 				"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb " +
 				"FROM pg_catalog.pg_constraint AS c " +
 				"JOIN pg_catalog.pg_class AS r ON (c.conrelid=r.oid) " +
 				"JOIN pg_catalog.pg_namespace AS ns ON (r.relnamespace=ns.oid) " +
-				"WHERE r.relname = 'test' AND ns.nspname='public'")) {
+				"WHERE r.relname = 'test2' AND ns.nspname='public'")) {
 			assertTrue(rs.next());
-			assertNull(rs.getObject("nb"));
+			assertEquals(2, rs.getInt("nb"));
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.relname, " +
@@ -839,6 +841,36 @@ public class TestPgClients {
 				"LEFT JOIN pg_catalog.pg_attribute AS f2 ON (f2.attrelid=r2.oid AND " +
 				"((c.confkey[1]=f2.attnum AND c.conkey[1]=f1.attnum))) " +
 				"WHERE r1.relname = 'test' AND ns1.nspname='public' ORDER BY 1")) {
+			assertTrue(rs.next());
+			assertEquals("p", rs.getString("contype"));
+			assertEquals("test", rs.getString("p_table"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT indrelid, indkey " +
+				"FROM pg_catalog.pg_index WHERE indisunique AND indrelid=" +
+				"(SELECT oid FROM pg_catalog.pg_class WHERE relname='test2' AND relnamespace=(" +
+				"SELECT oid FROM pg_catalog.pg_namespace WHERE nspname='public')) " +
+				"AND indpred IS NULL AND indexprs IS NULL ORDER BY indisprimary DESC LIMIT 1")) {
+			assertTrue(rs.next());
+			assertTrue(Arrays.asList("{1,2}", "{2,1}").contains(rs.getString("indkey")));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT attnum, attname " +
+				"FROM pg_catalog.pg_attribute WHERE attrelid=(" +
+				"SELECT oid FROM pg_catalog.pg_class WHERE relname='test2' AND " +
+				"relnamespace=(SELECT oid FROM pg_catalog.pg_namespace WHERE nspname='public')) " +
+				"AND attnum IN ('')")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT attnum, attname " +
+				"FROM pg_catalog.pg_attribute WHERE attrelid=(" +
+				"SELECT oid FROM pg_catalog.pg_class WHERE relname='test2' AND " +
+				"relnamespace=(SELECT oid FROM pg_catalog.pg_namespace WHERE nspname='public')) " +
+				"AND attnum IN ('{1,2}')")) {
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("attname"));
+			assertTrue(rs.next());
+			assertEquals("x2", rs.getString("attname"));
 			assertFalse(rs.next());
 		}
 	}

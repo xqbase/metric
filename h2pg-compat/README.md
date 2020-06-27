@@ -35,10 +35,8 @@ Valentina Studio 10.0 tested.
 
 phpPgAdmin 7.12.1 tested.
 
-The result for `select oid,typname from pg_type` is different from PostgreSQL, which may lead `pg_fieldtype` crash. To avoid this, just skip `pg_fieldtype` in `libraries/adodb/drivers/adodb-postgres64.inc.php` (near line 913):
+Unsupported Operations:
 
-			/*
-			if (pg_fieldtype($qid,$i) == 'bytea') {
-				$this->_blobArr[$i] = pg_fieldname($qid,$i);
-			}
-			*/
+- Columns, Browse: for tables with composite primary key
+- Indexes (due to incomplete implementation of `pg_index`)
+- Rules, Admin, Info
