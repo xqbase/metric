@@ -227,10 +227,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 blks_read, 0 blks_hit, '' datname");
 		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, " +
 				"0 tgfoid, 0 tgrelid, '' tgenabled, FALSE tgisconstraint");
-		addTable("pg_index", "SELECT NULL indexrelid, conrelid indrelid, " +
-				"(CASE contype WHEN 'p' THEN TRUE ELSE FALSE END) indisclustered, TRUE indisunique, " +
-				"(CASE contype WHEN 'p' THEN TRUE ELSE FALSE END) indisprimary, " +
-				"NULL indexprs, conkey indkey, NULL indpred, NULL indoption FROM pg_constraint");
+		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, " +
+				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisclustered, " +
+				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
+				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
+				"NULL indexprs, ARRAY_AGG(c.ordinal_position" /* ORDER BY i.ordinal_position */ + ") indkey, " +
+				"NULL indpred, NULL indoption FROM information_schema.indexes i " +
+				"JOIN information_schema.tables t USING (table_schema, table_name) " +
+				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
+				"GROUP BY i.id");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
