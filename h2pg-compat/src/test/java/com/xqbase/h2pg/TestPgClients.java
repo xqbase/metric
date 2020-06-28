@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -14,6 +15,9 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.h2.tools.Server;
 import org.junit.After;
@@ -41,6 +45,68 @@ public class TestPgClients {
 		conn = DriverManager.getConnection("jdbc:postgresql://localhost:5535/pgserver", "sa", "sa");
 		stat = conn.createStatement();
 		stat.execute("CREATE TABLE test (id SERIAL PRIMARY KEY, x1 INTEGER)");
+	}
+
+	@Test
+	public void testPgJdbc() throws SQLException {
+		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, x3 INT, PRIMARY KEY (x1, x2), UNIQUE (x3, x2))");
+		stat.execute("CREATE INDEX ON test2 (x3, x1)");
+		DatabaseMetaData dmd = conn.getMetaData();
+		try (ResultSet rs = dmd.getIndexInfo(null, null, "test2", false, true)) {
+			Map<String, List<String>> expected = new HashMap<>();
+			expected.put("p", Arrays.asList("x1", "x2"));
+			expected.put("u", Arrays.asList("x3", "x2"));
+			expected.put("i", Arrays.asList("x3", "x1"));
+			Map<String, List<String>> actual = new HashMap<>();
+			while (rs.next()) {
+				String type = rs.getBoolean("NON_UNIQUE") ? "i" : rs.getInt("TYPE") == 1 ? "p" : "u";
+				actual.computeIfAbsent(type, k -> Arrays.asList(null, null)).
+						set(rs.getInt("ORDINAL_POSITION") - 1, rs.getString("COLUMN_NAME"));
+			}
+			assertEquals(expected, actual);
+		}
+		ConsumerEx<ResultSet, SQLException> rsConsumer = rs -> {
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("COLUMN_NAME"));
+			assertEquals(1, rs.getInt("KEY_SEQ"));
+			assertTrue(rs.next());
+			assertEquals("x2", rs.getString("COLUMN_NAME"));
+			assertEquals(2, rs.getInt("KEY_SEQ"));
+			assertFalse(rs.next());
+		};
+		// for PgJDBC 42.2.9
+		try (ResultSet rs = stat.executeQuery("SELECT NULL AS TABLE_CAT, n.nspname AS TABLE_SCHEM, " +
+				"ct.relname AS TABLE_NAME, a.attname AS COLUMN_NAME, (i.keys).n AS KEY_SEQ, " +
+				"ci.relname AS PK_NAME FROM pg_catalog.pg_class ct " +
+				"JOIN pg_catalog.pg_attribute a ON (ct.oid = a.attrelid) " +
+				"JOIN pg_catalog.pg_namespace n ON (ct.relnamespace = n.oid) " +
+				"JOIN (SELECT i.indexrelid, i.indrelid, i.indisprimary, " +
+				"information_schema._pg_expandarray(i.indkey) AS keys FROM pg_catalog.pg_index i) i " +
+				"ON (a.attnum = (i.keys).x AND a.attrelid = i.indrelid) " +
+				"JOIN pg_catalog.pg_class ci ON (ci.oid = i.indexrelid) " +
+				"WHERE true AND ct.relname = E'test2' AND i.indisprimary " +
+				"ORDER BY table_name, pk_name, key_seq")) {
+			rsConsumer.accept(rs);
+		}
+		// for PgJDBC 42.2.10
+		try (ResultSet rs = stat.executeQuery("SELECT result.TABLE_CAT, result.TABLE_SCHEM, " +
+				"result.TABLE_NAME, result.COLUMN_NAME, result.KEY_SEQ, result.PK_NAME FROM " +
+				"(SELECT NULL AS TABLE_CAT, n.nspname AS TABLE_SCHEM, ct.relname AS TABLE_NAME, " +
+				"a.attname AS COLUMN_NAME, (information_schema._pg_expandarray(i.indkey)).n AS KEY_SEQ, " +
+				"ci.relname AS PK_NAME, information_schema._pg_expandarray(i.indkey) AS KEYS, " +
+				"a.attnum AS A_ATTNUM FROM pg_catalog.pg_class ct " +
+				"JOIN pg_catalog.pg_attribute a ON (ct.oid = a.attrelid) " +
+				"JOIN pg_catalog.pg_namespace n ON (ct.relnamespace = n.oid) " +
+				"JOIN pg_catalog.pg_index i ON ( a.attrelid = i.indrelid) " +
+				"JOIN pg_catalog.pg_class ci ON (ci.oid = i.indexrelid) " +
+				"WHERE true  AND ct.relname = E'test2' AND i.indisprimary  ) result " +
+				"where result.A_ATTNUM = (result.KEYS).x " +
+				"ORDER BY result.table_name, result.pk_name, result.key_seq")) {
+			rsConsumer.accept(rs);
+		}
+		try (ResultSet rs = dmd.getPrimaryKeys(null, null, "test2")) {
+			rsConsumer.accept(rs);
+		}
 	}
 
 	@Test
@@ -404,7 +470,9 @@ public class TestPgClients {
 				"INNER JOIN pg_catalog.pg_class tc ON tc.oid=i.indrelid " +
 				"LEFT OUTER JOIN pg_catalog.pg_description dsc ON i.indexrelid=dsc.objoid " +
 				"WHERE i.indrelid=" + oid + " ORDER BY c.relname")) {
-			// pg_index is empty
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("tabrelname"));
+			assertEquals("{1}", rs.getString("keys"));
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.oid,c.*," +

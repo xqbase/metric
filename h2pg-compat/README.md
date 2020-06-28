@@ -1,3 +1,12 @@
+### PgJDBC
+
+PgJDBC 42.2.9 and 42.2.14 tested.
+
+New supported APIs:
+
+- `DatabaseMetaData.getIndexInfo()`
+- `DatabaseMetaData.getPrimaryKeys()`
+
 ### PgAdmin
 
 PgAdmin 4.16 tested.
@@ -37,7 +46,6 @@ phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin) and 7.12.1 tested.
 
 Unsupported operations:
 
-- Indexes (due to incomplete implementation of `pg_index`)
 - Rules, Admin, Info
 
 Unsupported operations with 7.12.1:

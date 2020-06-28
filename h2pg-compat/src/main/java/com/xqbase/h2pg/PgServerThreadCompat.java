@@ -87,6 +87,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		return method;
 	}
 
+	private static SelectBody select(String sql) {
+		CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
+		try {
+			return ((Select) parser.Statement()).getSelectBody();
+		} catch (ParseException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	private static final LongValue ZERO = new LongValue(0);
 	private static final LongValue ONE = new LongValue(1);
 	private static final LongValue MINUS_ONE = new LongValue(-1);
@@ -99,13 +108,22 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
 			new Alias("pg_listening_channels");
+	private static final Alias PGJDBC_KEYS_X_ALIAS = new Alias("keys_x");
 	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
 	private static final Column OID_COLUMN = new Column("oid");
+	private static final Column PGJDBC_KEYS_X_COLUMN = new Column("i.keys_x");
 	private static final List<SelectItem> ALL_COLUMNS = Arrays.asList(new AllColumns());
 	private static final Table PG_CLASS = new Table("pg_catalog.pg_class");
 	private static final SelectExpressionItem RELNAME_COLUMN =
 			new SelectExpressionItem();
 	private static final ColDataType TEXT_TYPE = new ColDataType();
+	private static final SelectBody PGJDBC_KEYS =
+			select("SELECT i.id indexrelid, t.id indrelid, " +
+			"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
+			"c.ordinal_position keys_x, i.ordinal_position keys_n " +
+			"FROM information_schema.indexes i " +
+			"JOIN information_schema.tables t USING (table_schema, table_name) " +
+			"JOIN information_schema.columns c USING (table_schema, table_name, column_name)");
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 	private static final Map<String, Expression> FUNCTION_MAP = new HashMap<>();
 
@@ -120,11 +138,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" WHEN nsp.nspname = ANY('{information_schema}')",
 		// https://github.com/JSQLParser/JSqlParser/issues/720
 		") IS NOT NULL AS attisserial,",
-		// For phpPgAdmin 7.12.1
+		// for phpPgAdmin 7.12.1
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
-		// For phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
+		// for phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $patern$^\\[.*:(.*)\\]$$patern$)) as nb",
 		"(c.relkind = 'v'::\"char\")",
+		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
+		" (i.keys).n ",
+		" (i.keys).x ",
+		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.10
+		" (information_schema._pg_expandarray(i.indkey)).n ",
+		" result.A_ATTNUM = (result.KEYS).x ",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
@@ -136,17 +160,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"MAX(array_length(c.conkey)) nb",
 		"MAX(array_length(c.conkey)) nb",
 		"(c.relkind = 'v')",
+		" i.keys_n ",
+		" i.keys_x ",
+		" i.keys_n ",
+		" result.A_ATTNUM = result.keys_x ",
 	};
 	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
 	private static void addTable(String name, String sql) {
-		CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
-		SelectBody sb;
-		try {
-			sb = ((Select) parser.Statement()).getSelectBody();
-		} catch (ParseException e) {
-			throw new RuntimeException(e);
-		}
+		SelectBody sb = select(sql);
 		TABLE_MAP.put(name, sb);
 		if (!name.startsWith("information_schema.")) {
 			TABLE_MAP.put("pg_catalog." + name, sb);
@@ -229,7 +251,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 tgfoid, 0 tgrelid, '' tgenabled, FALSE tgisconstraint");
 		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisclustered, " +
-				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
+				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE " +
+				"WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
 				"NULL indexprs, ARRAY_AGG(c.ordinal_position" /* ORDER BY i.ordinal_position */ + ") indkey, " +
 				"NULL indpred, NULL indoption FROM information_schema.indexes i " +
@@ -398,10 +421,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return;
 		}
 		if (exp instanceof SubSelect) {
-			SelectBody sb = ((SubSelect) exp).getSelectBody();
-			if (sb instanceof PlainSelect) {
-				replace((PlainSelect) sb);
-			}
+			SubSelect ss = (SubSelect) exp;
+			replace(ss.getSelectBody(), ss::setSelectBody);
 			return;
 		}
 		if (exp instanceof ExistsExpression) {
@@ -518,16 +539,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return;
 		}
 		if (fi instanceof SubSelect) {
-			SelectBody sb = ((SubSelect) fi).getSelectBody();
-			if (sb instanceof PlainSelect) {
-				replace((PlainSelect) sb);
-			}
+			SubSelect ss = (SubSelect) fi;
+			replace(ss.getSelectBody(), ss::setSelectBody);
 			return;
 		}
 		if (fi instanceof SubJoin) {
 			SubJoin si = (SubJoin) fi;
 			FromItem left = si.getLeft();
-			// H2 cannot use alias in sub-query in join, so keep sub-join and 
+			// H2 cannot use alias in sub-query in join, so keep sub-join and
 			// avoid extracting table to sub-query in this case
 			if (left.toString().equals("pg_catalog.pg_class AS r2")) {
 				List<Join> joins = si.getJoinList();
@@ -585,13 +604,53 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		});
 	}
 
-	private void replace(PlainSelect ps) {
+	private void replace(SelectBody sb, Consumer<SelectBody> parentSet) {
+		if (sb instanceof SetOperationList) {
+			List<SelectBody> sbs = ((SetOperationList) sb).getSelects();
+			for (int i = 0; i < sbs.size(); i ++) {
+				int i_ = i;
+				replace(sbs.get(i), e -> sbs.set(i_, e));
+			}
+			return;
+		}
+		if (!(sb instanceof PlainSelect)) {
+			return;
+		}
+		PlainSelect ps = (PlainSelect) sb;
 		replace(ps.getFromItem(), ps::setFromItem);
 		for (SelectItem si : ps.getSelectItems()) {
 			if (!(si instanceof SelectExpressionItem)) {
 				continue;
 			}
 			SelectExpressionItem sei = (SelectExpressionItem) si;
+			switch (sei.toString()) {
+			case "information_schema._pg_expandarray(i.indkey) AS keys":
+				// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
+				parentSet.accept(PGJDBC_KEYS);
+				replaced = true;
+				return;
+			case "information_schema._pg_expandarray(i.indkey) AS KEYS":
+				// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.10
+				List<Join> joins = ps.getJoins();
+				if (joins == null) {
+					break;
+				}
+				for (Join join : ps.getJoins()) {
+					if (!join.getRightItem().toString().equals("pg_catalog.pg_index i")) {
+						continue;
+					}
+					sei.setExpression(PGJDBC_KEYS_X_COLUMN);
+					sei.setAlias(PGJDBC_KEYS_X_ALIAS);
+					SubSelect ss = new SubSelect();
+					ss.setAlias(join.getRightItem().getAlias());
+					ss.setSelectBody(PGJDBC_KEYS);
+					join.setRightItem(ss);
+					replaced = true;
+					return;
+				}
+				break;
+			default:
+			}
 			Expression exp = sei.getExpression();
 			if (exp instanceof Function &&
 					((Function) exp).getName().equals("generate_series") &&
@@ -639,16 +698,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		replace(ps.getWhere(), ps::setWhere);
 	}
 
-	private void replace(SelectBody sb) {
-		if (sb instanceof PlainSelect) {
-			replace((PlainSelect) sb);
-		} else if (sb instanceof SetOperationList) {
-			for (SelectBody sbi : ((SetOperationList) sb).getSelects()) {
-				replace(sbi);
-			}
-		}
-	}
-
 	private String getSQL(String s) {
 		anyArray = false;
 		String sql = s;
@@ -692,7 +741,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
-				replace(((Select) st).getSelectBody());
+				replace(((Select) st).getSelectBody(), null);
 				if (replaced) {
 					return st.toString();
 				}
