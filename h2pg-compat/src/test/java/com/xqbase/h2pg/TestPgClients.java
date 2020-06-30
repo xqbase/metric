@@ -944,6 +944,24 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testSquirrelSQL() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT nspname AS TABLE_SCHEM, " +
+				"NULL AS TABLE_CATALOG FROM pg_catalog.pg_namespace WHERE nspname <> 'pg_toast' " +
+				"AND (nspname !~ '^pg_temp_' OR nspname = (pg_catalog.current_schemas(true))[1]) " +
+				"AND (nspname !~ '^pg_toast_temp_' OR nspname = " +
+				"replace((pg_catalog.current_schemas(true))[1], 'pg_temp_', 'pg_toast_temp_')) " +
+				"ORDER BY TABLE_SCHEM")) {
+			assertTrue(rs.next());
+			assertEquals("information_schema", rs.getString("TABLE_SCHEM"));
+			assertTrue(rs.next());
+			assertEquals("pg_catalog", rs.getString("TABLE_SCHEM"));
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("TABLE_SCHEM"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +

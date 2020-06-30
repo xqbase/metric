@@ -27,6 +27,7 @@ import org.h2.util.Utils;
 
 import net.sf.jsqlparser.expression.Alias;
 import net.sf.jsqlparser.expression.AnyComparisonExpression;
+import net.sf.jsqlparser.expression.ArrayExpression;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.CaseExpression;
 import net.sf.jsqlparser.expression.CastExpression;
@@ -102,8 +103,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final NullValue NULL = new NullValue();
 	private static final Column TRUE = new Column("TRUE");
 	private static final Column FALSE = new Column("FALSE");
+	private static final Column CURRENT_SCHEMAS = new Column("ARRAY['public']");
 	private static final StringValue ROW_TO_JSON = new StringValue("{}");
-	private static final StringValue CURRENT_SCHEMAS = new StringValue("{public}");
 	private static final ValuesList PG_GET_KEYWORDS = new ValuesList();
 	private static final NullValue PG_LISTENING_CHANNELS = new NullValue();
 	private static final Alias PG_LISTENING_CHANNELS_ALIAS =
@@ -418,6 +419,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replaced |= left != oldLeft;
 				replace(left, ce::setLeftExpression);
 			}
+			return;
+		}
+		if (exp instanceof ArrayExpression) {
+			ArrayExpression ae = (ArrayExpression) exp;
+			replace(ae.getObjExpression(), ae::setObjExpression);
+			replace(ae.getIndexExpression(), ae::setIndexExpression);
 			return;
 		}
 		if (exp instanceof SubSelect) {
