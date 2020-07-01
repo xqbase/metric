@@ -959,6 +959,26 @@ public class TestPgClients {
 			assertEquals("public", rs.getString("TABLE_SCHEM"));
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT " +
+				"n.nspname = ANY(current_schemas(true)), n.nspname, t.typname " +
+				"FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n " +
+				"ON t.typnamespace = n.oid WHERE t.oid = 1043")) {
+			assertTrue(rs.next());
+			assertEquals("CHARACTER VARYING", rs.getString("typname"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT TRUE FROM pg_attribute " +
+				"WHERE attrelid = '\"public\".\"test\"'::regclass " +
+				"AND attname = 'oid' AND NOT attisdropped")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT TRUE FROM pg_attribute " +
+				"WHERE attrelid = '\"pg_catalog\".\"pg_attribute\"'::regclass " +
+				"AND attname = 'oid' AND NOT attisdropped")) {
+			assertTrue(rs.next());
+			assertTrue(rs.getBoolean(1));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -1036,14 +1056,11 @@ public class TestPgClients {
 			oidTest = rs.getInt("oid");
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT " + (oidPgClass & 0xFFFFFFFFL) +
-				"::regclass, " + oidTest + "::regclass")) {
+				"::regclass, " + oidTest + "::regclass, 10000001::regclass")) {
 			rs.next();
 			assertEquals("pg_class", rs.getString(1));
 			assertEquals("test", rs.getString(2));
-		}
-		try (ResultSet rs = stat.executeQuery("SELECT 10000001::regclass")) {
-			rs.next();
-			assertEquals("10000001", rs.getString(1));
+			assertEquals("10000001", rs.getString(3));
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT x1 FROM test")) {
 			ResultSetMetaData rsmd = rs.getMetaData();

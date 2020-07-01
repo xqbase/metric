@@ -111,10 +111,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			new Alias("pg_listening_channels");
 	private static final Alias PGJDBC_KEYS_X_ALIAS = new Alias("keys_x");
 	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
-	private static final Column OID_COLUMN = new Column("oid");
 	private static final Column PGJDBC_KEYS_X_COLUMN = new Column("i.keys_x");
 	private static final List<SelectItem> ALL_COLUMNS = Arrays.asList(new AllColumns());
-	private static final Table PG_CLASS = new Table("pg_catalog.pg_class");
 	private static final SelectExpressionItem RELNAME_COLUMN =
 			new SelectExpressionItem();
 	private static final ColDataType TEXT_TYPE = new ColDataType();
@@ -398,27 +396,38 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
 			}
-			if (left instanceof LongValue && type.equals("regclass")) {
-				// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, oid::text)
-				PlainSelect ps = new PlainSelect();
-				ps.addSelectItems(RELNAME_COLUMN);
-				ps.setFromItem(PG_CLASS);
-				EqualsTo et = new EqualsTo();
-				et.setLeftExpression(OID_COLUMN);
-				et.setRightExpression(new LongValue((int) ((LongValue) left).getValue()));
-				ps.setWhere(et);
-				SubSelect ss = new SubSelect();
-				ss.setSelectBody(ps);
-				Function func = new Function();
-				func.setName("IFNULL");
-				func.setParameters(new ExpressionList(ss, new StringValue(left.toString())));
-				parentSet.accept(func);
-				replaced = true;
-			} else {
-				ce.setLeftExpression(left);
-				replaced |= left != oldLeft;
-				replace(left, ce::setLeftExpression);
+			if (type.equals("regclass")) {
+				if (left instanceof LongValue) {
+					// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, number::text)
+					SubSelect ss = new SubSelect();
+					ss.setSelectBody(select("SELECT relname FROM pg_class WHERE oid = " +
+							(int) ((LongValue) left).getValue()));
+					Function func = new Function();
+					func.setName("IFNULL");
+					func.setParameters(new ExpressionList(ss, new StringValue(left.toString())));
+					parentSet.accept(func);
+					replaced = true;
+					return;
+				}
+				if (left instanceof StringValue) {
+					// '"schema"."table"'::regclass -> 'table'::regclass
+					String s = ((StringValue) left).getValue();
+					int dot = s.lastIndexOf('.');
+					if (dot >= 0) {
+						s = s.substring(dot + 1);
+					}
+					int len = s.length();
+					if (len >= 2 && s.charAt(0) == '"' && s.charAt(len - 1) == '"') {
+						s = s.substring(1, len - 1);
+					}
+					ce.setLeftExpression(new StringValue(s));
+					replaced = true;
+					return;
+				}
 			}
+			ce.setLeftExpression(left);
+			replaced |= left != oldLeft;
+			replace(left, ce::setLeftExpression);
 			return;
 		}
 		if (exp instanceof ArrayExpression) {
@@ -727,6 +736,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 		} else if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
 			sql = "SET join_collapse_limit=" + sql.substring(30);
+			replaced = true;
+		} else if (sql.startsWith("SELECT n.nspname = ANY(current_schemas(true)), ")) {
+			// JSqlParser cannot parse SELECT a = b, ... Just replace:
+			// SELECT n.nspname = ANY(current_schemas(true)) -> SELECT n.nspname = 'public'
+			// and ignore JSqlParser's failure
+			sql = "SELECT n.nspname = 'public', " + sql.substring(47);
 			replaced = true;
 		} else if (sql.endsWith("::oid)::oid[])")) {
 			// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
