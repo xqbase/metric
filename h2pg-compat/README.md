@@ -51,3 +51,11 @@ Unsupported operations:
 Unsupported operations with 7.12.1:
 
 - Columns, Browse: for tables with composite primary key
+
+### SQuirreL SQL
+
+SQuirreL SQL 4.1.0 tested.
+
+### Sqlectron
+
+Sqlectron 1.30.0 tested.

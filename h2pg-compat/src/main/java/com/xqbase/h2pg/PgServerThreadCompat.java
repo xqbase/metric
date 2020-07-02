@@ -233,7 +233,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.routines", "NULL type_udt_name");
-		addColumns("information_schema.triggers", "NULL event_object_table");
+		addColumns("information_schema.triggers",
+				"NULL event_object_table, NULL event_object_schema");
 		addEmptyTable("pg_collation", "0 oid, '' collnamespace, '' collname");
 		addEmptyTable("pg_depend", "'' deptype, 0 classid, 0 refclassid, " +
 				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
@@ -258,6 +259,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"JOIN information_schema.tables t USING (table_schema, table_name) " +
 				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
 				"GROUP BY i.id");
+		addTable("pg_indexes", "SELECT DISTINCT n.nspname AS schemaname, c.relname AS tablename, " +
+				"i.relname AS indexname, t.spcname AS \"tablespace\", " +
+				"pg_get_indexdef(i.oid) AS indexdef FROM information_schema.indexes x " +
+				"JOIN information_schema.tables it USING (table_schema, table_name) " +
+				"JOIN pg_class c ON c.oid = it.id " +
+				"JOIN pg_class i ON i.oid = x.id " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
+				"LEFT JOIN pg_tablespace t ON t.oid = i.reltablespace " +
+				"WHERE c.relkind IN ('r', 'm', 'p') AND i.relkind IN ('i', 'I')");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
@@ -274,6 +284,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("pg_get_functiondef", NULL);
 		addFunction("pg_get_viewdef", NULL);
 		addFunction("shobj_description", NULL);
+		addFunction("pg_backend_pid", ZERO);
 		addFunction("pg_cancel_backend", TRUE);
 		addFunction("pg_function_is_visible", TRUE);
 		addFunction("pg_database_size", ZERO);
