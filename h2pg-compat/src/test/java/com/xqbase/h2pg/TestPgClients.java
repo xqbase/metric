@@ -730,7 +730,7 @@ public class TestPgClients {
 				"( SELECT obj_description( c.oid ) ) AS comment, " +
 				"array_to_string( array(   " +
 				"SELECT a.attname FROM pg_attribute a WHERE a.attnum = ANY( c.conkey ) " +
-				"AND a.attrelid = c.conrelid ORDER BY (    SELECT i FROM ( " +
+				"AND a.attrelid = c.conrelid ORDER BY ( SELECT i FROM ( " +
 				"SELECT generate_series( array_lower( c.conkey, 1 ), array_upper( c.conkey, 1 ) ) ) g( i) " +
 				"WHERE c.conkey[i] = a.attnum LIMIT 1 ) ), '\r\n' ) AS unique_fields FROM pg_constraint c " +
 				"JOIN pg_class ON c.conrelid = pg_class.oid " +
@@ -1055,7 +1055,7 @@ public class TestPgClients {
 				"        pg_type bt JOIN pg_namespace nbt ON ((bt.typnamespace = nbt.oid))" +
 				"      ) ON (((t.typtype = 'd'::\"char\") AND (t.typbasetype = bt.oid)))" +
 				// Check ")))))"
-				    ")" +
+					")" +
 				  ") LEFT JOIN pg_index ix ON (" +
 				"    (a.attrelid = ix.indrelid) AND (a.attnum = ANY (ix.indkey)) AND (ix.indisprimary)" +
 				"  )" +
