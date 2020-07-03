@@ -54,7 +54,6 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
-import net.sf.jsqlparser.statement.create.table.ColDataType;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.FromItem;
@@ -113,9 +112,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column GENERATE_SERIES_COLUMN = new Column("\"X\"");
 	private static final Column PGJDBC_KEYS_X_COLUMN = new Column("i.keys_x");
 	private static final List<SelectItem> ALL_COLUMNS = Arrays.asList(new AllColumns());
-	private static final SelectExpressionItem RELNAME_COLUMN =
-			new SelectExpressionItem();
-	private static final ColDataType TEXT_TYPE = new ColDataType();
+	private static final List<WhenClause> YES_OR_NO = new ArrayList<>();
 	private static final SelectBody PGJDBC_KEYS =
 			select("SELECT i.id indexrelid, t.id indrelid, " +
 			"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
@@ -125,6 +122,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			"JOIN information_schema.columns c USING (table_schema, table_name, column_name)");
 	private static final Map<String, SelectBody> TABLE_MAP = new HashMap<>();
 	private static final Map<String, Expression> FUNCTION_MAP = new HashMap<>();
+	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
 
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
@@ -142,6 +140,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// for phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $patern$^\\[.*:(.*)\\]$$patern$)) as nb",
 		"(c.relkind = 'v'::\"char\")",
+		" t.typtype = 'd'::\"char\"",
 		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
 		" (i.keys).n ",
 		" (i.keys).x ",
@@ -159,12 +158,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"MAX(array_length(c.conkey)) nb",
 		"MAX(array_length(c.conkey)) nb",
 		"(c.relkind = 'v')",
+		" t.typtype = 'd'",
 		" i.keys_n ",
 		" i.keys_x ",
 		" i.keys_n ",
 		" result.A_ATTNUM = result.keys_x ",
 	};
-	private static final int[] REPLACE_FROM_LEN = new int[REPLACE_FROM.length];
 
 	private static void addTable(String name, String sql) {
 		SelectBody sb = select(sql);
@@ -218,8 +217,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		PG_GET_KEYWORDS.setMultiExpressionList(words);
 		PG_GET_KEYWORDS.setColumnNames(Arrays.asList("word"));
 		PG_GET_KEYWORDS.setAlias(new Alias("pg_get_keywords"));
-		TEXT_TYPE.setDataType("text");
-		RELNAME_COLUMN.setExpression(new Column("relname"));
+		WhenClause wc = new WhenClause();
+		wc.setWhenExpression(new StringValue("YES"));
+		wc.setThenExpression(TRUE);
+		YES_OR_NO.add(wc);
 
 		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage");
 		addColumns("pg_class", "NULL relacl, ${owner} relowner, NULL tableoid");
@@ -229,6 +230,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_namespace", "id oid, ${owner} nspowner");
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
 				"NULL prolang, 0 pronargs, FALSE proisagg");
+		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
 				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
@@ -254,7 +256,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE " +
 				"WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
-				"NULL indexprs, ARRAY_AGG(c.ordinal_position" /* ORDER BY i.ordinal_position */ + ") indkey, " +
+				// Should be ARRAY_AGG(c.ordinal_position ORDER BY i.ordinal_position,
+				// but not supported by JSqlParser
+				"NULL indexprs, ARRAY_AGG(c.ordinal_position) indkey, " +
 				"NULL indpred, NULL indoption FROM information_schema.indexes i " +
 				"JOIN information_schema.tables t USING (table_schema, table_name) " +
 				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
@@ -275,6 +279,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 		addFunction("information_schema._pg_char_max_length", NULL);
 		addFunction("information_schema._pg_numeric_precision", NULL);
+		addFunction("information_schema._pg_numeric_precision_radix", NULL);
 		addFunction("information_schema._pg_numeric_scale", NULL);
 		addFunction("information_schema._pg_datetime_precision", NULL);
 		addFunction("col_description", NULL);
@@ -284,19 +289,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("pg_get_functiondef", NULL);
 		addFunction("pg_get_viewdef", NULL);
 		addFunction("shobj_description", NULL);
-		addFunction("pg_backend_pid", ZERO);
 		addFunction("pg_cancel_backend", TRUE);
 		addFunction("pg_function_is_visible", TRUE);
+		addFunction("pg_is_other_temp_schema", FALSE);
+		addFunction("pg_backend_pid", ZERO);
 		addFunction("pg_database_size", ZERO);
+		addFunction("pg_size_pretty", ZERO);
 		addFunction("pg_total_relation_size", ZERO);
 		addFunction("array_lower", ONE);
 		addFunction("current_schemas", CURRENT_SCHEMAS);
 		addFunction("pg_listening_channels", PG_LISTENING_CHANNELS);
 		addFunction("row_to_json", ROW_TO_JSON);
-
-		for (int i = 0; i < REPLACE_FROM.length; i ++) {
-			REPLACE_FROM_LEN[i] = REPLACE_FROM[i].length();
-		}
 	}
 
 	private static ExpressionList getExpressionList(String value) {
@@ -407,9 +410,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			while (left instanceof CastExpression) {
 				left = ((CastExpression) left).getLeftExpression();
 			}
-			if (type.equals("regclass")) {
+			switch (type) {
+			case "cardinal_number":
+			case "character_data":
+			case "name":
+			case "sql_identifier":
+				parentSet.accept(left);
+				replace(left, parentSet);
+				replaced = true;
+				return;
+			case "regclass":
 				if (left instanceof LongValue) {
-					// number::regclass -> IFNULL(SELECT relname FROM pg_class WHERE oid = number, number::text)
+					// number::regclass ->
+					// IFNULL(SELECT relname FROM pg_class WHERE oid = number, number::text)
 					SubSelect ss = new SubSelect();
 					ss.setSelectBody(select("SELECT relname FROM pg_class WHERE oid = " +
 							(int) ((LongValue) left).getValue()));
@@ -435,6 +448,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replaced = true;
 					return;
 				}
+				break;
+			case "yes_or_no":
+				CaseExpression ce2 = new CaseExpression();
+				ce2.setSwitchExpression(left);
+				ce2.setWhenClauses(YES_OR_NO);
+				ce2.setElseExpression(FALSE);
+				parentSet.accept(ce2);
+				replaced = true;
+				return;
+			default:
 			}
 			ce.setLeftExpression(left);
 			replaced |= left != oldLeft;
@@ -548,9 +571,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			String name = table.getFullyQualifiedName();
 			SelectBody sb = TABLE_MAP.get(name);
 			if (sb == null) {
-				if (name.equals("pg_catalog.pg_shdescription")) {
+				switch (name) {
+				case "pg_shdescription":
+				case "pg_catalog.pg_shdescription":
 					table.setName("pg_description");
 					replaced = true;
+					break;
+				default:
 				}
 				return;
 			}
@@ -573,36 +600,27 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (fi instanceof SubJoin) {
 			SubJoin si = (SubJoin) fi;
 			FromItem left = si.getLeft();
-			// H2 cannot use alias in sub-query in join, so keep sub-join and
-			// avoid extracting table to sub-query in this case
-			if (left.toString().equals("pg_catalog.pg_class AS r2")) {
-				List<Join> joins = si.getJoinList();
-				if (joins != null) {
-					for (Join join : joins) {
-						replace(join.getRightItem(), join::setRightItem);
-						replace(join.getOnExpression(), join::setOnExpression);
-					}
-				}
-				return;
-			}
-			PlainSelect ps = new PlainSelect();
-			ps.setFromItem(left);
-			ps.setSelectItems(ALL_COLUMNS);
-			replace(left, ps::setFromItem);
-			Alias alias = si.getAlias();
 			List<Join> joins = si.getJoinList();
 			if (joins != null) {
 				for (Join join : joins) {
 					replace(join.getRightItem(), join::setRightItem);
 					replace(join.getOnExpression(), join::setOnExpression);
-					if (alias == null) {
-						alias = join.getRightItem().getAlias();
-					}
 				}
-				ps.setJoins(joins);
 			}
+			if (!left.toString().equals("pg_depend")) {
+				// H2 cannot use alias in sub-select in join, so keep sub-join and
+				// avoid extracting table to sub-select in this case
+				// replace(si.getLeft(), si::setLeft);
+				return;
+			}
+			// JOIN (pg_depend JOIN pg_class cs ON ...) ->
+			// JOIN (SELECT * FROM (SELECT ... WHEN FALSE) pg_depend JOIN ...) cs
+			PlainSelect ps = new PlainSelect();
+			ps.setSelectItems(ALL_COLUMNS);
+			ps.setJoins(joins);
+			replace(left, ps::setFromItem);
 			SubSelect ss = new SubSelect();
-			ss.setAlias(alias);
+			ss.setAlias(new Alias("cs"));
 			ss.setSelectBody(ps);
 			parentSet.accept(ss);
 			replaced = true;
@@ -727,6 +745,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private String getSQL(String s) {
 		anyArray = false;
+		String sqlInParentheses = null;
 		String sql = s;
 		if (sql.equals("SET TRANSACTION READ ONLY")) {
 			replaced = true;
@@ -743,16 +762,31 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return "SET NETWORK_TIMEOUT 0";
 		}
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
-			sql = "EXPLAIN " + sql.substring(16);
 			replaced = true;
-		} else if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
-			sql = "SET join_collapse_limit=" + sql.substring(30);
+			return "EXPLAIN " + sql.substring(16);
+		}
+		if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
 			replaced = true;
-		} else if (sql.startsWith("SELECT n.nspname = ANY(current_schemas(true)), ")) {
+			return "SET join_collapse_limit=" + sql.substring(30);
+		}
+		if (sql.startsWith("SELECT n.nspname = ANY(current_schemas(true)), ")) {
 			// JSqlParser cannot parse SELECT a = b, ... Just replace:
 			// SELECT n.nspname = ANY(current_schemas(true)) -> SELECT n.nspname = 'public'
 			// and ignore JSqlParser's failure
 			sql = "SELECT n.nspname = 'public', " + sql.substring(47);
+			replaced = true;
+		} else if (sql.startsWith("SELECT (nc.nspname)::information_schema.sql_identifier")) {
+			sql = sql.replace(")::information_schema.", ")::").replace("'::\"char\"", "'").
+					replace("a.attfdwoptions AS options", "NULL AS options").replaceAll("\\s+", " ").
+					replace("(c.relkind = ANY (ARRAY ['r', 'f', 'v', 'm']))",
+					"c.relkind IN ('r', 'f', 'v', 'm')");
+			int leftParentheses = sql.indexOf(" ( ( ( ( ( ( ");
+			int rightParentheses = sql.lastIndexOf(")))))");
+			if (leftParentheses >= 0 && rightParentheses >= 0) {
+				sqlInParentheses = sql.substring(leftParentheses + 7, rightParentheses + 3);
+				sql = sql.substring(0, leftParentheses + 7) +
+						IN_PARENTHESES_PLACEHOLDER + sql.substring(rightParentheses + 3);
+			}
 			replaced = true;
 		} else if (sql.endsWith("::oid)::oid[])")) {
 			// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
@@ -765,7 +799,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			int index;
 			while ((index = sql.indexOf(REPLACE_FROM[i])) >= 0) {
 				sql = sql.substring(0, index) + REPLACE_TO[i] +
-						sql.substring(index + REPLACE_FROM_LEN[i]);
+						sql.substring(index + REPLACE_FROM[i].length());
 				replaced = true;
 			}
 		}
@@ -776,7 +810,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (st instanceof Select) {
 				replace(((Select) st).getSelectBody(), null);
 				if (replaced) {
-					return st.toString();
+					sql = st.toString();
+					if (sqlInParentheses != null) {
+						sql = sql.replace(IN_PARENTHESES_PLACEHOLDER, sqlInParentheses);
+					}
 				}
 			} else if (st instanceof Insert) {
 				Insert insert = ((Insert) st);
@@ -786,9 +823,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return insert.toString();
 				}
 			} else if (st instanceof ShowStatement) {
-				if (((ShowStatement) st).getName().equals("LC_COLLATE")) {
+				switch (((ShowStatement) st).getName()) {
+				case "LC_COLLATE":
 					replaced = true;
 					return "SELECT 'C' lc_collate";
+				case "server_version_num":
+					replaced = true;
+					return "SELECT '80223' server_version_num";
+				default:
 				}
 			}
 		} catch (ParseException | TokenMgrException e) {

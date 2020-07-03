@@ -982,6 +982,103 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testToadEdge() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT oid, rolname, " +
+				"rolcanlogin AS login_role, rolconnlimit, rolvaliduntil " +
+				"FROM pg_roles ORDER BY rolname ASC")) {
+			assertTrue(rs.next());
+			assertEquals("sa", rs.getString("rolname"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT db.*, ts.spcname AS tablespace_name, " +
+				"u.usename AS owner, pg_encoding_to_char (db.encoding) AS encodingName, " +
+				"des.description AS \"comment\", pg_size_pretty(pg_database_size(db.oid)) AS size " +
+				"FROM (pg_catalog.pg_database db " +
+				"LEFT JOIN pg_catalog.pg_tablespace ts ON (db.dattablespace = ts.oid) " +
+				"LEFT JOIN pg_user u ON (db.datdba = u.usesysid)) " +
+				"LEFT JOIN pg_shdescription des ON (objoid = db.oid) " +
+				"WHERE db.datname = 'pgserver'")) {
+			assertTrue(rs.next());
+			assertEquals("main", rs.getString("tablespace_name"));
+			assertEquals("0", rs.getString("size"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT (nc.nspname)::information_schema.sql_identifier " +
+				"AS table_schema, (c.relname)::information_schema.sql_identifier AS table_name, " +
+				"(a.attname)::information_schema.sql_identifier AS column_name, " +
+				"(a.attnum)::information_schema.cardinal_number AS ordinal_position, " +
+				"(pg_get_expr (ad.adbin, ad.adrelid))::information_schema.character_data AS column_default, " +
+				"ix.indisprimary AS is_primary, (CASE " +
+				"WHEN (t.typtype = 'b'::\"char\") THEN 'BASE_TYPE'::text " +
+				"WHEN (t.typtype = 'c'::\"char\") THEN 'COMPOSITE_TYPE'::text " +
+				"WHEN (t.typtype = 'd'::\"char\") THEN 'DOMAIN'::text " +
+				"WHEN (t.typtype = 'e'::\"char\") THEN 'ENUM'::text " +
+				"WHEN (t.typtype = 'p'::\"char\") THEN 'PSEUDO_TYPE'::text " +
+				"WHEN (t.typtype = 'r'::\"char\") THEN 'RANGE_TYPE'::text END) AS data_type_type, " +
+				"(CASE WHEN (a.attnotnull OR ((t.typtype = 'd'::\"char\") AND t.typnotnull)) " +
+				"THEN 'NO'::text ELSE 'YES'::text END)::information_schema.yes_or_no AS is_nullable, " +
+				"nt.nspname AS type_schema, pg_catalog.format_type (t.oid, NULL) AS data_type, " +
+				"COALESCE (information_schema._pg_numeric_precision (t.oid, a.atttypmod), " +
+				"information_schema._pg_numeric_precision " +
+				"(tt.oid, a.atttypmod))::information_schema.cardinal_number AS numeric_precision, " +
+				"COALESCE (information_schema._pg_numeric_precision_radix (t.oid, a.atttypmod), " +
+				"information_schema._pg_numeric_precision_radix " +
+				"(tt.oid, a.atttypmod))::information_schema.cardinal_number AS numeric_precision_radix, " +
+				"COALESCE (information_schema._pg_numeric_scale (t.oid, a.atttypmod), " +
+				"information_schema._pg_numeric_scale " +
+				"(tt.oid, a.atttypmod))::information_schema.cardinal_number AS numeric_scale, " +
+				"COALESCE (information_schema._pg_datetime_precision (t.oid, a.atttypmod), " +
+				"information_schema._pg_datetime_precision " +
+				"(tt.oid, a.atttypmod))::information_schema.cardinal_number AS datetime_precision, " +
+				"(CASE WHEN (t.typtype = 'd'::\"char\") THEN nt.nspname " +
+				"ELSE NULL::name END)::information_schema.sql_identifier AS domain_schema, " +
+				"(CASE WHEN (t.typtype = 'd'::\"char\") THEN t.typname " +
+				"ELSE NULL::name END)::information_schema.sql_identifier AS domain_name, " +
+				"a.attfdwoptions AS options FROM " +
+				// Check " ( ( ( ( ( "
+				"(" +
+				"  (" +
+				"    (" +
+				"      (" +
+				"        (" +
+				"          (" +
+				"            pg_attribute a LEFT JOIN pg_attrdef ad ON " +
+				"            (((a.attrelid = ad.adrelid) AND (a.attnum = ad.adnum)))" +
+				"          ) JOIN (" +
+				"            pg_class c JOIN pg_namespace nc ON ((c.relnamespace = nc.oid))" +
+				"          ) ON ((a.attrelid = c.oid))" +
+				"        ) JOIN (" +
+				"          pg_type t JOIN pg_namespace nt ON ((t.typnamespace = nt.oid)) " +
+				"          LEFT JOIN pg_type tt ON (tt.oid = t.typelem)" +
+				"        ) ON ((a.atttypid = t.oid))" +
+				"      ) LEFT JOIN (" +
+				"        pg_type bt JOIN pg_namespace nbt ON ((bt.typnamespace = nbt.oid))" +
+				"      ) ON (((t.typtype = 'd'::\"char\") AND (t.typbasetype = bt.oid)))" +
+				// Check ")))))"
+				    ")" +
+				  ") LEFT JOIN pg_index ix ON (" +
+				"    (a.attrelid = ix.indrelid) AND (a.attnum = ANY (ix.indkey)) AND (ix.indisprimary)" +
+				"  )" +
+				") WHERE 1 = 1 AND nc.nspname = 'public' AND (" +
+				"  (" +
+				"    (NOT pg_is_other_temp_schema (nc.oid)) AND (a.attnum > 0)" +
+				"  ) AND (NOT a.attisdropped)" +
+				") AND (c.relkind = ANY (ARRAY ['r'::\"char\", 'f'::\"char\", 'v'::\"char\", 'm'::\"char\"]))")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("table_name"));
+			assertEquals("id", rs.getString("column_name"));
+			assertEquals(1, rs.getInt("ordinal_position"));
+			assertTrue(rs.getBoolean("is_primary"));
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("table_name"));
+			assertEquals("x1", rs.getString("column_name"));
+			assertEquals(2, rs.getInt("ordinal_position"));
+			assertFalse(rs.getBoolean("is_primary"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
