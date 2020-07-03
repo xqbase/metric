@@ -1034,7 +1034,7 @@ public class TestPgClients {
 				"ELSE NULL::name END)::information_schema.sql_identifier AS domain_schema, " +
 				"(CASE WHEN (t.typtype = 'd'::\"char\") THEN t.typname " +
 				"ELSE NULL::name END)::information_schema.sql_identifier AS domain_name, " +
-				"a.attfdwoptions AS options FROM " +
+				"a.attfdwoptions " + /* CRLF */ " AS options FROM " +
 				// Check " ( ( ( ( ( "
 				"(" +
 				"  (" +
@@ -1074,6 +1074,15 @@ public class TestPgClients {
 			assertEquals("x1", rs.getString("column_name"));
 			assertEquals(2, rs.getInt("ordinal_position"));
 			assertFalse(rs.getBoolean("is_primary"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.oid, c.relname AS \"name\", " +
+				"c.reloftype AS \"is_typed\" FROM pg_class c " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
+				"WHERE (c.relkind = 'r'::\"char\" OR c.relkind = 'p'::\"char\") " +
+				"AND n.nspname = 'public'")) {
+			assertTrue(rs.next());
+			assertEquals("test", rs.getString("name"));
 			assertFalse(rs.next());
 		}
 	}

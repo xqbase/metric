@@ -113,7 +113,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
 		// for phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $patern$^\\[.*:(.*)\\]$$patern$)) as nb",
+		// JSqlParser cannot parse `value::"type"`
 		"(c.relkind = 'v'::\"char\")",
+		"(c.relkind = 'r'::\"char\" OR c.relkind = 'p'::\"char\")",
 		" t.typtype = 'd'::\"char\"",
 		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
 		" (i.keys).n ",
@@ -132,6 +134,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"MAX(array_length(c.conkey)) nb",
 		"MAX(array_length(c.conkey)) nb",
 		"(c.relkind = 'v')",
+		"(c.relkind IN ('r', 'p'))",
 		" t.typtype = 'd'",
 		" i.keys_n ",
 		" i.keys_x ",
@@ -197,7 +200,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		pgGetKeywords.setAlias(new Alias("pg_get_keywords"));
 
 		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage");
-		addColumns("pg_class", "NULL relacl, ${owner} relowner, NULL tableoid");
+		addColumns("pg_class", "0 reloftype, NULL relacl, ${owner} relowner, NULL tableoid");
 		addColumns("pg_constraint", "NULL confkey, NULL confdeltype, NULL confmatchtype, " +
 				"NULL confupdtype, NULL connamespace, NULL tableoid");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
@@ -778,8 +781,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			sql = "SELECT n.nspname = 'public', " + sql.substring(47);
 			replaced = true;
 		} else if (sql.startsWith("SELECT (nc.nspname)::information_schema.sql_identifier")) {
-			sql = sql.replace(")::information_schema.", ")::").replace("'::\"char\"", "'").
-					replace("a.attfdwoptions AS options", "NULL AS options").replaceAll("\\s+", " ").
+			sql = sql.replace(")::information_schema.", ")::").
+					replace("'::\"char\"", "'").replaceAll("\\s+", " ").
+					replace(", a.attfdwoptions AS options ", ", NULL AS options ").
 					replace("(c.relkind = ANY (ARRAY ['r', 'f', 'v', 'm']))",
 					"c.relkind IN ('r', 'f', 'v', 'm')");
 			int leftParentheses = sql.indexOf(" ( ( ( ( ( ( ");
