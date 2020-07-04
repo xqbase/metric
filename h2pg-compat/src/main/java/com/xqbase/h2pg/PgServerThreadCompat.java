@@ -247,7 +247,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				// should be ARRAY_AGG(c.ordinal_position ORDER BY i.ordinal_position,
 				// but not supported by JSqlParser
 				"NULL indexprs, ARRAY_AGG(c.ordinal_position) indkey, " +
-				"NULL indpred, NULL indoption FROM information_schema.indexes i " +
+				"NULL indpred, NULL indoption FROM information_schema.index_columns ic " +
+				"JOIN information_schema.indexes i USING (index_schema, index_name) " +
 				"JOIN information_schema.tables t USING (table_schema, table_name) " +
 				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
 				"GROUP BY i.id");
@@ -291,7 +292,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("array_lower", new LongValue(1));
 		addFunction("current_schemas", new Column("ARRAY['public']"));
 		// addFunction("pg_listening_channels", PG_LISTENING_CHANNELS);
-		addFunction("row_to_json",  new StringValue("{}"));
+		addFunction("row_to_json", new StringValue("{}"));
 	}
 
 	private static ExpressionList getExpressionList(String value) {
@@ -672,8 +673,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				parentSet.accept(select("SELECT i.id indexrelid, t.id indrelid, " +
 						"(CASE index_type_name WHEN 'PRIMARY KEY' " +
 						"THEN TRUE ELSE FALSE END) indisprimary, " +
-						"c.ordinal_position keys_x, i.ordinal_position keys_n " +
-						"FROM information_schema.indexes i " +
+						"c.ordinal_position keys_x, ic.ordinal_position keys_n " +
+						"FROM information_schema.index_columns ic " +
+						"JOIN information_schema.indexes i USING (index_schema, index_name) " +
 						"JOIN information_schema.tables t USING (table_schema, table_name) " +
 						"JOIN information_schema.columns c " +
 						"USING (table_schema, table_name, column_name)"));
@@ -696,8 +698,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					ss.setSelectBody(select("SELECT i.id indexrelid, t.id indrelid, " +
 							"(CASE index_type_name WHEN 'PRIMARY KEY' " +
 							"THEN TRUE ELSE FALSE END) indisprimary, " +
-							"c.ordinal_position keys_x, i.ordinal_position keys_n " +
-							"FROM information_schema.indexes i " +
+							"c.ordinal_position keys_x, ic.ordinal_position keys_n " +
+							"FROM information_schema.index_columns ic " +
+							"JOIN information_schema.indexes i USING (index_schema, index_name) " +
 							"JOIN information_schema.tables t USING (table_schema, table_name) " +
 							"JOIN information_schema.columns c " +
 							"USING (table_schema, table_name, column_name)"));
