@@ -206,7 +206,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage");
 		addColumns("pg_class", "FALSE relisshared, 0 relnatts, 0 reloftype, 0 reltoastrelid, " +
-				"NULL relacl, ${owner} relowner, NULL tableoid, NULL reloptions");
+				"NULL relacl, ${owner} relowner, TRUE relhaspkey, FALSE relhastriggers, " +
+				"FALSE relhassubclass, NULL tableoid, NULL reloptions, NULL relpersistence");
 		addColumns("pg_constraint", "FALSE condeferrable, FALSE condeferred, " +
 				"NULL confkey, NULL confdeltype, NULL confmatchtype, " +
 				"NULL confupdtype, NULL connamespace, NULL tableoid, NULL conbin");
@@ -279,6 +280,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("pg_get_functiondef", nul);
 		addFunction("pg_get_ruledef", nul);
 		addFunction("pg_get_viewdef", nul);
+		addFunction("pg_relation_filepath", nul);
 		addFunction("shobj_description", nul);
 		Column tru = new Column("TRUE");
 		addFunction("pg_cancel_backend", tru);
@@ -615,9 +617,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			// JOIN (pg_depend JOIN pg_class cs ON ...) ->
 			// JOIN (SELECT * FROM (SELECT ... WHERE FALSE) pg_depend JOIN ...) cs
 			PlainSelect ps = new PlainSelect();
+			ps.setFromItem(left);
+			replace(left, ps::setFromItem);
 			ps.setSelectItems(Arrays.asList(new AllColumns()));
 			ps.setJoins(joins);
-			replace(left, ps::setFromItem);
 			SubSelect ss = new SubSelect();
 			ss.setAlias(new Alias("cs"));
 			ss.setSelectBody(ps);
@@ -820,6 +823,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 			replaced = true;
 		} else if (sql.startsWith("SELECT DISTINCT")) {
+			// for TestPgClients.testToadEdge(), test case #5
 			if (sql.replaceAll("\\s+", " ").startsWith("SELECT DISTINCT trg.oid, " +
 					"trg.tgname AS trigger_name, tbl.relname AS parent_name, " +
 					"p.proname AS function_name, ")) {
@@ -828,6 +832,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 						"'' trigger_type, '' trigger_event, '' action_orientation, " +
 						"'' enabled, '' action_condition, '' description, '' action_statement, " +
 						"FALSE deferrable, FALSE deferred, 0 tgconstraint WHERE FALSE";
+			}
+		} else if (sql.startsWith("select quote_ident(c.relname) as table_name,")) {
+			// for TestPgClients.testOmniDB(), test case #1
+			int dataLengthFrom = sql.indexOf("(select case when x.truetypmod = -1");
+			int dataLengthTo = sql.lastIndexOf(") as data_length,");
+			if (dataLengthFrom >= 0 && dataLengthTo >= 0) {
+				sql = sql.substring(0, dataLengthFrom) + " NULL" + sql.substring(dataLengthTo + 4);
+				replaced = true;
 			}
 		} else if (sql.endsWith("::oid)::oid[])")) {
 			// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->

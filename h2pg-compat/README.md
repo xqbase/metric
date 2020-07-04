@@ -63,3 +63,11 @@ Sqlectron 1.30.0 tested.
 ### Postico
 
 Postico 1.5.13 tested.
+
+### ~Toad Edge~
+
+Toad Edge not supported.
+
+### ~OmniDB~
+
+OmniDB not supported.

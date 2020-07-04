@@ -1131,6 +1131,44 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testOmniDB() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("select quote_ident(c.relname) as table_name, " +
+				"quote_ident(a.attname) as column_name, " +
+				"(case when t.typtype = 'd'::\"char\" then " +
+				"  case when bt.typelem <> 0::oid and bt.typlen = '-1'::integer then 'ARRAY'::text " +
+				"    when nbt.nspname = 'pg_catalog'::name then format_type(t.typbasetype, NULL::integer) " +
+				"    else 'USER-DEFINED'::text end " +
+				"  else case when t.typelem <> 0::oid and t.typlen = '-1'::integer then 'ARRAY'::text " +
+				"    when nt.nspname = 'pg_catalog'::name then format_type(a.atttypid, NULL::integer) " +
+				"    else 'USER-DEFINED'::text end " +
+				"end) as data_type, " +
+				"(case when a.attnotnull or t.typtype = 'd'::char and t.typnotnull " +
+				"then 'NO' else 'YES' end ) as nullable, " +
+				"(select case when x.truetypmod = -1 /* default typmod */ then null " +
+				"  when x.truetypid in (1042, 1043) /* char, varchar */ then x.truetypmod - 4 " +
+				"  when x.truetypid in (1560, 1562) /* bit, varbit */ then x.truetypmod else null end " +
+				"  from (select " +
+				"    (case when t.typtype = 'd' then t.typbasetype else a.atttypid end ) as truetypid, " +
+				"    (case when t.typtype = 'd' then t.typtypmod else a.atttypmod end ) as truetypmod ) " +
+				"x ) as data_length, null as data_precision, null as data_scale from pg_attribute a " +
+				"inner join pg_class c on c.oid = a.attrelid " +
+				"inner join pg_namespace n on n.oid = c.relnamespace " +
+				"inner join ( pg_type t inner join pg_namespace nt on t.typnamespace = nt.oid ) " +
+				"  on a.atttypid = t.oid " +
+				"left join ( pg_type bt inner join pg_namespace nbt on bt.typnamespace = nbt.oid ) " +
+				"  on t.typtype = 'd'::\"char\" and t.typbasetype = bt.oid " +
+				"where a.attnum > 0 and not a.attisdropped and c.relkind in ('r', 'f', 'p') " +
+				"and quote_ident(n.nspname) = '\"public\"' and quote_ident(c.relname) = '\"test\"' " +
+				"order by quote_ident(c.relname), a.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("\"id\"", rs.getString("column_name"));
+			assertTrue(rs.next());
+			assertEquals("\"x1\"", rs.getString("column_name"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +
