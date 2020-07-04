@@ -113,10 +113,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $pattern$^\\[.*:(.*)\\]$$pattern$)) as nb",
 		// for phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin)
 		"max(SUBSTRING(array_dims(c.conkey) FROM  $patern$^\\[.*:(.*)\\]$$patern$)) as nb",
-		// JSqlParser cannot parse `value::"type"`
-		"(c.relkind = 'v'::\"char\")",
-		"(c.relkind = 'r'::\"char\" OR c.relkind = 'p'::\"char\")",
-		" t.typtype = 'd'::\"char\"",
+		// JSqlParser cannot parse `value::"type"` and `value::information_schema.type`
+		"'::\"char\"",
+		")::information_schema.",
 		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
 		" (i.keys).n ",
 		" (i.keys).x ",
@@ -133,9 +132,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		")::CAST_TO_FALSE attisserial,",
 		"MAX(array_length(c.conkey)) nb",
 		"MAX(array_length(c.conkey)) nb",
-		"(c.relkind = 'v')",
-		"(c.relkind IN ('r', 'p'))",
-		" t.typtype = 'd'",
+		"'",
+		")::",
 		" i.keys_n ",
 		" i.keys_x ",
 		" i.keys_n ",
@@ -200,8 +198,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		pgGetKeywords.setAlias(new Alias("pg_get_keywords"));
 
 		addColumns("pg_attribute", "0 attndims, 0 attstattarget, NULL attstorage");
-		addColumns("pg_class", "0 reloftype, NULL relacl, ${owner} relowner, NULL tableoid");
-		addColumns("pg_constraint", "NULL confkey, NULL confdeltype, NULL confmatchtype, " +
+		addColumns("pg_class", "FALSE relisshared, 0 relnatts, 0 reloftype, 0 reltoastrelid, " +
+				"NULL relacl, ${owner} relowner, NULL tableoid, NULL reloptions");
+		addColumns("pg_constraint", "FALSE condeferrable, FALSE condeferred, " +
+				"NULL confkey, NULL confdeltype, NULL confmatchtype, " +
 				"NULL confupdtype, NULL connamespace, NULL tableoid");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
 		addColumns("pg_namespace", "id oid, ${owner} nspowner");
@@ -226,8 +226,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addEmptyTable("pg_stat_database", "0 xact_commit, 0 xact_rollback, " +
 				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
 				"0 blks_read, 0 blks_hit, '' datname");
-		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, " +
-				"0 tgfoid, 0 tgrelid, '' tgenabled, FALSE tgisconstraint");
+		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, 0 tgfoid, " +
+				"0 tgrelid, '' tgenabled, FALSE tgisconstraint, FALSE tgisinternal");
+		addEmptyTable("information_schema.role_table_grants", "'' grantor, '' grantee, " +
+				"'' table_schema, '' table_name, '' privilege_type, " +
+				"FALSE is_grantable, FALSE with_hierarchy");
 		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisclustered, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE " +
@@ -265,6 +268,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("pg_get_constraintdef", nul);
 		addFunction("pg_get_triggerdef", nul);
 		addFunction("pg_get_functiondef", nul);
+		addFunction("pg_get_ruledef", nul);
 		addFunction("pg_get_viewdef", nul);
 		addFunction("shobj_description", nul);
 		Column tru = new Column("TRUE");
@@ -725,6 +729,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			Alias alias = sei.getAlias();
 			if (alias != null && alias.getName().equals("table")) {
 				alias.setName("\"table\"");
+				replaced = true;
 			}
 		}
 		List<Join> joins = ps.getJoins();
@@ -781,8 +786,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			sql = "SELECT n.nspname = 'public', " + sql.substring(47);
 			replaced = true;
 		} else if (sql.startsWith("SELECT (nc.nspname)::information_schema.sql_identifier")) {
-			sql = sql.replace(")::information_schema.", ")::").
-					replace("'::\"char\"", "'").replaceAll("\\s+", " ").
+			// for TestPgClients.testToadEdge(), test case #3
+			sql = sql.replace("'::\"char\"", "'").replaceAll("\\s+", " ").
 					replace(", a.attfdwoptions AS options ", ", NULL AS options ").
 					replace("(c.relkind = ANY (ARRAY ['r', 'f', 'v', 'm']))",
 					"c.relkind IN ('r', 'f', 'v', 'm')");
@@ -794,6 +799,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 						IN_PARENTHESES_PLACEHOLDER + sql.substring(rightParentheses + 3);
 			}
 			replaced = true;
+		} else if (sql.startsWith("SELECT DISTINCT")) {
+			if (sql.replaceAll("\\s+", " ").startsWith("SELECT DISTINCT trg.oid, " +
+					"trg.tgname AS trigger_name, tbl.relname AS parent_name, " +
+					"p.proname AS function_name, ")) {
+				replaced = true;
+				return "SELECT 0 oid, '' trigger_name, '' parent_name, '' function_name, " +
+						"'' trigger_type, '' trigger_event, '' action_orientation, " +
+						"'' enabled, '' action_condition, '' description, '' action_statement, " +
+						"FALSE deferrable, FALSE deferred, 0 tgconstraint WHERE FALSE";
+			}
 		} else if (sql.endsWith("::oid)::oid[])")) {
 			// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
 			// ARRAY_CONTAINS(SELECT con.conkey ..., attnum)

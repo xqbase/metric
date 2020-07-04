@@ -1085,6 +1085,13 @@ public class TestPgClients {
 			assertEquals("test", rs.getString("name"));
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT trg.oid, trg.tgname AS trigger_name, " +
+				"tbl.relname AS parent_name, p.proname AS function_name, ... AS trigger_type, " +
+				"... AS trigger_event, ... AS action_orientation, ... AS enabled, " +
+				"... AS action_condition, description, ... AS action_statement, " +
+				"trg.tgdeferrable AS deferrable, trg.tginitdeferred AS deferred, tgconstraint FROM ...")) {
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
