@@ -59,3 +59,7 @@ SQuirreL SQL 4.1.0 tested.
 ### Sqlectron
 
 Sqlectron 1.30.0 tested.
+
+### Postico
+
+Postico 1.5.13 tested.

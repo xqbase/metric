@@ -1095,6 +1095,42 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testPostico() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT oid, nspname, " +
+				"nspname = ANY (current_schemas(true)) AS is_on_search_path, " +
+				"oid = pg_my_temp_schema() AS is_my_temp_schema, " +
+				"pg_is_other_temp_schema(oid) AS is_other_temp_schema FROM pg_namespace")) {
+			assertTrue(rs.next());
+			assertEquals("public", rs.getString("nspname"));
+			assertTrue(rs.getBoolean("is_on_search_path"));
+			assertTrue(rs.next());
+			assertEquals("information_schema", rs.getString("nspname"));
+			assertFalse(rs.getBoolean("is_on_search_path"));
+			assertTrue(rs.next());
+			assertEquals("pg_catalog", rs.getString("nspname"));
+			assertFalse(rs.getBoolean("is_on_search_path"));
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT pg_class.oid, pg_class.relname, " +
+				"indisunique, indisprimary, false AS indisexclusion, indkey, " +
+				"pg_get_indexdef(indexrelid, 0, true) AS definition, " +
+				"ARRAY(select pg_get_indexdef(indexrelid, attnum, true) FROM pg_attribute " +
+				"WHERE attrelid = indexrelid ORDER BY attnum) AS expressions, " +
+				"obj_description(pg_class.oid, 'pg_class') AS comment, NULL AS indoption, " +
+				"NULL AS collations, ARRAY(SELECT pg_opclass.opcname " +
+				"FROM generate_series(0, indnatts-1) AS t(i) " +
+				"LEFT JOIN pg_opclass ON pg_opclass.oid = indclass[i]) AS opclasses, " +
+				"pg_get_expr(indpred,indrelid, true), amname FROM pg_index " +
+				"LEFT JOIN pg_class ON pg_class.oid = indexrelid " +
+				"LEFT JOIN pg_am ON pg_class.relam = pg_am.oid " +
+				"WHERE indrelid = '\"public\".\"test\"'::regclass ORDER BY pg_class.oid")) {
+			assertTrue(rs.next());
+			assertEquals("{1}", rs.getString("indkey"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +

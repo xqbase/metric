@@ -69,6 +69,7 @@ import net.sf.jsqlparser.statement.select.SubJoin;
 import net.sf.jsqlparser.statement.select.SubSelect;
 import net.sf.jsqlparser.statement.select.TableFunction;
 import net.sf.jsqlparser.statement.select.ValuesList;
+import net.sf.jsqlparser.statement.update.Update;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Field initDone, out, dataInRaw, stop;
@@ -103,6 +104,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// "deferrable" and "tablespace" are keywords in JSqlParser
 		", condeferrable::int AS deferrable, ",
 		"tablespace) AS tablespace",
+		"')) as tablespace, ",
 		" CAST('*' AS pg_catalog.text) ",
 		// JSqlParser cannot parse SELECT a = b, ... Just replace:
 		// nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
@@ -122,11 +124,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.10
 		" (information_schema._pg_expandarray(i.indkey)).n ",
 		" result.A_ATTNUM = (result.KEYS).x ",
+		// for Postico
+		", ARRAY(SELECT pg_opclass.opcname FROM generate_series(0, indnatts-1) AS t(i) " +
+		"LEFT JOIN pg_opclass ON pg_opclass.oid = indclass[i]) AS opclasses, ",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
+		"')) as \"tablespace\", ",
 		" '*' ",
 		" WHEN nsp.nspname = 'information_schema'",
 		")::CAST_TO_FALSE attisserial,",
@@ -138,6 +144,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" i.keys_x ",
 		" i.keys_n ",
 		" result.A_ATTNUM = result.keys_x ",
+		", NULL opclasses, ",
 	};
 
 	private static ValuesList pgGetKeywords = new ValuesList();
@@ -202,12 +209,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL relacl, ${owner} relowner, NULL tableoid, NULL reloptions");
 		addColumns("pg_constraint", "FALSE condeferrable, FALSE condeferred, " +
 				"NULL confkey, NULL confdeltype, NULL confmatchtype, " +
-				"NULL confupdtype, NULL connamespace, NULL tableoid");
+				"NULL confupdtype, NULL connamespace, NULL tableoid, NULL conbin");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
 		addColumns("pg_namespace", "id oid, ${owner} nspowner");
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
 				"NULL prolang, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
+		addColumns("pg_settings", "'' source");
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
 				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
@@ -403,8 +411,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replace(left, parentSet);
 				replaced = true;
 				return;
+			case "oid":
 			case "regclass":
-				if (left instanceof LongValue) {
+				if (left instanceof LongValue && type.equals("regclass")) {
 					// number::regclass ->
 					// IFNULL(SELECT relname FROM pg_class WHERE oid = number, number::text)
 					SubSelect ss = new SubSelect();
@@ -429,6 +438,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 						s = s.substring(1, len - 1);
 					}
 					ce.setLeftExpression(new StringValue(s));
+					ce.getType().setDataType("regclass");
 					replaced = true;
 					return;
 				}
@@ -771,6 +781,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 			return "SET NETWORK_TIMEOUT 0";
 		}
+		if (sql.equals("SELECT oid, nspname, nspname = ANY (current_schemas(true)) " +
+				"AS is_on_search_path, oid = pg_my_temp_schema() AS is_my_temp_schema, " +
+				"pg_is_other_temp_schema(oid) AS is_other_temp_schema FROM pg_namespace")) {
+			replaced = true;
+			return "SELECT oid, nspname, nspname = 'public' is_on_search_path, " +
+					"FALSE is_my_temp_schema, FALSE is_other_temp_schema FROM pg_namespace";
+		}
 		if (sql.startsWith("EXPLAIN VERBOSE ")) {
 			replaced = true;
 			return "EXPLAIN " + sql.substring(16);
@@ -842,6 +859,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					insert.setReturningExpressionList(null);
 					replaced = true;
 					return insert.toString();
+				}
+			} else if (st instanceof Update) {
+				Update update = ((Update) st);
+				if (update.getReturningExpressionList() != null) {
+					update.setReturningExpressionList(null);
+					replaced = true;
+					return update.toString();
 				}
 			} else if (st instanceof ShowStatement) {
 				switch (((ShowStatement) st).getName()) {
