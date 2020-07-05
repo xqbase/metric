@@ -1169,6 +1169,43 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testLibreOfficeBase() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("WITH con AS " +
+				"(SELECT oid, conname, contype, condeferrable, condeferred, conrelid, " +
+				"confrelid,  confupdtype, confdeltype, " +
+				"generate_subscripts(conkey,1) AS conkeyseq, unnest(conkey) AS conkey , " +
+				"unnest(confkey) AS confkey FROM pg_catalog.pg_constraint) " +
+				"SELECT NULL::text AS PKTABLE_CAT, pkn.nspname AS PKTABLE_SCHEM, " +
+				"pkc.relname AS PKTABLE_NAME, pka.attname AS PKCOLUMN_NAME,  " +
+				"NULL::text AS FKTABLE_CAT, fkn.nspname AS FKTABLE_SCHEM, " +
+				"fkc.relname AS FKTABLE_NAME, fka.attname AS FKCOLUMN_NAME,  " +
+				"con.conkeyseq AS KEY_SEQ,  " +
+				"CASE con.confupdtype   WHEN 'c' THEN 0  WHEN 'n' THEN 2  WHEN 'd' THEN 4  " +
+				"WHEN 'r' THEN 1  WHEN 'a' THEN 4  ELSE NULL  END AS UPDATE_RULE,  " +
+				"CASE con.confdeltype   WHEN 'c' THEN 0  WHEN 'n' THEN 2  WHEN 'd' THEN 4  " +
+				"WHEN 'r' THEN 1  WHEN 'a' THEN 4  ELSE NULL  END AS DELETE_RULE,  " +
+				"con.conname AS FK_NAME, pkic.relname AS PK_NAME,  " +
+				"CASE   WHEN con.condeferrable AND con.condeferred THEN 5  " +
+				"WHEN con.condeferrable THEN 6  ELSE 7 END AS DEFERRABILITY " +
+				"FROM  pg_catalog.pg_namespace pkn, pg_catalog.pg_class pkc, " +
+				"pg_catalog.pg_attribute pka,  pg_catalog.pg_namespace fkn, " +
+				"pg_catalog.pg_class fkc, pg_catalog.pg_attribute fka,  " +
+				"con, pg_catalog.pg_depend dep, pg_catalog.pg_class pkic " +
+				"WHERE pkn.oid = pkc.relnamespace AND pkc.oid = pka.attrelid " +
+				"AND pka.attnum = con.confkey AND con.confrelid = pkc.oid  " +
+				"AND  fkn.oid = fkc.relnamespace AND fkc.oid = fka.attrelid " +
+				"AND fka.attnum = con.conkey  AND con.conrelid  = fkc.oid  " +
+				"AND con.contype = 'f' AND con.oid = dep.objid " +
+				"AND pkic.oid = dep.refobjid AND pkic.relkind = 'i' " +
+				"AND dep.classid = 'pg_constraint'::regclass::oid " +
+				"AND dep.refclassid = 'pg_class'::regclass::oid  " +
+				"AND fkn.nspname = 'public'  AND fkc.relname = 'test' " +
+				"ORDER BY pkn.nspname, pkc.relname, conkeyseq")) {
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +

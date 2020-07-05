@@ -69,6 +69,7 @@ import net.sf.jsqlparser.statement.select.SubJoin;
 import net.sf.jsqlparser.statement.select.SubSelect;
 import net.sf.jsqlparser.statement.select.TableFunction;
 import net.sf.jsqlparser.statement.select.ValuesList;
+import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
@@ -274,6 +275,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("information_schema._pg_numeric_scale", nul);
 		addFunction("information_schema._pg_datetime_precision", nul);
 		addFunction("col_description", nul);
+		addFunction("generate_subscripts", nul);
 		addFunction("oidvectortypes", nul);
 		addFunction("pg_get_constraintdef", nul);
 		addFunction("pg_get_triggerdef", nul);
@@ -651,21 +653,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		});
 	}
 
-	private void replace(SelectBody sb, Consumer<SelectBody> parentSet) {
-		if (sb instanceof SetOperationList) {
-			List<SelectBody> sbs = ((SetOperationList) sb).getSelects();
-			for (int i = 0; i < sbs.size(); i ++) {
-				int i_ = i;
-				replace(sbs.get(i), e -> sbs.set(i_, e));
-			}
-			return;
-		}
-		if (!(sb instanceof PlainSelect)) {
-			return;
-		}
-		PlainSelect ps = (PlainSelect) sb;
-		replace(ps.getFromItem(), ps::setFromItem);
-		for (SelectItem si : ps.getSelectItems()) {
+	private void replace(List<SelectItem> sis, Consumer<SelectBody> parentSet, PlainSelect ps) {
+		for (SelectItem si : sis) {
 			if (!(si instanceof SelectExpressionItem)) {
 				continue;
 			}
@@ -686,6 +675,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				return;
 			case "information_schema._pg_expandarray(i.indkey) AS KEYS":
 				// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.10
+				if (ps == null) {
+					break;
+				}
 				List<Join> joins = ps.getJoins();
 				if (joins == null) {
 					break;
@@ -715,7 +707,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			default:
 			}
 			Expression exp = sei.getExpression();
-			if (exp instanceof Function) {
+			if (exp instanceof Function && ps != null) {
 				switch (((Function) exp).getName()) {
 				case "generate_series":
 					if (ps.getSelectItems().size() == 1 && ps.getFromItem() == null) {
@@ -747,6 +739,39 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				alias.setName("\"table\"");
 				replaced = true;
 			}
+		}
+	}
+
+	private void replace(SelectBody sb, Consumer<SelectBody> parentSet) {
+		if (sb instanceof SetOperationList) {
+			List<SelectBody> sbs = ((SetOperationList) sb).getSelects();
+			for (int i = 0; i < sbs.size(); i ++) {
+				int i_ = i;
+				replace(sbs.get(i), e -> sbs.set(i_, e));
+			}
+			return;
+		}
+		if (sb instanceof WithItem) {
+			WithItem wi = (WithItem) sb;
+			replace(wi.getSelectBody(), wi::setSelectBody);
+			List<SelectItem> sis = wi.getWithItemList();
+			if (sis != null) {
+				replace(wi.getWithItemList(), parentSet, null);
+			}
+			return;
+		}
+		if (!(sb instanceof PlainSelect)) {
+			return;
+		}
+		PlainSelect ps = (PlainSelect) sb;
+		replace(ps.getFromItem(), ps::setFromItem);
+		boolean[] ret = {false};
+		replace(ps.getSelectItems(), e -> {
+			parentSet.accept(e);
+			ret[0] = true;
+		}, ps);
+		if (ret[0]) {
+			return;
 		}
 		List<Join> joins = ps.getJoins();
 		if (joins != null) {
@@ -861,7 +886,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			CCJSqlParser parser = new CCJSqlParser(new StringProvider(sql));
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
-				replace(((Select) st).getSelectBody(), null);
+				Select select = (Select) st;
+				replace(select.getSelectBody(), null);
+				List<WithItem> wis = select.getWithItemsList();
+				if (wis != null) {
+					for (int i = 0; i < wis.size(); i ++) {
+						int i_ = i;
+						replace(wis.get(i), e -> wis.set(i_, (WithItem) e));
+					}
+				}
 				if (replaced) {
 					sql = st.toString();
 					if (sqlInParentheses != null) {

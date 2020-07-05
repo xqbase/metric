@@ -64,6 +64,18 @@ Sqlectron 1.30.0 tested.
 
 Postico 1.5.13 tested.
 
+### DbVisualizer
+
+DbVisualizer Free 11.0.3 tested.
+
+### LibreOffice Base
+
+LibreOffice Base 6.3.6.2 tested.
+
+Unsupported operations:
+
+- Edit in Table Data View
+
 ### ~Toad Edge~
 
 Toad Edge not supported.
