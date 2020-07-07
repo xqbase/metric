@@ -106,6 +106,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		", condeferrable::int AS deferrable, ",
 		"tablespace) AS tablespace",
 		"')) as tablespace, ",
+		", t.spcname AS tablespace, ",
 		" CAST('*' AS pg_catalog.text) ",
 		// JSqlParser cannot parse SELECT a = b, ... Just replace:
 		// nsp.nspname = ANY('{information_schema}') -> nsp.nspname = 'information_schema'
@@ -128,12 +129,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// for Postico
 		", ARRAY(SELECT pg_opclass.opcname FROM generate_series(0, indnatts-1) AS t(i) " +
 		"LEFT JOIN pg_opclass ON pg_opclass.oid = indclass[i]) AS opclasses, ",
+		// for Navicat
+		", (c.reltriggers > 0) AS hastriggers, ",
+		", ((SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0) AS inhtable, ",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
 		"')) as \"tablespace\", ",
+		", t.spcname AS \"tablespace\", ",
 		" '*' ",
 		" WHEN nsp.nspname = 'information_schema'",
 		")::CAST_TO_FALSE attisserial,",
@@ -146,6 +151,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" i.keys_n ",
 		" result.A_ATTNUM = result.keys_x ",
 		", NULL opclasses, ",
+		", (CASE WHEN c.reltriggers > 0 THEN TRUE ELSE FALSE END) AS hastriggers, ",
+		", (CASE WHEN (SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0 THEN TRUE ELSE FALSE END) AS inhtable, ",
 	};
 
 	private static ValuesList pgGetKeywords = new ValuesList();
@@ -213,7 +220,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL confkey, NULL confdeltype, NULL confmatchtype, " +
 				"NULL confupdtype, NULL connamespace, NULL tableoid, NULL conbin");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
-		addColumns("pg_namespace", "id oid, ${owner} nspowner");
+		addColumns("pg_namespace", "id oid, ${owner} nspowner, NULL nspacl");
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
 				"NULL prolang, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
@@ -416,6 +423,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replace(left, parentSet);
 				replaced = true;
 				return;
+			case "char[]":
+				if (left instanceof StringValue) {
+					replaced = true;
+					return;
+				}
+				break;
 			case "oid":
 			case "regclass":
 				if (left instanceof LongValue && type.equals("regclass")) {
@@ -795,6 +808,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private String getSQL(String s) {
+		System.out.println(s);
 		anyArray = false;
 		String sqlInParentheses = null;
 		String sql = s;
