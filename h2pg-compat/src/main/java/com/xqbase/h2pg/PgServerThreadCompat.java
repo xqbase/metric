@@ -64,10 +64,12 @@ import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectBody;
 import net.sf.jsqlparser.statement.select.SelectExpressionItem;
 import net.sf.jsqlparser.statement.select.SelectItem;
+import net.sf.jsqlparser.statement.select.SetOperation;
 import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.SubJoin;
 import net.sf.jsqlparser.statement.select.SubSelect;
 import net.sf.jsqlparser.statement.select.TableFunction;
+import net.sf.jsqlparser.statement.select.UnionOp;
 import net.sf.jsqlparser.statement.select.ValuesList;
 import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
@@ -423,12 +425,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				replace(left, parentSet);
 				replaced = true;
 				return;
-			case "char[]":
-				if (left instanceof StringValue) {
-					replaced = true;
-					return;
-				}
-				break;
 			case "oid":
 			case "regclass":
 				if (left instanceof LongValue && type.equals("regclass")) {
@@ -475,8 +471,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				return;
 			default:
 			}
-			ce.setLeftExpression(left);
-			replaced |= left != oldLeft;
+			if (left != oldLeft) {
+				ce.setLeftExpression(left);
+				replaced = true;
+			}
 			replace(left, ce::setLeftExpression);
 			return;
 		}
@@ -556,13 +554,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			List<Expression> exps = func.getParameters().getExpressions();
 			if (exps.size() == 1) {
 				Expression exp0 = exps.get(0);
+				String value = null;
 				if (exp0 instanceof StringValue) {
 					// value = ANY('{...}') -> value IN (...)
-					InExpression in = new InExpression(left,
-							getExpressionList(((StringValue) exp0).getValue()));
-					replace(left, in::setLeftExpression);
-					parentSet.accept(in);
-				} else {
+					value = ((StringValue) exp0).getValue();
+				} else if (exp0 instanceof CastExpression) {
+					// value = ANY('{...}'::char[]) -> value IN (...)
+					CastExpression ce = (CastExpression) exp0;
+					Expression ceLeft = ce.getLeftExpression();
+					if (ce.getType().toString().equals("char[]") &&
+							ceLeft instanceof StringValue) {
+						value = ((StringValue) ceLeft).getValue();
+					}
+				}
+				if (value == null) {
 					// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 					// ANY(SubSelect) is parsed as AnyComparisonExpression
 					// if (!(exp0 instanceof SubSelect)) {
@@ -572,6 +577,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					func.setName("ARRAY_CONTAINS");
 					func.setParameters(el);
 					parentSet.accept(func);
+				} else {
+					InExpression in = new InExpression(left, getExpressionList(value));
+					replace(left, in::setLeftExpression);
+					parentSet.accept(in);
 				}
 				replaced = true;
 				return;
@@ -623,24 +632,49 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replace(join.getOnExpression(), join::setOnExpression);
 				}
 			}
-			if (!left.toString().equals("pg_depend")) {
+			switch (left.toString()) {
+			case "pg_inherits i":
+				Alias alias = si.getAlias();
+				if (alias == null || !alias.getName().equals("i2")) {
+					break;
+				}
+				// for TestPgClients.testNavicat(), test case #2
+				PlainSelect ps = new PlainSelect();
+				ps.setFromItem(left);
+				replace(left, ps::setFromItem);
+				ps.setSelectItems(Arrays.asList(
+						new SelectExpressionItem(new Column("nspname")),
+						new SelectExpressionItem(new Column("relname")),
+						new SelectExpressionItem(new Column("inhrelid"))));
+				ps.setJoins(joins);
+				SubSelect ss = new SubSelect();
+				ss.setAlias(alias);
+				ss.setSelectBody(ps);
+				parentSet.accept(ss);
+				replaced = true;
+				break;
+			case "pg_depend":
+				// JOIN (pg_depend JOIN pg_class cs ON ...) ->
+				// JOIN (SELECT * FROM (SELECT ... WHERE FALSE) pg_depend JOIN ...) cs
+				ps = new PlainSelect();
+				ps.setFromItem(left);
+				replace(left, ps::setFromItem);
+				ps.setSelectItems(Arrays.asList(new AllColumns()));
+				ps.setJoins(joins);
+				ss = new SubSelect();
+				ss.setAlias(new Alias("cs"));
+				ss.setSelectBody(ps);
+				parentSet.accept(ss);
+				replaced = true;
+				break;
+			default:
 				// H2 cannot use alias in sub-select in join, so keep sub-join and
 				// avoid extracting table to sub-select in this case
 				// replace(si.getLeft(), si::setLeft);
+			}
+			if (!left.toString().equals("pg_depend")) {
 				return;
 			}
-			// JOIN (pg_depend JOIN pg_class cs ON ...) ->
-			// JOIN (SELECT * FROM (SELECT ... WHERE FALSE) pg_depend JOIN ...) cs
-			PlainSelect ps = new PlainSelect();
-			ps.setFromItem(left);
-			replace(left, ps::setFromItem);
-			ps.setSelectItems(Arrays.asList(new AllColumns()));
-			ps.setJoins(joins);
-			SubSelect ss = new SubSelect();
-			ss.setAlias(new Alias("cs"));
-			ss.setSelectBody(ps);
-			parentSet.accept(ss);
-			replaced = true;
 			return;
 		}
 		if (!(fi instanceof TableFunction)) {
@@ -757,10 +791,26 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private void replace(SelectBody sb, Consumer<SelectBody> parentSet) {
 		if (sb instanceof SetOperationList) {
+			SetOperationList sol = (SetOperationList) sb;
+			boolean countOnly = true;
 			List<SelectBody> sbs = ((SetOperationList) sb).getSelects();
 			for (int i = 0; i < sbs.size(); i ++) {
+				SelectBody sbi = sbs.get(i);
+				if (!sbi.toString().startsWith("SELECT COUNT(*) FROM ")) {
+					countOnly = false;
+				}
 				int i_ = i;
-				replace(sbs.get(i), e -> sbs.set(i_, e));
+				replace(sbi, e -> sbs.set(i_, e));
+			}
+			if (countOnly) {
+				// SELECT COUNT(*) FROM ... UNION SELECT COUNT(*) FROM ... ->
+				// SELECT COUNT(*) FROM ... UNION ALL SELECT COUNT(*) FROM ...
+				for (SetOperation so : sol.getOperations()) {
+					if (so instanceof UnionOp && !((UnionOp) so).isAll()) {
+						((UnionOp) so).setAll(true);
+						replaced = true;
+					}
+				}
 			}
 			return;
 		}
@@ -799,6 +849,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				obes.get(0).getExpression() instanceof SubSelect &&
 				ps.getSelectItems().size() == 1) {
 			obes.get(0).setExpression(new LongValue(1));
+			replaced = true;
 		}
 		// OFFSET m LIMIT n -> LIMIT n OFFSET m
 		if (ps.getOffset() != null && ps.getLimit() != null) {
@@ -808,7 +859,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private String getSQL(String s) {
-		System.out.println(s);
 		anyArray = false;
 		String sqlInParentheses = null;
 		String sql = s;
@@ -917,7 +967,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 			} else if (st instanceof Insert) {
 				Insert insert = ((Insert) st);
-				if (insert.getReturningExpressionList() != null) {
+				if (insert.isReturningAllColumns() ||
+						insert.getReturningExpressionList() != null) {
+					insert.setReturningAllColumns(false);
 					insert.setReturningExpressionList(null);
 					replaced = true;
 					return insert.toString();

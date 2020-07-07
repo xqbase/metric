@@ -983,6 +983,25 @@ public class TestPgClients {
 
 	@Test
 	public void testNavicat() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_class c " +
+				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
+				"WHERE c.relkind = ANY ('{r,v,m}'::char[]) UNION " +
+				"SELECT COUNT(*) FROM pg_attribute a " +
+				"JOIN pg_class c on a.attrelid = c.oid " +
+				"JOIN pg_namespace n on c.relnamespace = n.oid " +
+				"JOIN pg_type tp on tp.typelem = a.atttypid " +
+				"WHERE a.attnum > 0 UNION " +
+				"SELECT COUNT(*) FROM information_schema.routines")) {
+			assertTrue(rs.next());
+			int tables = rs.getInt(1);
+			assertTrue(tables > 0);
+			assertTrue(rs.next());
+			int columns = rs.getInt(1);
+			assertTrue(columns > tables);
+			assertTrue(rs.next());
+			assertEquals(0, rs.getInt(1));
+			assertFalse(rs.next());
+		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.oid, n.nspname AS schemaname, " +
 				"c.relname AS tablename, c.relacl, pg_get_userbyid(c.relowner) AS tableowner, " +
 				"obj_description(c.oid) AS description, c.relkind, ci.relname As cluster, " +
@@ -1000,7 +1019,8 @@ public class TestPgClients {
 				"WHERE (c.relkind = 'r'::\"char\") AND n.nspname = 'public' " +
 				"ORDER BY schemaname, tablename")) {
 			assertTrue(rs.next());
-			assertEquals("sa", rs.getString("rolname"));
+			assertEquals("test", rs.getString("tablename"));
+			assertNotNull(rs.getString("cluster"));
 			assertFalse(rs.next());
 		}
 	}
