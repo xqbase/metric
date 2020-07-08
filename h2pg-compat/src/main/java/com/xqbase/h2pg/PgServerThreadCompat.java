@@ -230,6 +230,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
 				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
+		addColumns("information_schema.columns", "NULL udt_schema, NULL udt_name");
 		addColumns("information_schema.routines", "NULL type_udt_name");
 		addColumns("information_schema.triggers",
 				"NULL event_object_table, NULL event_object_schema");
@@ -263,7 +264,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"JOIN information_schema.tables t USING (table_schema, table_name) " +
 				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
 				"GROUP BY i.id");
-		addTable("pg_indexes", "SELECT DISTINCT n.nspname AS schemaname, c.relname AS tablename, " +
+		addTable("pg_indexes", "SELECT n.nspname AS schemaname, c.relname AS tablename, " +
 				"i.relname AS indexname, t.spcname AS \"tablespace\", " +
 				"pg_get_indexdef(i.oid) AS indexdef FROM information_schema.indexes x " +
 				"JOIN information_schema.tables it USING (table_schema, table_name) " +

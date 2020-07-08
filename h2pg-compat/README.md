@@ -76,6 +76,16 @@ Unsupported operations:
 
 - Edit in Table Data View
 
+### Navicat
+
+Navicat 15.0.17 tested.
+
+Should check `View / Show Hidden Items` to show all tables.
+
+Unsupported operations:
+
+- Design Table
+
 ### ~Toad Edge~
 
 Toad Edge not supported.
