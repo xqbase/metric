@@ -17,7 +17,7 @@ Import the metric-client library as a maven dependency:
 ```
 
 For a webapp project, add a filter into web.xml:
- 
+
 ```xml
 <filter>
 	<filter-name>MetricFilter</filter-name>

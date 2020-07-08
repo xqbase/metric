@@ -134,7 +134,9 @@ public class Collector {
 	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
+	private static File mvStoreFile;
 	private static ConnectionPool.Entry h2PoolEntry;
+	private static Object mvStore;
 
 	private static boolean insert(String sql, Object... in) throws SQLException {
 		return insert(null, sql, in);
@@ -234,7 +236,7 @@ public class Collector {
 		if (tagValues == null) {
 			tagValues = new HashMap<>();
 			tagMap.put(tagKey, tagValues);
-			// Must use "value.clone()" here, because many tags may share one "value" 
+			// Must use "value.clone()" here, because many tags may share one "value"
 			tagValues.put(tagValue, value.clone());
 		} else {
 			MetricValue oldValue = tagValues.get(tagValue);
@@ -270,8 +272,6 @@ public class Collector {
 		return tags;
 	}
 
-	private static Class<?> jdbcConnection;
-	private static Method getSession, getDatabase, getStore, getMvStore;
 	private static Method getFillRate, getChunksFillRate;
 	private static Method getCacheSizeUsed, getCacheHitRatio;
 
@@ -321,24 +321,22 @@ public class Collector {
 				Metric.put("metric.size", name.quarterSize, "name", "_quarter." + name.name);
 			}
 		}
-		// MVStore: fill rate, cache used and hit ratio
-		if (h2PoolEntry == null) {
+		// MVStore: size, fill rate, cache used and hit ratio
+		if (mvStoreFile != null) {
+			Metric.put("metric.mvstore.size", mvStoreFile.length());
+		}
+		if (mvStore == null) {
 			return;
 		}
-		Object conn = h2PoolEntry.getObject().unwrap(jdbcConnection);
 		try {
-			Object session = getSession.invoke(conn);
-			Object database = getDatabase.invoke(session);
-			Object store = getStore.invoke(database);
-			Object mv = getMvStore.invoke(store);
 			Metric.put("metric.mvstore.fill_rate", ((Number) getFillRate.
-					invoke(mv)).doubleValue(), "type", "store");
+					invoke(mvStore)).doubleValue(), "type", "store");
 			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
-					invoke(mv)).doubleValue(), "type", "chunks");
+					invoke(mvStore)).doubleValue(), "type", "chunks");
 			Metric.put("metric.mvstore.cache_size_used",
-					((Number) getCacheSizeUsed.invoke(mv)).doubleValue());
+					((Number) getCacheSizeUsed.invoke(mvStore)).doubleValue());
 			Metric.put("metric.mvstore.cache_hit_ratio",
-					((Number) getCacheHitRatio.invoke(mv)).doubleValue());
+					((Number) getCacheHitRatio.invoke(mvStore)).doubleValue());
 		} catch (ReflectiveOperationException e) {
 			Log.w("" + e);
 		}
@@ -552,19 +550,11 @@ public class Collector {
 		ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(2);
 
 		try {
-			jdbcConnection = Class.forName("org.h2.jdbc.JdbcConnection");
-			getSession = jdbcConnection.getMethod("getSession");
-			getDatabase = Class.forName("org.h2.engine.Session").
-					getMethod("getDatabase");
-			getStore = Class.forName("org.h2.engine.Database").
-					getMethod("getStore");
-			getMvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
-					getMethod("getMvStore");
-			Class<?> mvStore = Class.forName("org.h2.mvstore.MVStore");
-			getFillRate = mvStore.getMethod("getFillRate");
-			getChunksFillRate = mvStore.getMethod("getChunksFillRate");
-			getCacheSizeUsed = mvStore.getMethod("getCacheSizeUsed");
-			getCacheHitRatio = mvStore.getMethod("getCacheHitRatio");
+			Class<?> mvStoreClass = Class.forName("org.h2.mvstore.MVStore");
+			getFillRate = mvStoreClass.getMethod("getFillRate");
+			getChunksFillRate = mvStoreClass.getMethod("getChunksFillRate");
+			getCacheSizeUsed = mvStoreClass.getMethod("getCacheSizeUsed");
+			getCacheHitRatio = mvStoreClass.getMethod("getCacheHitRatio");
 		} catch (ReflectiveOperationException e) {
 			Log.w("" + e);
 		}
@@ -604,6 +594,7 @@ public class Collector {
 			ManagementMonitor monitor = new ManagementMonitor("metric.server",
 					"server_id", "" + serverId);
 		) {
+			mvStoreFile = null;
 			boolean createTable = false, derby = false, sqlite = false;
 			Driver driver = (Driver) Class.forName(p.
 					getProperty("driver")).newInstance();
@@ -611,7 +602,8 @@ public class Collector {
 			if (url.endsWith(":h2:metric")) {
 				h2DataDir = Conf.getAbsolutePath("data");
 				new File(h2DataDir).mkdir();
-				createTable = !new File(h2DataDir + "/metric.mv.db").exists();
+				mvStoreFile = new File(h2DataDir + "/metric.mv.db");
+				createTable = !mvStoreFile.exists();
 				h2DataDir = h2DataDir.replace('\\', '/');
 				url = url.substring(0, url.length() - 6) + "file:" + h2DataDir +
 						"/metric;mode=postgresql;database_to_lower=true;" +
@@ -638,11 +630,22 @@ public class Collector {
 
 			DB = new ConnectionPool(driver, url,
 					p.getProperty("user"), p.getProperty("password"));
+			h2PoolEntry = null;
+			mvStore = null;
 			try {
 				if (h2DataDir != null) {
 					// An embedded connection must be created first, see:
 					// https://github.com/h2database/h2database/issues/2294
 					h2PoolEntry = DB.borrow();
+					Class<?> connClz = Class.forName("org.h2.jdbc.JdbcConnection");
+					Object conn = h2PoolEntry.getObject().unwrap(connClz);
+					Object session = connClz.getMethod("getSession").invoke(conn);
+					Object database = Class.forName("org.h2.engine.Session").
+							getMethod("getDatabase").invoke(session);
+					Object store = Class.forName("org.h2.engine.Database").
+							getMethod("getStore").invoke(database);
+					mvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+							getMethod("getMvStore").invoke(store);
 					if (h2Port > 0) {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);
 					}
