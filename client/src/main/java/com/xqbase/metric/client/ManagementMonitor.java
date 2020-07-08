@@ -86,7 +86,7 @@ public class ManagementMonitor implements Runnable, AutoCloseable {
 			};
 			NotificationBroadcaster broadcaster = ((NotificationBroadcaster) gcBean);
 			broadcaster.addNotificationListener(listener, null, null);
-			gcListeners.put(broadcaster, listener); 
+			gcListeners.put(broadcaster, listener);
 		}
 	}
 

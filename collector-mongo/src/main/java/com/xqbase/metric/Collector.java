@@ -194,7 +194,7 @@ public class Collector {
 		if (tagValues == null) {
 			tagValues = new HashMap<>();
 			tagMap.put(tagKey, tagValues);
-			// Must use "value.clone()" here, because many tags may share one "value" 
+			// Must use "value.clone()" here, because many tags may share one "value"
 			tagValues.put(tagValue, value.clone());
 		} else {
 			MetricValue oldValue = tagValues.get(tagValue);
