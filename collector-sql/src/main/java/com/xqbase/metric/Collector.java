@@ -644,7 +644,7 @@ public class Collector {
 							getMethod("getDatabase").invoke(session);
 					Object store = Class.forName("org.h2.engine.Database").
 							getMethod("getStore").invoke(database);
-					mvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+					mvStore = Class.forName("org.h2.mvstore.db.Store").
 							getMethod("getMvStore").invoke(store);
 					if (h2Port > 0) {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);
