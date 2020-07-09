@@ -22,6 +22,10 @@ Unsupported operations:
 
 - Insert on Data Output, due to uncommitted `INSERT INTO ... RETURNING ...`
 
+### pgcli
+
+pgcli 3.0.0 tested.
+
 ### HeidiSQL
 
 HeidiSQL 11.0.0 tested.

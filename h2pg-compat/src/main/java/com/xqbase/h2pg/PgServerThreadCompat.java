@@ -103,7 +103,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column FALSE = new Column("FALSE");
 	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
 	private static final String[] REPLACE_FROM = {
-		" = ANY(ARRAY[E'v', E'm'])",
 		"(indpred IS NOT NULL)",
 		// "deferrable" and "tablespace" are keywords in JSqlParser
 		", condeferrable::int AS deferrable, ",
@@ -135,9 +134,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// for Navicat
 		", (c.reltriggers > 0) AS hastriggers, ",
 		", ((SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0) AS inhtable, ",
+		// for pgcli
+		" = ANY(ARRAY[E'r',E'p',E'f'])",
+		" = ANY(ARRAY[E'v',E'm'])",
+		"(SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)",
+		"d.deptype = 'e' is_extension,",
 	};
 	private static final String[] REPLACE_TO = {
-		" IN ('v', 'm')",
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
@@ -156,7 +159,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" result.A_ATTNUM = result.keys_x ",
 		", NULL opclasses, ",
 		", (CASE WHEN c.reltriggers > 0 THEN TRUE ELSE FALSE END) AS hastriggers, ",
-		", (CASE WHEN (SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0 THEN TRUE ELSE FALSE END) AS inhtable, ",
+		", (CASE WHEN (SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0 " +
+		"THEN TRUE ELSE FALSE END) AS inhtable, ",
+		" IN ('r', 'p', 'f')",
+		" IN ('v', 'm')",
+		"(SELECT (CASE c.relkind WHEN 'c' THEN TRUE ELSE FALSE END) " +
+		"FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)",
+		"(CASE d.deptype WHEN 'e' THEN TRUE ELSE FALSE END) is_extension,",
 	};
 
 	private static ValuesList pgGetKeywords = new ValuesList();
@@ -299,6 +308,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		Column tru = new Column("TRUE");
 		addFunction("pg_cancel_backend", tru);
 		addFunction("pg_function_is_visible", tru);
+		addFunction("pg_type_is_visible", tru);
 		addFunction("pg_is_other_temp_schema", FALSE);
 		LongValue zero = new LongValue(0);
 		addFunction("pg_backend_pid", zero);
@@ -460,10 +470,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					return;
 				}
 				break;
-			case "regtype":
-				ce.getType().setDataType("regclass");
-				replaced = true;
-				break;
 			case "yes_or_no":
 				CaseExpression ce2 = new CaseExpression();
 				ce2.setSwitchExpression(left);
@@ -535,6 +541,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return;
 		}
 		if (!(exp instanceof BinaryExpression)) {
+			return;
+		}
+		if (exp.toString().equals("p.prorettype::regtype != 'trigger'::regtype")) {
+			parentSet.accept(new Column("TRUE"));
+			replaced = true;
 			return;
 		}
 		BinaryExpression be = (BinaryExpression) exp;

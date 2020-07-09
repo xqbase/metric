@@ -350,8 +350,34 @@ public class TestPgClients {
 		try (ResultSet rs = stat.executeQuery("SELECT n.nspname schema_name, " +
 				"c.relname table_name FROM pg_catalog.pg_class c " +
 				"LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
-				"WHERE c.relkind = ANY(ARRAY[E'v', E'm']) ORDER BY 1,2")) {
+				"WHERE c.relkind = ANY(ARRAY[E'r',E'p',E'f']) ORDER BY 1,2")) {
 			// just no exception
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT n.nspname schema_name, " +
+				"c.relname table_name FROM pg_catalog.pg_class c " +
+				"LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
+				"WHERE c.relkind = ANY(ARRAY[E'v',E'm']) ORDER BY 1,2")) {
+			// just no exception
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT n.nspname schema_name, " +
+				"pg_catalog.format_type(t.oid, NULL) type_name FROM pg_catalog.pg_type t " +
+				"LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace " +
+				"WHERE (t.typrelid = 0 OR " +
+				"(SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)) " +
+				"AND t.typname !~ '^_' AND n.nspname <> 'pg_catalog' " +
+				"AND n.nspname <> 'information_schema' " +
+				"AND pg_catalog.pg_type_is_visible(t.oid) ORDER BY 1, 2")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT n.nspname schema_name, " +
+				"p.proname func_name, p.proargnames, NULL arg_types, NULL arg_modes, " +
+				"'' ret_type, p.proisagg is_aggregate, false is_window, " +
+				"p.proretset is_set_returning, d.deptype = 'e' is_extension, " +
+				"NULL AS arg_defaults FROM pg_catalog.pg_proc p " +
+				"INNER JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace " +
+				"LEFT JOIN pg_depend d ON d.objid = p.oid and d.deptype = 'e' " +
+				"WHERE p.prorettype::regtype != 'trigger'::regtype ORDER BY 1, 2")) {
+			assertFalse(rs.next());
 		}
 	}
 
