@@ -346,6 +346,16 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testPgcli() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT n.nspname schema_name, " +
+				"c.relname table_name FROM pg_catalog.pg_class c " +
+				"LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
+				"WHERE c.relkind = ANY(ARRAY[E'v', E'm']) ORDER BY 1,2")) {
+			// just no exception
+		}
+	}
+
+	@Test
 	public void testHeidiSQL() throws SQLException {
 		try (ResultSet rs = stat.executeQuery("SHOW ssl")) {
 			assertTrue(rs.next());

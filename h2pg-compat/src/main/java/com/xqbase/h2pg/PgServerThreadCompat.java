@@ -103,6 +103,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column FALSE = new Column("FALSE");
 	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
 	private static final String[] REPLACE_FROM = {
+		" = ANY(ARRAY[E'v', E'm'])",
 		"(indpred IS NOT NULL)",
 		// "deferrable" and "tablespace" are keywords in JSqlParser
 		", condeferrable::int AS deferrable, ",
@@ -136,6 +137,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		", ((SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0) AS inhtable, ",
 	};
 	private static final String[] REPLACE_TO = {
+		" IN ('v', 'm')",
 		"(NVL2(indpred, TRUE, FALSE))",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
@@ -223,8 +225,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL confupdtype, NULL connamespace, NULL tableoid, NULL conbin");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
 		addColumns("pg_namespace", "id oid, ${owner} nspowner, NULL nspacl");
-		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, " +
-				"NULL prolang, 0 pronargs, FALSE proisagg");
+		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, NULL proargnames, " +
+				"NULL prolang, NULL proretset, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
 		addColumns("pg_settings", "'' source");
 		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
@@ -457,6 +459,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replaced = true;
 					return;
 				}
+				break;
+			case "regtype":
+				ce.getType().setDataType("regclass");
+				replaced = true;
 				break;
 			case "yes_or_no":
 				CaseExpression ce2 = new CaseExpression();
