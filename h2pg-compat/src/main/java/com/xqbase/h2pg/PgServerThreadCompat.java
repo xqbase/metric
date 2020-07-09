@@ -100,6 +100,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
+	private static Table table(String table, String alias) {
+		Table t = new Table(table);
+		t.setAlias(new Alias(alias));
+		return t;
+	}
+
+	private static Join join(String table, String alias) {
+		Join join = new Join();
+		join.setRightItem(table(table, alias));
+		join.setSimple(true);
+		return join;
+	}
+
 	private static final Column FALSE = new Column("FALSE");
 	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
 	private static final String[] REPLACE_FROM = {
@@ -139,6 +152,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" = ANY(ARRAY[E'v',E'm'])",
 		"(SELECT c.relkind = 'c' FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)",
 		"d.deptype = 'e' is_extension,",
+		"((t.tgtype)::integer & ",
+		", pg_get_expr(indpred, indrelid, true) AS constraint, ",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
@@ -166,6 +181,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"(SELECT (CASE c.relkind WHEN 'c' THEN TRUE ELSE FALSE END) " +
 		"FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)",
 		"(CASE d.deptype WHEN 'e' THEN TRUE ELSE FALSE END) is_extension,",
+		"(",
+		", pg_get_expr(indpred, indrelid, true) AS \"constraint\", ",
 	};
 
 	private static ValuesList pgGetKeywords = new ValuesList();
@@ -230,8 +247,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL relacl, ${owner} relowner, TRUE relhaspkey, FALSE relhastriggers, " +
 				"FALSE relhassubclass, NULL tableoid, NULL reloptions, NULL relpersistence");
 		addColumns("pg_constraint", "FALSE condeferrable, FALSE condeferred, " +
-				"NULL confkey, NULL confdeltype, NULL confmatchtype, " +
-				"NULL confupdtype, NULL connamespace, NULL tableoid, NULL conbin");
+				"NULL confkey, NULL confdeltype, NULL confmatchtype, NULL confupdtype, " +
+				"NULL connamespace, NULL tableoid, NULL conbin, NULL consrc");
 		addColumns("pg_database", "-1 datconnlimit, FALSE datistemplate");
 		addColumns("pg_namespace", "id oid, ${owner} nspowner, NULL nspacl");
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, NULL proargnames, " +
@@ -250,26 +267,28 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
 		addEmptyTable("pg_event_trigger", "0");
 		addEmptyTable("pg_language", "0 oid, '' lanname");
-		addEmptyTable("pg_rewrite", "0 oid, '' rulename, 0 ev_class");
+		addEmptyTable("pg_rewrite", "0 oid, '' rulename, " +
+				"0 ev_class, '' ev_type, FALSE is_instead");
 		addEmptyTable("pg_shdepend", "'' deptype, 0 classid, 0 refclassid, " +
 				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
 		addEmptyTable("pg_stat_activity", "'' state, '' datname");
 		addEmptyTable("pg_stat_database", "0 xact_commit, 0 xact_rollback, " +
 				"0 tup_inserted, 0 tup_updated, 0 tup_deleted, 0 tup_fetched, 0 tup_returned, " +
 				"0 blks_read, 0 blks_hit, '' datname");
-		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, 0 tgfoid, " +
-				"0 tgrelid, '' tgenabled, FALSE tgisconstraint, FALSE tgisinternal");
+		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, 0 tgfoid, 0 tgrelid, " +
+				"0 tgconstrrelid, '' tgenabled, FALSE tgisconstraint, FALSE tgisinternal, " +
+				"FALSE tgdeferrable, FALSE tginitdeferred");
 		addEmptyTable("information_schema.role_table_grants", "'' grantor, '' grantee, " +
 				"'' table_schema, '' table_name, '' privilege_type, " +
 				"FALSE is_grantable, FALSE with_hierarchy");
-		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, " +
+		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, COUNT(*) indnatts, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisclustered, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE " +
 				"WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisprimary, " +
 				// should be ARRAY_AGG(c.ordinal_position ORDER BY i.ordinal_position,
 				// but not supported by JSqlParser
-				"NULL indexprs, ARRAY_AGG(c.ordinal_position) indkey, " +
+				"NULL indexprs, ARRAY_AGG(c.ordinal_position) indkey, NULL indclass, " +
 				"NULL indpred, NULL indoption FROM information_schema.index_columns ic " +
 				"JOIN information_schema.indexes i USING (index_schema, index_name) " +
 				"JOIN information_schema.tables t USING (table_schema, table_name) " +
@@ -690,9 +709,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				// avoid extracting table to sub-select in this case
 				// replace(si.getLeft(), si::setLeft);
 			}
-			if (!left.toString().equals("pg_depend")) {
-				return;
-			}
 			return;
 		}
 		if (!(fi instanceof TableFunction)) {
@@ -845,7 +861,23 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return;
 		}
 		PlainSelect ps = (PlainSelect) sb;
-		replace(ps.getFromItem(), ps::setFromItem);
+		FromItem fi = ps.getFromItem();
+		// for TestPgClients.testNavicat(), test case #3
+		if (fi instanceof SubJoin && fi.toString().equals("((pg_rewrite r " +
+					"JOIN pg_class c ON ((c.oid = r.ev_class))) " +
+					"LEFT JOIN pg_namespace n ON ((n.oid = c.relnamespace)))")) {
+			fi = table("pg_rewrite", "r");
+			ps.setFromItem(fi);
+			List<Join> joins = ps.getJoins();
+			if (joins == null) {
+				joins = new ArrayList<>();
+				ps.setJoins(joins);
+			}
+			joins.add(join("pg_class", "c"));
+			joins.add(join("pg_namespace", "n"));
+			replaced = true;
+		}
+		replace(fi, ps::setFromItem);
 		boolean[] ret = {false};
 		replace(ps.getSelectItems(), e -> {
 			parentSet.accept(e);

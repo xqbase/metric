@@ -1059,6 +1059,80 @@ public class TestPgClients {
 			assertNotNull(rs.getString("cluster"));
 			assertFalse(rs.next());
 		}
+		try (ResultSet rs = stat.executeQuery("SELECT n.nspname AS rule_schema, " +
+				"c.relname, r.rulename, r.oid, r.ev_type, r.is_instead, " +
+				"pg_get_ruledef(r.oid) AS definition, obj_description(r.oid) AS comment " +
+				"FROM ((pg_rewrite r JOIN pg_class c ON ((c.oid = r.ev_class))) " +
+				"LEFT JOIN pg_namespace n ON ((n.oid = c.relnamespace))) " +
+				"WHERE (r.rulename <> '_RETURN'::name) AND (n.nspname='public') " +
+				"AND (c.relname='test') ORDER BY c.relname, r.oid ASC")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT t.oid AS oid, " +
+				"(n.nspname)::information_schema.sql_identifier AS trigger_schema, " +
+				"(t.tgname)::information_schema.sql_identifier AS trigger_name, " +
+				"(c.relname)::information_schema.sql_identifier AS trigger_table_name, " +
+				"(em.text)::information_schema.character_data AS event_manipulation, " +
+				"(c.relkind)::information_schema.sql_identifier AS trigger_table_type, " +
+				"(nsp.nspname)::information_schema.sql_identifier AS referenced_table_schema, " +
+				"(cs.relname)::information_schema.sql_identifier AS referenced_table, " +
+				"t.tgdeferrable AS is_deferrable, t.tginitdeferred AS is_deferred, " +
+				"(np.nspname)::information_schema.sql_identifier AS function_schema, " +
+				"(p.proname)::information_schema.sql_identifier AS function_name, " +
+				"(\"substring\"(pg_get_triggerdef(t.oid), " +
+				"(\"position\"(\"substring\"(pg_get_triggerdef(t.oid), 48), " +
+				"'EXECUTE PROCEDURE'::text) + 47)))::information_schema.character_data " +
+				"AS action_statement, " +
+				"(CASE WHEN (((t.tgtype)::integer & 1) = 1) THEN 'ROW'::text " +
+				"ELSE 'STATEMENT'::text END)::information_schema.character_data AS for_each, " +
+				"(CASE WHEN (((t.tgtype)::integer & 2) = 2) THEN 'BEFORE'::text " +
+				"ELSE 'AFTER'::text END)::information_schema.character_data AS fire_time, " +
+				"t.tgenabled AS enabled, t.tgisconstraint AS is_constraint, " +
+				"t.tgisconstraint AS is_internal, obj_description(t.oid) AS comment " +
+				"FROM pg_trigger t " +
+				"INNER JOIN pg_class c ON t.tgrelid = c.oid " +
+				"LEFT JOIN pg_namespace n ON c.relnamespace = n.oid " +
+				"LEFT JOIN pg_proc p ON t.tgfoid = p.oid " +
+				"LEFT JOIN pg_namespace np ON p.pronamespace = np.oid " +
+				"LEFT JOIN (((SELECT 4, 'INSERT' UNION ALL SELECT 8, 'DELETE') " +
+				"UNION ALL SELECT 16, 'UPDATE') UNION ALL SELECT 32, 'TRUNCATE') " +
+				"em(num, text) ON ((t.tgtype)::integer & em.num) <> 0 " +
+				"LEFT OUTER JOIN (SELECT oid, relnamespace, relname FROM pg_class) cs " +
+				"ON (t.tgconstrrelid = cs.oid) " +
+				"LEFT OUTER JOIN (SELECT oid, nspname FROM pg_namespace) nsp " +
+				"ON (cs.relnamespace = nsp.oid) " +
+				"WHERE (n.nspname)::information_schema.sql_identifier = 'public' " +
+				"AND (c.relname)::information_schema.sql_identifier = 'test' " +
+				"ORDER BY c.relname, t.tgname ASC")) {
+			assertFalse(rs.next());
+		}
+		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
+		try (ResultSet rs = stat.executeQuery("SELECT ci.relname AS index_name, " +
+				"con.conname, i.indexrelid AS oid, ct.relname AS table_name, " +
+				"i.indrelid AS table_oid, am.amname AS index_type, i.indisunique AS is_unique, " +
+				"i.indisclustered AS is_clustered, i.indisprimary AS is_primary, " +
+				"pg_get_expr(indpred, indrelid, true) AS constraint, " +
+				"ts.spcname AS tablespace_name, pa.rolname AS owner, ci.reloptions, i.indkey, " +
+				"i.indclass, i.indnatts, ci.relpages AS index_pages, " +
+				"obj_description(indexrelid) AS comment FROM pg_index i " +
+				"LEFT JOIN pg_class ct ON ct.oid = i.indrelid " +
+				"LEFT JOIN pg_class ci ON ci.oid = i.indexrelid " +
+				"LEFT JOIN pg_namespace tns ON tns.oid = ct.relnamespace " +
+				"LEFT JOIN pg_namespace ins ON ins.oid = ci.relnamespace " +
+				"LEFT JOIN pg_tablespace ts ON ci.reltablespace = ts.oid " +
+				"LEFT JOIN pg_am am ON ci.relam = am.oid " +
+				"LEFT JOIN pg_depend dep ON dep.classid = ci.tableoid " +
+				"AND dep.objid = ci.oid AND dep.refobjsubid = '0' " +
+				"LEFT JOIN pg_constraint con ON con.tableoid = dep.refclassid " +
+				"AND con.oid = dep.refobjid " +
+				"LEFT JOIN pg_roles pa ON pa.oid = ci.relowner " +
+				"WHERE ins.nspname = 'public' AND conname IS NULL " +
+				"AND ct.relname = 'test2' ORDER BY ct.relname, ins.nspname, ci.relname")) {
+			assertTrue(rs.next());
+			assertEquals("test2", rs.getString("table_name"));
+			assertEquals(2, rs.getInt("indnatts"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
