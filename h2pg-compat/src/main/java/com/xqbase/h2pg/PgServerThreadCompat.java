@@ -1108,6 +1108,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		case 'P':
 			int z1 = findZero(data, 5, data.length) + 1;
 			int z2 = findZero(data, z1, data.length);
+			if (z1 == z2) {
+				break;
+			}
 			Charset charset = (Charset) getEncoding.invoke(this);
 			replaced = false;
 			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());

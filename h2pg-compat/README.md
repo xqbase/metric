@@ -28,7 +28,7 @@ pgcli 3.0.0 tested.
 
 ### HeidiSQL
 
-HeidiSQL 11.0.0 tested.
+HeidiSQL 11.0.0.5919 tested.
 
 ### DBeaver
 
@@ -85,6 +85,14 @@ Unsupported operations:
 Navicat 15.0.17 tested.
 
 Should check `View / Show Hidden Items` to show all tables.
+
+### DataGrip
+
+DataGrip 2020.1.5 tested.
+
+### Database Navigator plugin for IntelliJ IDEs
+
+Database Navigator plugin 3.2.0627 tested.
 
 ### ~Toad Edge~
 
