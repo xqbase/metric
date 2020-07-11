@@ -256,7 +256,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
 		addColumns("pg_settings", "'' source");
 		addColumns("pg_type", "FALSE typbyval, NULL typcategory, NULL typcollation, " +
-				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
+				"NULL typdefault, 0 typndims, 0 typarray, ${owner} typowner, " +
+				"NULL typalign, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.columns", "NULL udt_schema, NULL udt_name");
 		addColumns("information_schema.routines", "NULL type_udt_name");
@@ -1001,7 +1002,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
 				Select select = (Select) st;
-				replace(select.getSelectBody(), null);
+				replace(select.getSelectBody(), select::setSelectBody);
 				List<WithItem> wis = select.getWithItemsList();
 				if (wis != null) {
 					for (int i = 0; i < wis.size(); i ++) {

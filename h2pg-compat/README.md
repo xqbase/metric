@@ -98,6 +98,10 @@ Database Navigator plugin 3.2.0627 tested.
 
 TablePlus 3.6.3 tested.
 
+### ~dbForge Studio~
+
+dbForge Studio not supported.
+
 ### ~Toad Edge~
 
 Toad Edge not supported.
