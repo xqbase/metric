@@ -640,7 +640,7 @@ public class Collector {
 					Class<?> connClz = Class.forName("org.h2.jdbc.JdbcConnection");
 					Object conn = h2PoolEntry.getObject().unwrap(connClz);
 					Object session = connClz.getMethod("getSession").invoke(conn);
-					Object database = Class.forName("org.h2.engine.Session").
+					Object database = Class.forName("org.h2.engine.SessionLocal").
 							getMethod("getDatabase").invoke(session);
 					Object store = Class.forName("org.h2.engine.Database").
 							getMethod("getStore").invoke(database);
