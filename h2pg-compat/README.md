@@ -94,6 +94,10 @@ DataGrip 2020.1.5 tested.
 
 Database Navigator plugin 3.2.0627 tested.
 
+### TablePlus
+
+TablePlus 3.6.3 tested.
+
 ### ~Toad Edge~
 
 Toad Edge not supported.

@@ -255,7 +255,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL prolang, NULL proretset, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
 		addColumns("pg_settings", "'' source");
-		addColumns("pg_type", "NULL typcategory, NULL typcollation, " +
+		addColumns("pg_type", "FALSE typbyval, NULL typcategory, NULL typcollation, " +
 				"NULL typdefault, 0 typndims, ${owner} typowner, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.columns", "NULL udt_schema, NULL udt_name");
@@ -1039,6 +1039,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				case "server_version_num":
 					replaced = true;
 					return "SELECT '80223' server_version_num";
+				case "integer_datetimes":
+					replaced = true;
+					return "SELECT TRUE integer_datetimes";
 				default:
 				}
 			}
