@@ -45,6 +45,7 @@ import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.expression.operators.relational.ItemsList;
+import net.sf.jsqlparser.expression.operators.relational.JsonOperator;
 import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParser;
 import net.sf.jsqlparser.parser.ParseException;
@@ -154,6 +155,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"d.deptype = 'e' is_extension,",
 		"((t.tgtype)::integer & ",
 		", pg_get_expr(indpred, indrelid, true) AS constraint, ",
+		// for dbForge
+		" dv.adsrc IS NOT NULL AND dv.adsrc LIKE 'nextval(%)' AS autoinc,",
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
@@ -183,6 +186,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		"(CASE d.deptype WHEN 'e' THEN TRUE ELSE FALSE END) is_extension,",
 		"(",
 		", pg_get_expr(indpred, indrelid, true) AS \"constraint\", ",
+		" (CASE WHEN dv.adsrc IS NOT NULL AND dv.adsrc LIKE 'nextval(%)' " +
+		"THEN TRUE ELSE FALSE END) AS autoinc,",
 	};
 
 	private static ValuesList pgGetKeywords = new ValuesList();
@@ -356,6 +361,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private boolean replaced = false;
 	private boolean anyArray = false;
+
+	private Function arrayContains(Expression array, Expression value) {
+		ExpressionList el = new ExpressionList(array, value);
+		replace(array, e -> el.getExpressions().set(0, e));
+		replace(value, e -> el.getExpressions().set(1, e));
+		Function func = new Function();
+		func.setName("ARRAY_CONTAINS");
+		func.setParameters(el);
+		return func;
+	}
 
 	private void replace(Expression exp, Consumer<Expression> parentSet) {
 		if (exp instanceof Column) {
@@ -576,15 +591,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (anyArray && be instanceof EqualsTo &&
 				right instanceof AnyComparisonExpression) {
 			SubSelect ss = ((AnyComparisonExpression) right).getSubSelect();
-			Function func = new Function();
-			ExpressionList el = new ExpressionList(ss, left);
-			replace(ss, (Consumer<Expression>) e -> el.getExpressions().set(0, e));
-			replace(left, e -> el.getExpressions().set(1, e));
-			func.setName("ARRAY_CONTAINS");
-			func.setParameters(el);
-			parentSet.accept(func);
+			parentSet.accept(arrayContains(ss, left));
 			replaced = true;
 			return;
+		}
+		// array @> ARRAY[value] -> ARRAY_CONTAINS(array, value)
+		if (be instanceof JsonOperator && right instanceof ArrayExpression &&
+				((JsonOperator) be).getStringExpression().equals("@>")) {
+			ArrayExpression array = (ArrayExpression) right;
+			if (array.getObjExpression().toString().equals("ARRAY")) {
+				parentSet.accept(arrayContains(left, array.getIndexExpression()));
+				replaced = true;
+				return;
+			}
 		}
 		if (be instanceof EqualsTo && right instanceof Function &&
 				((Function) right).getName().toUpperCase().equals("ANY")) {
@@ -608,13 +627,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				if (value == null) {
 					// value = ANY(array) -> ARRAY_CONTAINS(array, value)
 					// ANY(SubSelect) is parsed as AnyComparisonExpression
-					// if (!(exp0 instanceof SubSelect)) {
-					ExpressionList el = new ExpressionList(exp0, left);
-					replace(exp0, e -> el.getExpressions().set(0, e));
-					replace(left, e -> el.getExpressions().set(1, e));
-					func.setName("ARRAY_CONTAINS");
-					func.setParameters(el);
-					parentSet.accept(func);
+					parentSet.accept(arrayContains(exp0, left));
 				} else {
 					InExpression in = new InExpression(left, getExpressionList(value));
 					replace(left, in::setLeftExpression);
@@ -863,6 +876,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		PlainSelect ps = (PlainSelect) sb;
 		FromItem fi = ps.getFromItem();
+		// for dbForge
+		if (fi instanceof SubSelect &&
+				((SubSelect) fi).getAlias().getName().equals("PAGE_READ_T") &&
+				new Throwable().getStackTrace()[1].getMethodName().equals("getSQL")) {
+			// TODO use text representation in Paginal Mode
+		}
 		// for TestPgClients.testNavicat(), test case #3
 		if (fi instanceof SubJoin && fi.toString().equals("((pg_rewrite r " +
 					"JOIN pg_class c ON ((c.oid = r.ev_class))) " +
@@ -1027,7 +1046,9 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 			} else if (st instanceof Update) {
 				Update update = ((Update) st);
-				if (update.getReturningExpressionList() != null) {
+				if (update.isReturningAllColumns() ||
+						update.getReturningExpressionList() != null) {
+					update.setReturningAllColumns(false);
 					update.setReturningExpressionList(null);
 					replaced = true;
 					return update.toString();

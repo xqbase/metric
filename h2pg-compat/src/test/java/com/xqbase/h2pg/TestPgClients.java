@@ -1360,6 +1360,41 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testDbForge() throws SQLException {
+		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
+		int oid;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class " +
+				"WHERE relname = 'test2' ORDER BY relname")) {
+			rs.next();
+			oid = rs.getInt("oid");
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT c.attrelid, c.attname, " +
+				"format_type(c.atttypid, c.atttypmod) AS formattedtype, " +
+				"c.attnotnull, NULL AS collname, dv.adsrc, " +
+				"COALESCE(pk.contype, '') || COALESCE(uk.contype, '') AS contypes, pd.description, " +
+				"dv.adsrc IS NOT NULL AND dv.adsrc LIKE 'nextval(%)' AS autoinc, c.attndims " +
+				"FROM pg_attribute c " +
+				"LEFT JOIN pg_class pc ON c.attrelid = pc.oid " +
+				"LEFT JOIN pg_type tp ON tp.oid = c.atttypid " +
+				"LEFT JOIN pg_attrdef dv ON dv.adnum = c.attnum AND dv.adrelid = c.attrelid " +
+				"LEFT JOIN pg_constraint pk ON pk.conrelid = c.attrelid " +
+				"AND pk.contype = 'p' AND pk.conkey @> ARRAY[c.attnum] " +
+				"LEFT JOIN pg_constraint uk ON uk.conrelid = c.attrelid " +
+				"AND uk.contype = 'u' AND uk.conkey @> ARRAY[c.attnum] " +
+				"LEFT JOIN pg_description pd ON c.attrelid = pd.objoid AND pd.objsubid = c.attnum " +
+				"WHERE c.attnum >= 0 AND c.attisdropped IS FALSE AND c.attrelid IN (" + oid + ") " +
+				"ORDER BY pc.relname, c.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("attname"));
+			assertEquals("p", rs.getString("contypes"));
+			assertTrue(rs.next());
+			assertEquals("x2", rs.getString("attname"));
+			assertEquals("p", rs.getString("contypes"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +

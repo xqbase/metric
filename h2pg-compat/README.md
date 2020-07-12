@@ -98,9 +98,14 @@ Database Navigator plugin 3.2.0627 tested.
 
 TablePlus 3.6.3 tested.
 
-### ~dbForge Studio~
+### dbForge Studio
 
-dbForge Studio not supported.
+dbForge Studio 2.2.207 tested.
+
+Unsupported operations:
+
+- Edit table
+- Select `text` or `array` columns in non-paginal mode
 
 ### ~Toad Edge~
 
