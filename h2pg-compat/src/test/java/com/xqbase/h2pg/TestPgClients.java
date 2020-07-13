@@ -1395,6 +1395,16 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testTableau() throws SQLException {
+		stat.execute("set extra_float_digits = 2");
+		try (ResultSet rs = stat.executeQuery("show transaction_isolation")) {
+			assertTrue(rs.next());
+			assertEquals("read committed", rs.getString("transaction_isolation"));
+		}
+		stat.execute("set timezone to 'UTC'");
+	}
+
+	@Test
 	public void testJSqlParser() throws SQLException {
 		stat.execute("INSERT INTO test (x1) VALUES (2), (3), (4)");
 		try (ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test " +

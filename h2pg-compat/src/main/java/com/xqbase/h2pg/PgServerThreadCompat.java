@@ -53,6 +53,7 @@ import net.sf.jsqlparser.parser.StringProvider;
 import net.sf.jsqlparser.parser.TokenMgrException;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.statement.SetStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.insert.Insert;
@@ -116,6 +117,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private static final Column FALSE = new Column("FALSE");
 	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
+	private static final String NOOP = "SET NETWORK_TIMEOUT 0";
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
 		// "deferrable" and "tablespace" are keywords in JSqlParser
@@ -361,6 +363,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private boolean replaced = false;
 	private boolean anyArray = false;
+	private boolean paginal = false;
 
 	private Function arrayContains(Expression array, Expression value) {
 		ExpressionList el = new ExpressionList(array, value);
@@ -880,7 +883,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (fi instanceof SubSelect &&
 				((SubSelect) fi).getAlias().getName().equals("PAGE_READ_T") &&
 				new Throwable().getStackTrace()[1].getMethodName().equals("getSQL")) {
-			// TODO use text representation in Paginal Mode
+			paginal = true;
 		}
 		// for TestPgClients.testNavicat(), test case #3
 		if (fi instanceof SubJoin && fi.toString().equals("((pg_rewrite r " +
@@ -938,13 +941,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (sql.equals("RESET statement_timeout")) {
 			replaced = true;
-			return "SET NETWORK_TIMEOUT 0";
+			return NOOP;
 		}
 		// The result for `select oid,typname from pg_type` is different from PostgreSQL,
 		// which may lead `pg_fieldtype` crash. Just make it fail.
 		if (sql.equals("select oid,typname from pg_type")) {
 			replaced = true;
-			return "SET NETWORK_TIMEOUT 0";
+			return NOOP;
 		}
 		if (sql.equals("SELECT oid, nspname, nspname = ANY (current_schemas(true)) " +
 				"AS is_on_search_path, oid = pg_my_temp_schema() AS is_my_temp_schema, " +
@@ -960,6 +963,10 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (sql.startsWith("SET LOCAL join_collapse_limit=")) {
 			replaced = true;
 			return "SET join_collapse_limit=" + sql.substring(30);
+		}
+		if (sql.startsWith("set timezone to ")) {
+			replaced = true;
+			return NOOP;
 		}
 		if (sql.startsWith("SELECT n.nspname = ANY(current_schemas(true)), ")) {
 			// JSqlParser cannot parse SELECT a = b, ... Just replace:
@@ -1064,6 +1071,16 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				case "integer_datetimes":
 					replaced = true;
 					return "SELECT TRUE integer_datetimes";
+				case "transaction_isolation":
+					replaced = true;
+					return "SHOW TRANSACTION ISOLATION LEVEL";
+				default:
+				}
+			} else if (st instanceof SetStatement) {
+				switch (((SetStatement) st).getName()) {
+				case "extra_float_digits":
+					replaced = true;
+					return NOOP;
 				default:
 				}
 			}
@@ -1130,6 +1147,21 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		System.arraycopy(head, 0, data, initLen, 4);
 		read(data, initLen + 4, dataLen - 4);
 		switch (x) {
+		case 'B':
+			if (!paginal) {
+				break;
+			}
+			int z = findZero(data, 5, data.length) + 1;
+			z = findZero(data, z, data.length) + 1;
+			// TODO
+			// paramFormatCount (2)
+			// paramFormats (2n)
+			// paramCount (2)
+			// params ((4 + m) * n)
+			// resultFormatCount (2)
+			// resultFormats (2n)
+			paginal = false;
+			break;
 		case 'P':
 			int z1 = findZero(data, 5, data.length) + 1;
 			int z2 = findZero(data, z1, data.length);
@@ -1138,6 +1170,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 			Charset charset = (Charset) getEncoding.invoke(this);
 			replaced = false;
+			paginal = false;
 			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());
 			if (!replaced) {
 				break;
