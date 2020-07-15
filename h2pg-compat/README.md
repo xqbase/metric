@@ -104,8 +104,12 @@ dbForge Studio 2.2.207 tested.
 
 Unsupported operations:
 
-- Edit table
+- Data editing
 - Select `text` or `array` columns in non-paginal mode
+
+### Tableau
+
+Tableau 2020.2.2 tested via JDBC and ODBC.
 
 ### ~Toad Edge~
 

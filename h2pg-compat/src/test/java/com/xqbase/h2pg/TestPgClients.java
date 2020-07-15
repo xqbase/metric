@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -18,11 +19,14 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import org.h2.server.pg.PgServer;
 import org.h2.tools.Server;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.postgresql.jdbc.PgConnection;
 
 public class TestPgClients {
 	private Server server;
@@ -1359,6 +1363,28 @@ public class TestPgClients {
 		}
 	}
 
+	private static Set<?> supportedBinaryOids;
+
+	static {
+		try {
+			Field supportedBinaryOidsField = PgConnection.class.
+					getDeclaredField("SUPPORTED_BINARY_OIDS");
+			supportedBinaryOidsField.setAccessible(true);
+			supportedBinaryOids = (Set<?>) supportedBinaryOidsField.get(null);
+		} catch (ReflectiveOperationException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void addBinaryOid(int oid, boolean remove) {
+		if (remove) {
+			supportedBinaryOids.remove(Integer.valueOf(oid));
+		} else {
+			((Set<Integer>) supportedBinaryOids).add(Integer.valueOf(oid));
+		}
+	}
+
 	@Test
 	public void testDbForge() throws SQLException {
 		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
@@ -1392,6 +1418,30 @@ public class TestPgClients {
 			assertEquals("p", rs.getString("contypes"));
 			assertFalse(rs.next());
 		}
+
+		stat.execute("CREATE TABLE test3 (id INT PRIMARY KEY, x1 VARCHAR)");
+		stat.execute("INSERT INTO test3 (id, x1) VALUES (1, 'test')");
+
+		addBinaryOid(PgServer.PG_TYPE_VARCHAR, false);
+		try (
+			Connection conn1 = DriverManager.getConnection("jdbc:postgresql://" +
+					"localhost:5535/pgserver?prepareThreshold=-1", "sa", "sa");
+			Statement stat1 = conn1.createStatement();
+		) {
+			try (ResultSet rs = stat1.executeQuery("SELECT * FROM test3")) {
+				assertFalse(true);
+			} catch (SQLException e) {
+				assertEquals("HY000", e.getSQLState());
+			}
+			try (ResultSet rs = stat1.executeQuery("SELECT * FROM " +
+					"(SELECT * FROM test3) AS PAGE_READ_T LIMIT 1000")) {
+				assertTrue(rs.next());
+				assertEquals(1, rs.getInt("id"));
+				assertEquals("test", rs.getString("x1"));
+				assertFalse(rs.next());
+			}
+		}
+		addBinaryOid(PgServer.PG_TYPE_VARCHAR, true);
 	}
 
 	@Test
@@ -1401,7 +1451,7 @@ public class TestPgClients {
 			assertTrue(rs.next());
 			assertEquals("read committed", rs.getString("transaction_isolation"));
 		}
-		stat.execute("set timezone to 'UTC'");
+		stat.execute("SET TIMEZONE TO 'UTC'");
 	}
 
 	@Test

@@ -964,7 +964,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 			return "SET join_collapse_limit=" + sql.substring(30);
 		}
-		if (sql.startsWith("set timezone to ")) {
+		if (sql.startsWith("SET TIMEZONE TO ")) {
 			replaced = true;
 			return NOOP;
 		}
@@ -1147,19 +1147,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		System.arraycopy(head, 0, data, initLen, 4);
 		read(data, initLen + 4, dataLen - 4);
 		switch (x) {
-		case 'B':
+		case 'E':
 			if (!paginal) {
 				break;
 			}
-			int z = findZero(data, 5, data.length) + 1;
-			z = findZero(data, z, data.length) + 1;
 			// TODO
-			// paramFormatCount (2)
-			// paramFormats (2n)
-			// paramCount (2)
-			// params ((4 + m) * n)
-			// resultFormatCount (2)
-			// resultFormats (2n)
+			// Portal p = portals.get(name);
+			// if p.resultColumnFormat = {1}:
+			// set p.resultColumnFormat by p.prep.prep.getMetaData()
 			paginal = false;
 			break;
 		case 'P':
