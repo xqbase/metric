@@ -11,6 +11,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
+import java.sql.PreparedStatement;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -19,6 +22,9 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import org.h2.command.Parser;
+import org.h2.jdbc.JdbcResultSetMetaData;
+import org.h2.result.ResultInterface;
+import org.h2.server.pg.PgServer;
 import org.h2.server.pg.PgServerThread;
 import org.h2.server.pg.PgServerThreadEx;
 import org.h2.util.Bits;
@@ -77,13 +83,19 @@ import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 
 public class PgServerThreadCompat extends PgServerThreadEx {
-	private static Field initDone, out, dataInRaw, stop;
+	private static Field initDone, out, dataInRaw, stop, portalsField;
+	private static Field formatField, portalPrep, preparedPrep, resultField;
 	private static Method process, getEncoding;
 
-	private static Field getField(String name) throws ReflectiveOperationException {
-		Field field = PgServerThread.class.getDeclaredField(name);
+	private static Field getField(Class<?> clazz,
+			String name) throws ReflectiveOperationException {
+		Field field = clazz.getDeclaredField(name);
 		field.setAccessible(true);
 		return field;
+	}
+
+	private static Field getField(String name) throws ReflectiveOperationException {
+		return getField(PgServerThread.class, name);
 	}
 
 	private static Method getMethod(String name, Class<?>... paramTypes)
@@ -228,6 +240,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			out = getField("out");
 			dataInRaw = getField("dataInRaw");
 			stop = getField("stop");
+			portalsField = getField("portals");
+			Class<?> portalClass = Class.forName("org.h2.server.pg.PgServerThread$Portal");
+			formatField = getField(portalClass, "resultColumnFormat");
+			portalPrep = getField(portalClass, "prep");
+			preparedPrep = getField(Class.
+					forName("org.h2.server.pg.PgServerThread$Prepared"), "prep");
+			resultField = getField(JdbcResultSetMetaData.class, "result");
 			process = getMethod("process");
 			getEncoding = getMethod("getEncoding");
 			Field tokensField = Parser.class.getDeclaredField("TOKENS");
@@ -1104,11 +1123,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private PgServerCompat server;
 	private InputStream ins;
 	private OutputStream outs;
+	private Map<?, ?> portals;
 
 	public PgServerThreadCompat(Socket socket, PgServerCompat server) {
 		super(socket, server);
 		this.socket = socket;
 		this.server = server;
+		try {
+			portals = (Map<?, ?>) portalsField.get(this);
+		} catch (ReflectiveOperationException e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 	private void read(byte[] b, int off, int len) throws IOException {
@@ -1146,24 +1171,60 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		System.arraycopy(head, 0, data, initLen, 4);
 		read(data, initLen + 4, dataLen - 4);
+		Charset charset = (Charset) getEncoding.invoke(this);
 		switch (x) {
 		case 'E':
 			if (!paginal) {
 				break;
 			}
-			// TODO
-			// Portal p = portals.get(name);
-			// if p.resultColumnFormat = {1}:
-			// set p.resultColumnFormat by p.prep.prep.getMetaData()
 			paginal = false;
+			int z1 = findZero(data, 5, data.length);
+			String name = new String(data, 5, z1 - 5, charset);
+			Object portal = portals.get(name);
+			if (portal == null) {
+				break;
+			}
+			ResultSetMetaData rsmd;
+			int columnCount;
+			try {
+				rsmd = ((PreparedStatement) preparedPrep.
+						get(portalPrep.get(portal))).getMetaData();
+				columnCount = rsmd.getColumnCount();
+			} catch (SQLException e) {
+				server.traceError(e);
+				break;
+			}
+			int[] resultColumnFormat = new int[columnCount];
+			formatField.set(portal, resultColumnFormat);
+			ResultInterface result = (ResultInterface) resultField.get(rsmd);
+			for (int i = 0; i < columnCount; i ++) {
+				// See PgServerThread.writeDataColumn(), binary part
+				switch (PgServer.convertType(result.getColumnType(i))) {
+	            case PgServer.PG_TYPE_INT2:
+	            case PgServer.PG_TYPE_INT4:
+	            case PgServer.PG_TYPE_INT8:
+	            case PgServer.PG_TYPE_FLOAT4:
+	            case PgServer.PG_TYPE_FLOAT8:
+	            case PgServer.PG_TYPE_BYTEA:
+	            case PgServer.PG_TYPE_DATE:
+	            case PgServer.PG_TYPE_TIME:
+	            case PgServer.PG_TYPE_TIMETZ:
+	            case PgServer.PG_TYPE_TIMESTAMP:
+	            case PgServer.PG_TYPE_TIMESTAMPTZ:
+	            	resultColumnFormat[i] = 1;
+	            	break;
+				default:
+	            	resultColumnFormat[i] = 0;
+				}
+			}
+			replaced = true;
 			break;
 		case 'P':
-			int z1 = findZero(data, 5, data.length) + 1;
+			z1 = findZero(data, 5, data.length) + 1;
 			int z2 = findZero(data, z1, data.length);
 			if (z1 == z2) {
 				break;
 			}
-			Charset charset = (Charset) getEncoding.invoke(this);
 			replaced = false;
 			paginal = false;
 			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());
@@ -1181,7 +1242,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			break;
 		case 'Q':
 			z1 = findZero(data, 5, data.length);
-			charset = (Charset) getEncoding.invoke(this);
 			replaced = false;
 			StringBuilder sb = new StringBuilder();
 			try (ScriptReader reader = new ScriptReader(new

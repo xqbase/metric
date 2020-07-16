@@ -105,7 +105,8 @@ dbForge Studio 2.2.207 tested.
 Unsupported operations:
 
 - Data editing
-- Select `text` or `array` columns in non-paginal mode
+- Select `TEXT` columns in non-paginal mode
+- Select `REAL` or `ARRAY` columns in paginal or non-paginal mode
 
 ### Tableau
 
