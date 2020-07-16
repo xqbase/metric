@@ -1200,21 +1200,21 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			for (int i = 0; i < columnCount; i ++) {
 				// See PgServerThread.writeDataColumn(), binary part
 				switch (PgServer.convertType(result.getColumnType(i))) {
-	            case PgServer.PG_TYPE_INT2:
-	            case PgServer.PG_TYPE_INT4:
-	            case PgServer.PG_TYPE_INT8:
-	            case PgServer.PG_TYPE_FLOAT4:
-	            case PgServer.PG_TYPE_FLOAT8:
-	            case PgServer.PG_TYPE_BYTEA:
-	            case PgServer.PG_TYPE_DATE:
-	            case PgServer.PG_TYPE_TIME:
-	            case PgServer.PG_TYPE_TIMETZ:
-	            case PgServer.PG_TYPE_TIMESTAMP:
-	            case PgServer.PG_TYPE_TIMESTAMPTZ:
-	            	resultColumnFormat[i] = 1;
-	            	break;
+				case PgServer.PG_TYPE_INT2:
+				case PgServer.PG_TYPE_INT4:
+				case PgServer.PG_TYPE_INT8:
+				case PgServer.PG_TYPE_FLOAT4:
+				case PgServer.PG_TYPE_FLOAT8:
+				case PgServer.PG_TYPE_BYTEA:
+				case PgServer.PG_TYPE_DATE:
+				case PgServer.PG_TYPE_TIME:
+				case PgServer.PG_TYPE_TIMETZ:
+				case PgServer.PG_TYPE_TIMESTAMP:
+				case PgServer.PG_TYPE_TIMESTAMPTZ:
+					resultColumnFormat[i] = 1;
+					break;
 				default:
-	            	resultColumnFormat[i] = 0;
+					resultColumnFormat[i] = 0;
 				}
 			}
 			replaced = true;

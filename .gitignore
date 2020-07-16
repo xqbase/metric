@@ -31,4 +31,5 @@ hs_err_pid*
 /dashboard-sql/target
 /h2pg-compat/target
 /migrate/target
+/p6spy2/target
 /test/target
