@@ -572,9 +572,16 @@ public class TestPgClients {
 			assertEquals("INTEGER", rs.getString("full_type"));
 			assertFalse(rs.next());
 		}
+		int oid;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+			rs.next();
+			oid = rs.getInt("oid");
+		}
 		try (ResultSet rs = stat.executeQuery("SELECT relname, indisunique::int, " +
 				"indisprimary::int, indkey, indoption , (indpred IS NOT NULL)::int as indispartial " +
-				"FROM pg_index i, pg_class ci WHERE i.indrelid = 11 AND ci.oid = i.indexrelid")) {
+				"FROM pg_index i, pg_class ci WHERE i.indrelid = " + oid + " AND ci.oid = i.indexrelid")) {
+			assertTrue(rs.next());
+			assertEquals("{1}", rs.getString("indkey"));
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT conname, condeferrable::int AS deferrable, " +

@@ -56,7 +56,7 @@ public class Driver implements java.sql.Driver {
 	private static Set<String> excludedClasses = new HashSet<>(Arrays.
 			asList("com.xqbase.p6spy2.Driver", "com.xqbase.p6spy2.", "com.sun.proxy."));
 
-	private static void log(Level l, String s, Throwable t) {
+	private static void log(Level l, CharSequence s, Throwable t) {
 		String sourceClass = "", sourceMethod = "";
 		for (StackTraceElement ste : new Throwable().getStackTrace()) {
 			String cls = ste.getClassName();
@@ -67,7 +67,7 @@ public class Driver implements java.sql.Driver {
 				break;
 			}
 		}
-		logger.logp(l, sourceClass, sourceMethod, s, t);
+		logger.logp(l, sourceClass, sourceMethod, s.toString(), t);
 	}
 
 	private static Object invoke(Object delegate,
@@ -81,26 +81,28 @@ public class Driver implements java.sql.Driver {
 						isAssignableFrom(delegate.getClass()));
 			}
 		}
-		String s;
-		if (args == null) {
-			s = "()";
-		} else {
-			s = Arrays.asList(args).toString();
-			s = "(" + s.substring(1, s.length() - 1) + ")";
+		StringBuilder sb = new StringBuilder(delegate.getClass().getName()).
+				append('.').append(method.getName()).append('(');
+		if (args != null && args.length > 0) {
+			for (Object arg : args) {
+				sb.append(arg instanceof String[] ?
+						Arrays.asList((String[]) arg) : arg).append(", ");
+			}
+			sb.setLength(sb.length() - 2);
 		}
-		s = delegate.getClass().getName() + "." + method.getName() + s;
+		sb.append(')');
 		Object value;
 		try {
 			value = method.invoke(delegate, args);
 		} catch (InvocationTargetException e) {
 			Throwable t = e.getTargetException();
-			log(Level.SEVERE, s, t);
+			log(Level.SEVERE, sb, t);
 			throw t;
 		}
 		if (method.getReturnType() != void.class) {
-			s += " -> " + value;
+			sb.append(" -> ").append(value);
 		}
-		log(Level.INFO, s, null);
+		log(Level.INFO, sb, null);
 		if (!(value instanceof Wrapper) || value instanceof Wrapped) {
 			return value;
 		}
@@ -119,16 +121,16 @@ public class Driver implements java.sql.Driver {
 			return null;
 		}
 		String url_ = "jdbc:" + url.substring(PREFIX.length());
+		StringBuilder sb = new StringBuilder("java.sql.DriverManager.getConnection(").
+				append(url_).append(", ").append(info).append(')');
 		Connection delegate;
 		try {
 			delegate = DriverManager.getConnection(url_, info);
 		} catch (SQLException | RuntimeException e) {
-			log(Level.SEVERE, url_ +
-					(info == null || info.isEmpty() ? "" : ", " + info), e);
+			log(Level.SEVERE, sb, e);
 			throw e;
 		}
-		log(Level.INFO, "DriverManager.getConnection(" +
-				url_ + ", " + info + ") -> " + delegate, null);
+		log(Level.INFO, sb.append(" -> ").append(delegate), null);
 		return (Connection) Proxy.
 				newProxyInstance(Driver.class.getClassLoader(),
 				new Class[] {Connection.class, Wrapper.class},
