@@ -15,6 +15,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -110,6 +111,17 @@ public class TestPgClients {
 		}
 		try (ResultSet rs = dmd.getPrimaryKeys(null, null, "test2")) {
 			rsConsumer.accept(rs);
+		}
+
+		try (ResultSet rs = dmd.getImportedKeys(null, null, "test")) {
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = dmd.getVersionColumns(null, null, "test")) {
+			assertTrue(rs.next());
+			assertEquals("ctid", rs.getString("COLUMN_NAME"));
+			assertEquals(Types.OTHER, rs.getInt("DATA_TYPE"));
+			assertEquals("tid", rs.getString("TYPE_NAME"));
+			assertFalse(rs.next());
 		}
 	}
 
@@ -1378,6 +1390,24 @@ public class TestPgClients {
 				"AND fkn.nspname = 'public'  AND fkc.relname = 'test' " +
 				"ORDER BY pkn.nspname, pkc.relname, conkeyseq")) {
 			assertFalse(rs.next());
+		}
+		int oid;
+		try (ResultSet rs = stat.executeQuery("SELECT oid FROM pg_class WHERE relname = 'test'")) {
+			rs.next();
+			oid = rs.getInt("oid");
+		}
+		try (ResultSet rs = stat.executeQuery("select a.attname, " +
+				"a.atttypid from pg_index i, pg_attribute a " +
+				"where indrelid=" + oid + " and indnatts=1 and indisunique " +
+				"and indexprs is null and indpred is null " +
+				"and i.indrelid = a.attrelid and a.attnum=i.indkey[0] " +
+				"and attnotnull and atttypid in (23, 26)")) {
+			assertFalse(rs.next());
+			/*
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("attname"));
+			assertFalse(rs.next());
+			*/
 		}
 	}
 

@@ -158,6 +158,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.10
 		" (information_schema._pg_expandarray(i.indkey)).n ",
 		" result.A_ATTNUM = (result.KEYS).x ",
+		// for DatabaseMetaData.getVersionColumns() in PgJDBC
+		" typinput='array_in'::regproc",
 		// for Postico
 		", ARRAY(SELECT pg_opclass.opcname FROM generate_series(0, indnatts-1) AS t(i) " +
 		"LEFT JOIN pg_opclass ON pg_opclass.oid = indclass[i]) AS opclasses, ",
@@ -191,6 +193,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		" i.keys_x ",
 		" i.keys_n ",
 		" result.A_ATTNUM = result.keys_x ",
+		" FALSE",
 		", NULL opclasses, ",
 		", (CASE WHEN c.reltriggers > 0 THEN TRUE ELSE FALSE END) AS hastriggers, ",
 		", (CASE WHEN (SELECT count(*) FROM pg_inherits WHERE inhparent = c.oid) > 0 " +
@@ -282,7 +285,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, NULL proargnames, " +
 				"NULL prolang, NULL proretset, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
-		addColumns("pg_settings", "'' source");
 		addColumns("pg_type", "FALSE typbyval, NULL typcategory, NULL typcollation, " +
 				"NULL typdefault, 0 typndims, 0 typarray, ${owner} typowner, " +
 				"NULL typalign, NULL typstorage");
@@ -306,7 +308,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 blks_read, 0 blks_hit, '' datname");
 		addEmptyTable("pg_trigger", "0 oid, '' tgname, 0 tableoid, 0 tgfoid, 0 tgrelid, " +
 				"0 tgconstrrelid, '' tgenabled, FALSE tgisconstraint, FALSE tgisinternal, " +
-				"FALSE tgdeferrable, FALSE tginitdeferred");
+				"FALSE tgdeferrable, FALSE tginitdeferred, '' tgconstrname, 0 tgnargs, NULL tgargs");
 		addEmptyTable("information_schema.role_table_grants", "'' grantor, '' grantee, " +
 				"'' table_schema, '' table_name, '' privilege_type, " +
 				"FALSE is_grantable, FALSE with_hierarchy");
@@ -332,6 +334,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
 				"LEFT JOIN pg_tablespace t ON t.oid = i.reltablespace " +
 				"WHERE c.relkind IN ('r', 'm', 'p') AND i.relkind IN ('i', 'I')");
+		addTable("pg_settings", "SELECT name, setting, '' source FROM pg_settings " +
+				"UNION ALL SELECT 'max_index_keys', '32', ''");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
@@ -365,7 +369,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addFunction("pg_size_pretty", new StringValue("0"));
 		addFunction("array_lower", new LongValue(1));
 		addFunction("current_schemas", new Column("ARRAY['public']"));
-		// addFunction("pg_listening_channels", PG_LISTENING_CHANNELS);
 		addFunction("row_to_json", new StringValue("{}"));
 	}
 
@@ -553,9 +556,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		if (exp instanceof ArrayExpression) {
 			ArrayExpression ae = (ArrayExpression) exp;
 			// indkey in PostgreSQL is int2vector (0-base), but here 1-base
-			if (ae.toString().equals("i.indkey[ia.attnum - 1]")) {
-				ae.setIndexExpression(new Column("ia.attnum"));
-				replaced = true;
+			if (ae.getObjExpression().toString().equals("i.indkey")) {
+				Expression ie = ae.getIndexExpression();
+				if (ie.toString().equals("ia.attnum - 1")) {
+					ae.setIndexExpression(new Column("ia.attnum"));
+					replaced = true;
+				} else if (ie instanceof LongValue) {
+					// just set i.indkey[0] to -1, otherwise ODBC will use ctid
+					// ae.setIndexExpression(new LongValue(((LongValue) ie).getValue() + 1));
+					parentSet.accept(new LongValue(-1));
+					replaced = true;
+				}
 			}
 			replace(ae.getObjExpression(), ae::setObjExpression);
 			replace(ae.getIndexExpression(), ae::setIndexExpression);

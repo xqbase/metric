@@ -76,9 +76,25 @@ DbVisualizer Free 11.0.3 tested.
 
 LibreOffice Base 6.3.6.2 tested.
 
+Supported operations:
+
+- Edit in Table Data View if connection type is JDBC
+
 Unsupported operations:
 
-- Edit in Table Data View
+- Edit in Table Data View if connection type is PostgreSQL or ODBC
+
+### OpenOffice Base
+
+OpenOffice Base 4.1.7 tested.
+
+Supported operations:
+
+- Edit in Table Data View if connection type is JDBC
+
+Unsupported operations:
+
+- Edit in Table Data View if connection type is ODBC
 
 ### Navicat
 
@@ -112,7 +128,14 @@ Unsupported operations:
 
 Tableau 2020.2.2 tested via JDBC and ODBC.
 
-Connection via PostgreSQL directly is not supported.
+Supported connection types:
+
+- JDBC
+- ODBC
+
+Unsupported connection type:
+
+- PostgreSQL
 
 ### ~Toad Edge~
 
