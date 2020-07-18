@@ -62,9 +62,11 @@ import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.SetStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.create.table.CreateTable;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.GroupByElement;
 import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.OrderByElement;
 import net.sf.jsqlparser.statement.select.PlainSelect;
@@ -550,13 +552,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (exp instanceof ArrayExpression) {
 			ArrayExpression ae = (ArrayExpression) exp;
+			// indkey in PostgreSQL is int2vector (0-base), but here 1-base
+			if (ae.toString().equals("i.indkey[ia.attnum - 1]")) {
+				ae.setIndexExpression(new Column("ia.attnum"));
+				replaced = true;
+			}
 			replace(ae.getObjExpression(), ae::setObjExpression);
 			replace(ae.getIndexExpression(), ae::setIndexExpression);
 			return;
 		}
 		if (exp instanceof SubSelect) {
 			SubSelect ss = (SubSelect) exp;
-			replace(ss.getSelectBody(), ss::setSelectBody);
+			replace(ss.getSelectBody(), ss::setSelectBody, null);
 			return;
 		}
 		if (exp instanceof ExistsExpression) {
@@ -594,7 +601,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (exp instanceof AnyComparisonExpression) {
 			AnyComparisonExpression ace = (AnyComparisonExpression) exp;
-			replace((Expression) ace.getSubSelect(), null);
+			replace(ace.getSubSelect(), null);
 			return;
 		}
 		if (!(exp instanceof BinaryExpression)) {
@@ -663,7 +670,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		replace(right, be::setRightExpression);
 	}
 
-	private void replace(FromItem fi, Consumer<FromItem> parentSet) {
+	private void replace(FromItem fi, Consumer<FromItem> parentSet, PlainSelect parent) {
 		if (fi instanceof Table) {
 			Table table = (Table) fi;
 			String name = table.getFullyQualifiedName();
@@ -692,82 +699,105 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (fi instanceof SubSelect) {
 			SubSelect ss = (SubSelect) fi;
-			replace(ss.getSelectBody(), ss::setSelectBody);
+			replace(ss.getSelectBody(), ss::setSelectBody, null);
 			return;
 		}
-		if (fi instanceof SubJoin) {
-			SubJoin si = (SubJoin) fi;
-			FromItem left = si.getLeft();
-			List<Join> joins = si.getJoinList();
-			if (joins != null) {
-				for (Join join : joins) {
-					replace(join.getRightItem(), join::setRightItem);
-					replace(join.getOnExpression(), join::setOnExpression);
-				}
+		if (fi instanceof TableFunction) {
+			TableFunction tf = (TableFunction) fi;
+			Function func = tf.getFunction();
+			if (func.getName().equals("pg_get_keywords")) {
+				parentSet.accept(pgGetKeywords);
+				replaced = true;
+				return;
 			}
-			switch (left.toString()) {
-			case "pg_inherits i":
-				Alias alias = si.getAlias();
-				if (alias == null || !alias.getName().equals("i2")) {
-					break;
+			replace(func, exp -> {
+				if (exp instanceof Function) {
+					tf.setFunction((Function) exp);
+				} else {
+					PlainSelect ps1 = new PlainSelect();
+					ps1.setSelectItems(Arrays.asList(new SelectExpressionItem(exp)));
+					SubSelect ss = new SubSelect();
+					ss.setSelectBody(ps1);
+					parentSet.accept(ss);
 				}
-				// for TestPgClients.testNavicat(), test case #2
-				PlainSelect ps = new PlainSelect();
-				ps.setFromItem(left);
-				replace(left, ps::setFromItem);
-				ps.setSelectItems(Arrays.asList(
-						new SelectExpressionItem(new Column("nspname")),
-						new SelectExpressionItem(new Column("relname")),
-						new SelectExpressionItem(new Column("inhrelid"))));
-				ps.setJoins(joins);
+			});
+			return;
+		}
+		if (!(fi instanceof SubJoin)) {
+			return;
+		}
+		SubJoin sj = (SubJoin) fi;
+		FromItem left = sj.getLeft();
+		List<Join> joins = sj.getJoinList();
+		if (joins != null) {
+			// for TestPgClients.testTableau(), test case #4
+			if (parent != null && joins.size() == 1 && joins.get(0).toString().
+					equals("LEFT OUTER JOIN pg_catalog.pg_constraint cn " +
+					"ON cn.conrelid = ref.confrelid AND cn.contype = 'p'")) {
 				SubSelect ss = new SubSelect();
-				ss.setAlias(alias);
-				ss.setSelectBody(ps);
-				parentSet.accept(ss);
+				ss.setSelectBody(select("SELECT *, NULL confupdtype, NULL confdeltype, " +
+						"FALSE condeferrable, FALSE condeferred, 0 i FROM pg_constraint"));
+				ss.setAlias(new Alias("ref"));
+				// parentSet.accept(ss);
+				parent.setFromItem(ss);
+				joins = new ArrayList<>();
+				joins.add(join("pg_namespace", "n1"));
+				joins.add(join("pg_namespace", "n2"));
+				joins.add(join("pg_class", "c1"));
+				joins.add(join("pg_class", "c2"));
+				joins.add(join("pg_attribute", "a1"));
+				joins.add(join("pg_attribute", "a2"));
+				joins.add(join("pg_constraint", "cn"));
+				parent.setJoins(joins);
+				parent.setWhere(new Column("FALSE"));
 				replaced = true;
-				break;
-			case "pg_depend":
-				// JOIN (pg_depend JOIN pg_class cs ON ...) ->
-				// JOIN (SELECT * FROM (SELECT ... WHERE FALSE) pg_depend JOIN ...) cs
-				ps = new PlainSelect();
-				ps.setFromItem(left);
-				replace(left, ps::setFromItem);
-				ps.setSelectItems(Arrays.asList(new AllColumns()));
-				ps.setJoins(joins);
-				ss = new SubSelect();
-				ss.setAlias(new Alias("cs"));
-				ss.setSelectBody(ps);
-				parentSet.accept(ss);
-				replaced = true;
-				break;
-			default:
-				// H2 cannot use alias in sub-select in join, so keep sub-join and
-				// avoid extracting table to sub-select in this case
-				// replace(si.getLeft(), si::setLeft);
+				return;
 			}
-			return;
+			for (Join join : joins) {
+				replace(join.getRightItem(), join::setRightItem, null);
+				replace(join.getOnExpression(), join::setOnExpression);
+			}
 		}
-		if (!(fi instanceof TableFunction)) {
-			return;
-		}
-		TableFunction ti = (TableFunction) fi;
-		Function func = ti.getFunction();
-		if (func.getName().equals("pg_get_keywords")) {
-			parentSet.accept(pgGetKeywords);
+		switch (left.toString()) {
+		case "pg_inherits i":
+			Alias alias = sj.getAlias();
+			if (alias == null || !alias.getName().equals("i2")) {
+				break;
+			}
+			// for TestPgClients.testNavicat(), test case #2
+			PlainSelect ps = new PlainSelect();
+			ps.setFromItem(left);
+			replace(left, ps::setFromItem, null);
+			ps.setSelectItems(Arrays.asList(
+					new SelectExpressionItem(new Column("nspname")),
+					new SelectExpressionItem(new Column("relname")),
+					new SelectExpressionItem(new Column("inhrelid"))));
+			ps.setJoins(joins);
+			SubSelect ss = new SubSelect();
+			ss.setAlias(alias);
+			ss.setSelectBody(ps);
+			parentSet.accept(ss);
 			replaced = true;
-			return;
+			break;
+		case "pg_depend":
+			// JOIN (pg_depend JOIN pg_class cs ON ...) ->
+			// JOIN (SELECT * FROM (SELECT ... WHERE FALSE) pg_depend JOIN ...) cs
+			ps = new PlainSelect();
+			ps.setFromItem(left);
+			replace(left, ps::setFromItem, null);
+			ps.setSelectItems(Arrays.asList(new AllColumns()));
+			ps.setJoins(joins);
+			ss = new SubSelect();
+			ss.setAlias(new Alias("cs"));
+			ss.setSelectBody(ps);
+			parentSet.accept(ss);
+			replaced = true;
+			break;
+		default:
+			// H2 cannot use alias in sub-select in join, so keep sub-join and
+			// avoid extracting table to sub-select in this case
+			// replace(left, si::setLeft);
 		}
-		replace(func, exp -> {
-			if (exp instanceof Function) {
-				ti.setFunction((Function) exp);
-			} else {
-				PlainSelect ps1 = new PlainSelect();
-				ps1.setSelectItems(Arrays.asList(new SelectExpressionItem(exp)));
-				SubSelect ss = new SubSelect();
-				ss.setSelectBody(ps1);
-				parentSet.accept(ss);
-			}
-		});
 	}
 
 	private void replace(List<SelectItem> sis, Consumer<SelectBody> parentSet, PlainSelect ps) {
@@ -827,14 +857,24 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (exp instanceof Function && ps != null) {
 				switch (((Function) exp).getName()) {
 				case "generate_series":
-					if (ps.getSelectItems().size() == 1 && ps.getFromItem() == null) {
-						sei.setExpression(new Column("\"X\""));
-						TableFunction tf = new TableFunction();
-						tf.setFunction((Function) exp);
-						replace(exp, null);
+					sei.setExpression(new Column("\"X\""));
+					TableFunction tf = new TableFunction();
+					tf.setFunction((Function) exp);
+					replace(exp, null);
+					if (ps.getFromItem() == null) {
 						ps.setFromItem(tf);
-						replaced = true;
+					} else {
+						Join join = new Join();
+						join.setRightItem(tf);
+						join.setSimple(true);
+						List<Join> joins = ps.getJoins();
+						if (joins == null) {
+							ps.setJoins(Arrays.asList(join));
+						} else {
+							joins.add(join);
+						}
 					}
+					replaced = true;
 					break;
 				case "pg_listening_channels":
 					sei.setExpression(new NullValue());
@@ -859,7 +899,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
-	private void replace(SelectBody sb, Consumer<SelectBody> parentSet) {
+	private void replace(SelectBody sb, Consumer<SelectBody> parentSet,
+			Consumer<Statement> parentParentSet) {
 		if (sb instanceof SetOperationList) {
 			SetOperationList sol = (SetOperationList) sb;
 			boolean countOnly = true;
@@ -870,7 +911,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					countOnly = false;
 				}
 				int i_ = i;
-				replace(sbi, e -> sbs.set(i_, e));
+				replace(sbi, e -> sbs.set(i_, e), null);
 			}
 			if (countOnly) {
 				// SELECT COUNT(*) FROM ... UNION SELECT COUNT(*) FROM ... ->
@@ -886,7 +927,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		if (sb instanceof WithItem) {
 			WithItem wi = (WithItem) sb;
-			replace(wi.getSelectBody(), wi::setSelectBody);
+			replace(wi.getSelectBody(), wi::setSelectBody, null);
 			List<SelectItem> sis = wi.getWithItemList();
 			if (sis != null) {
 				replace(wi.getWithItemList(), parentSet, null);
@@ -899,10 +940,12 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		PlainSelect ps = (PlainSelect) sb;
 		FromItem fi = ps.getFromItem();
 		// for dbForge
-		if (fi instanceof SubSelect &&
-				((SubSelect) fi).getAlias().getName().equals("PAGE_READ_T") &&
-				new Throwable().getStackTrace()[1].getMethodName().equals("getSQL")) {
-			paginal = true;
+		if (fi instanceof SubSelect) {
+			Alias alias = ((SubSelect) fi).getAlias();
+			if (alias != null && alias.getName().equals("PAGE_READ_T") &&
+					new Throwable().getStackTrace()[1].getMethodName().equals("getSQL")) {
+				paginal = true;
+			}
 		}
 		// for TestPgClients.testNavicat(), test case #3
 		if (fi instanceof SubJoin && fi.toString().equals("((pg_rewrite r " +
@@ -919,7 +962,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			joins.add(join("pg_namespace", "n"));
 			replaced = true;
 		}
-		replace(fi, ps::setFromItem);
+		replace(fi, ps::setFromItem, ps);
 		boolean[] ret = {false};
 		replace(ps.getSelectItems(), e -> {
 			parentSet.accept(e);
@@ -931,8 +974,33 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		List<Join> joins = ps.getJoins();
 		if (joins != null) {
 			for (Join join : ps.getJoins()) {
-				replace(join.getRightItem(), join::setRightItem);
+				replace(join.getRightItem(), join::setRightItem, null);
 				replace(join.getOnExpression(), join::setOnExpression);
+			}
+		}
+		// GROUP BY <number> -> GROUP BY <select-items>
+		GroupByElement gbe = ps.getGroupBy();
+		if (gbe != null) {
+			List<SelectItem> sis = ps.getSelectItems();
+			List<Expression> gbes = gbe.getGroupByExpressions();
+			for (int i = 0; i < gbes.size(); i ++) {
+				Expression e = gbes.get(i);
+				if (!(e instanceof LongValue)) {
+					continue;
+				}
+				int j = (int) ((LongValue) e).getValue() - 1;
+				if (j < 0 || j >= sis.size()) {
+					continue;
+				}
+				SelectItem si = sis.get(j);
+				if (!(si instanceof SelectExpressionItem)) {
+					continue;
+				}
+				SelectExpressionItem sei = (SelectExpressionItem) si;
+				Expression gb = sei.getAlias() == null ? sei.getExpression() :
+						new Column(sei.getAlias().getName());
+				gbes.set(j, gb);
+				replaced = true;
 			}
 		}
 		// ORDER BY (SELECT ...) -> ORDER BY 1
@@ -948,6 +1016,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 		}
 		replace(ps.getWhere(), ps::setWhere);
+		// INTO
+		List<Table> its = ps.getIntoTables();
+		if (its != null && its.size() == 1) {
+			ps.setIntoTables(null);
+			Select select = new Select();
+			select.setSelectBody(sb);
+			Insert insert = new Insert();
+			insert.setTable(its.get(0));
+			insert.setUseValues(false);
+			insert.setSelect(select);
+			parentParentSet.accept(insert);
+			replaced = true;
+		}
 	}
 
 	private String getSQL(String s) {
@@ -1047,12 +1128,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			Statement st = parser.Statement();
 			if (st instanceof Select) {
 				Select select = (Select) st;
-				replace(select.getSelectBody(), select::setSelectBody);
+				Statement[] retSt = {null};
+				replace(select.getSelectBody(),
+						select::setSelectBody, ret -> retSt[0] = ret);
+				if (retSt[0] != null) {
+					replaced = true;
+					return retSt[0].toString();
+				}
 				List<WithItem> wis = select.getWithItemsList();
 				if (wis != null) {
 					for (int i = 0; i < wis.size(); i ++) {
 						int i_ = i;
-						replace(wis.get(i), e -> wis.set(i_, (WithItem) e));
+						replace(wis.get(i), e -> wis.set(i_, (WithItem) e), null);
 					}
 				}
 				if (replaced) {
@@ -1101,6 +1188,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					replaced = true;
 					return NOOP;
 				default:
+				}
+			} else if (st instanceof CreateTable) {
+				CreateTable ct = (CreateTable) st;
+				List<?> tableOptions = ct.getTableOptionsStrings();
+				if (tableOptions != null && (tableOptions.remove("PRESERVE") |
+						tableOptions.remove("ROWS"))) {
+					replaced = true;
+					return ct.toString();
 				}
 			}
 		} catch (ParseException | TokenMgrException e) {

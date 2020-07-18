@@ -1030,6 +1030,7 @@ public class TestPgClients {
 
 	@Test
 	public void testNavicat() throws SQLException {
+		// #1
 		try (ResultSet rs = stat.executeQuery("SELECT COUNT(*) FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
 				"WHERE c.relkind = ANY ('{r,v,m}'::char[]) UNION " +
@@ -1049,6 +1050,7 @@ public class TestPgClients {
 			assertEquals(0, rs.getInt(1));
 			assertFalse(rs.next());
 		}
+		// #2
 		try (ResultSet rs = stat.executeQuery("SELECT c.oid, n.nspname AS schemaname, " +
 				"c.relname AS tablename, c.relacl, pg_get_userbyid(c.relowner) AS tableowner, " +
 				"obj_description(c.oid) AS description, c.relkind, ci.relname As cluster, " +
@@ -1070,6 +1072,7 @@ public class TestPgClients {
 			assertNotNull(rs.getString("cluster"));
 			assertFalse(rs.next());
 		}
+		// #3
 		try (ResultSet rs = stat.executeQuery("SELECT n.nspname AS rule_schema, " +
 				"c.relname, r.rulename, r.oid, r.ev_type, r.is_instead, " +
 				"pg_get_ruledef(r.oid) AS definition, obj_description(r.oid) AS comment " +
@@ -1079,6 +1082,7 @@ public class TestPgClients {
 				"AND (c.relname='test') ORDER BY c.relname, r.oid ASC")) {
 			assertFalse(rs.next());
 		}
+		// #4
 		try (ResultSet rs = stat.executeQuery("SELECT t.oid AS oid, " +
 				"(n.nspname)::information_schema.sql_identifier AS trigger_schema, " +
 				"(t.tgname)::information_schema.sql_identifier AS trigger_name, " +
@@ -1117,6 +1121,7 @@ public class TestPgClients {
 				"ORDER BY c.relname, t.tgname ASC")) {
 			assertFalse(rs.next());
 		}
+		// #5
 		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
 		try (ResultSet rs = stat.executeQuery("SELECT ci.relname AS index_name, " +
 				"con.conname, i.indexrelid AS oid, ct.relname AS table_name, " +
@@ -1148,6 +1153,7 @@ public class TestPgClients {
 
 	@Test
 	public void testToadEdge() throws SQLException {
+		// #1
 		try (ResultSet rs = stat.executeQuery("SELECT oid, rolname, " +
 				"rolcanlogin AS login_role, rolconnlimit, rolvaliduntil " +
 				"FROM pg_roles ORDER BY rolname ASC")) {
@@ -1155,6 +1161,7 @@ public class TestPgClients {
 			assertEquals("sa", rs.getString("rolname"));
 			assertFalse(rs.next());
 		}
+		// #2
 		try (ResultSet rs = stat.executeQuery("SELECT db.*, ts.spcname AS tablespace_name, " +
 				"u.usename AS owner, pg_encoding_to_char (db.encoding) AS encodingName, " +
 				"des.description AS \"comment\", pg_size_pretty(pg_database_size(db.oid)) AS size " +
@@ -1168,6 +1175,7 @@ public class TestPgClients {
 			assertEquals("0", rs.getString("size"));
 			assertFalse(rs.next());
 		}
+		// #3
 		try (ResultSet rs = stat.executeQuery("SELECT (nc.nspname)::information_schema.sql_identifier " +
 				"AS table_schema, (c.relname)::information_schema.sql_identifier AS table_name, " +
 				"(a.attname)::information_schema.sql_identifier AS column_name, " +
@@ -1241,6 +1249,7 @@ public class TestPgClients {
 			assertFalse(rs.getBoolean("is_primary"));
 			assertFalse(rs.next());
 		}
+		// #4
 		try (ResultSet rs = stat.executeQuery("SELECT c.oid, c.relname AS \"name\", " +
 				"c.reloftype AS \"is_typed\" FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
@@ -1250,6 +1259,7 @@ public class TestPgClients {
 			assertEquals("test", rs.getString("name"));
 			assertFalse(rs.next());
 		}
+		// #5
 		try (ResultSet rs = stat.executeQuery("SELECT DISTINCT trg.oid, trg.tgname AS trigger_name, " +
 				"tbl.relname AS parent_name, p.proname AS function_name, ... AS trigger_type, " +
 				"... AS trigger_event, ... AS action_orientation, ... AS enabled, " +
@@ -1297,6 +1307,7 @@ public class TestPgClients {
 
 	@Test
 	public void testOmniDB() throws SQLException {
+		// #1
 		try (ResultSet rs = stat.executeQuery("select quote_ident(c.relname) as table_name, " +
 				"quote_ident(a.attname) as column_name, " +
 				"(case when t.typtype = 'd'::\"char\" then " +
@@ -1453,12 +1464,104 @@ public class TestPgClients {
 
 	@Test
 	public void testTableau() throws SQLException {
+		// #1
 		stat.execute("set extra_float_digits = 2");
+		// #2
 		try (ResultSet rs = stat.executeQuery("show transaction_isolation")) {
 			assertTrue(rs.next());
 			assertEquals("read committed", rs.getString("transaction_isolation"));
 		}
+		// #3
 		stat.execute("SET TIMEZONE TO 'UTC'");
+		// #4
+		try (ResultSet rs = stat.executeQuery("select 'pgserver'::name as PKTABLE_CAT, " +
+				"n2.nspname as PKTABLE_SCHEM, c2.relname as PKTABLE_NAME, " +
+				"a2.attname as PKCOLUMN_NAME, 'pgserver'::name as FKTABLE_CAT, " +
+				"n1.nspname as FKTABLE_SCHEM, c1.relname as FKTABLE_NAME, " +
+				"a1.attname as FKCOLUMN_NAME, i::int2 as KEY_SEQ, " +
+				"case ref.confupdtype when 'c' then 0::int2 when 'n' then 2::int2 " +
+				"when 'd' then 4::int2 when 'r' then 1::int2 else 3::int2 end " +
+				"as UPDATE_RULE, " +
+				"case ref.confdeltype when 'c' then 0::int2 when 'n' then 2::int2 " +
+				"when 'd' then 4::int2 when 'r' then 1::int2 else 3::int2 end " +
+				"as DELETE_RULE, ref.conname as FK_NAME, cn.conname as PK_NAME, " +
+				"case when ref.condeferrable then " +
+				"  case when ref.condeferred then 5::int2 else 6::int2 end " +
+				"else 7::int2 end as DEFERRABLITY from " +
+				"(" +
+				"  (" +
+				"    (" +
+				"      (" +
+				"        (" +
+				"          (" +
+				"            (" +
+				"              (select cn.oid, conrelid, conkey, confrelid, confkey, " +
+				"generate_series(array_lower(conkey, 1), array_upper(conkey, 1)) as i, " +
+				"confupdtype, confdeltype, conname, condeferrable, condeferred " +
+				"from pg_catalog.pg_constraint cn, pg_catalog.pg_class c, " +
+				"pg_catalog.pg_namespace n where contype = 'f' and conrelid = c.oid " +
+				"and relname = E'test' and n.oid = c.relnamespace and " +
+				"n.nspname = E'public') ref " +
+				"              inner join pg_catalog.pg_class c1 on c1.oid = ref.conrelid" +
+				"            ) " +
+				"            inner join pg_catalog.pg_namespace n1 " +
+				"            on n1.oid = c1.relnamespace" +
+				"          ) " +
+				"          inner join pg_catalog.pg_attribute a1 " +
+				"          on a1.attrelid = c1.oid and a1.attnum = conkey[i]" +
+				"        ) " +
+				"        inner join pg_catalog.pg_class c2 on c2.oid = ref.confrelid" +
+				"      ) " +
+				"      inner join pg_catalog.pg_namespace n2 on n2.oid = c2.relnamespace" +
+				"    ) " +
+				"    inner join pg_catalog.pg_attribute a2 " +
+				"    on a2.attrelid = c2.oid and a2.attnum = confkey[i]" +
+				"  ) " +
+				"  left outer join pg_catalog.pg_constraint cn " +
+				"  on cn.conrelid = ref.confrelid and cn.contype = 'p'" +
+				") order by ref.oid, ref.i")) {
+			assertFalse(rs.next());
+		}
+		// #5
+		try (ResultSet rs = stat.executeQuery("select ta.attname, ia.attnum, " +
+				"ic.relname, n.nspname, tc.relname from pg_catalog.pg_attribute ta, " +
+				"pg_catalog.pg_attribute ia, pg_catalog.pg_class tc, " +
+				"pg_catalog.pg_index i, pg_catalog.pg_namespace n, pg_catalog.pg_class ic " +
+				"where tc.relname = E'test' AND n.nspname = E'public' " +
+				"AND tc.oid = i.indrelid AND n.oid = tc.relnamespace " +
+				"AND i.indisprimary = 't' AND ia.attrelid = i.indexrelid " +
+				"AND ta.attrelid = i.indrelid AND ta.attnum = i.indkey[ia.attnum-1] " +
+				"AND (NOT ta.attisdropped) AND (NOT ia.attisdropped) " +
+				"AND ic.oid = i.indexrelid order by ia.attnum")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("attname"));
+			assertFalse(rs.next());
+		}
+		// #6
+		stat.execute("CREATE LOCAL TEMPORARY TABLE \"temp\" " +
+				"( \"COL\" INTEGER ) ON COMMIT PRESERVE ROWS");
+		// #7
+		stat.execute("INSERT INTO test (x1) VALUES (2), (3)");
+		try (ResultSet rs = stat.executeQuery("SELECT \"test\".\"id\" AS \"id\", " +
+				"\"test\".\"x1\" AS \"x1\", SUM(\"test\".\"id\") AS \"sum_id_ok\" " +
+				"FROM \"public\".\"test\" \"test\" GROUP BY 1, 2")) {
+			assertTrue(rs.next());
+			assertEquals(1, rs.getInt("id"));
+			assertEquals(2, rs.getInt("x1"));
+			assertEquals(1, rs.getInt("sum_id_ok"));
+			assertTrue(rs.next());
+			assertEquals(2, rs.getInt("id"));
+			assertEquals(3, rs.getInt("x1"));
+			assertEquals(2, rs.getInt("sum_id_ok"));
+			assertFalse(rs.next());
+		}
+		// #8
+		stat.execute("SELECT TOP 1 * INTO \"temp\" FROM (SELECT 1 AS COL) AS CHECKTEMP");
+		try (ResultSet rs = stat.executeQuery("SELECT \"COL\" FROM temp")) {
+			assertTrue(rs.next());
+			assertEquals(1, rs.getInt("col"));
+			assertFalse(rs.next());
+		}
 	}
 
 	@Test
@@ -1510,9 +1613,15 @@ public class TestPgClients {
 			}
 			assertFalse(rs.next());
 		}
-		try (ResultSet rs = stat.executeQuery("SELECT generate_series(5, 10) gs")) {
+		try (ResultSet rs = stat.executeQuery("SELECT id, generate_series(5, 10) gs FROM test2")) {
 			for (int i = 5; i <= 10; i ++) {
 				assertTrue(rs.next());
+				assertEquals(1, rs.getInt("id"));
+				assertEquals(i, rs.getLong("gs"));
+			}
+			for (int i = 5; i <= 10; i ++) {
+				assertTrue(rs.next());
+				assertEquals(2, rs.getInt("id"));
 				assertEquals(i, rs.getLong("gs"));
 			}
 			assertFalse(rs.next());

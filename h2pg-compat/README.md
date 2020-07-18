@@ -112,6 +112,8 @@ Unsupported operations:
 
 Tableau 2020.2.2 tested via JDBC and ODBC.
 
+Connection via PostgreSQL directly is not supported.
+
 ### ~Toad Edge~
 
 Toad Edge not supported.
