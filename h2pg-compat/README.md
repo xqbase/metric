@@ -71,7 +71,7 @@ LibreOffice Base 6.3.6.2 and OpenOffice Base 4.1.7 tested.
 
 Known issue:
 
-- Unable to edit in DataGrid if connection type is PostgreSQL or ODBC (JDBC works)
+- Unable to edit in DataGrid via native PostgreSQL or ODBC (JDBC works)
 
 ### Navicat
 
@@ -108,7 +108,7 @@ Tableau 2020.2.2 tested.
 
 Known Issue:
 
-- Connection type PostgreSQL doesn't work (JDBC and ODBC work)
+- Native PostgreSQL doesn't work (JDBC and ODBC work)
 
 ### Power BI
 
@@ -116,7 +116,7 @@ Power BI 2.83.5894.721 tested.
 
 Known Issue:
 
-- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) columns
+- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) columns via native PostgreSQL (ODBC works with `NUMERIC`)
 
 ### ~Toad Edge~
 
