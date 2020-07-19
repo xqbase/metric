@@ -19,7 +19,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.h2.command.Parser;
 import org.h2.jdbc.JdbcResultSetMetaData;
@@ -214,7 +217,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static Map<String, Expression> functionMap = new HashMap<>();
 
 	private static void addTable(String name, String sql) {
-		SelectBody sb = select(sql);
+		SelectBody sb = select(sql.replace("${owner}",
+				"(SELECT oid FROM pg_user WHERE usename = current_user())"));
 		tableMap.put(name, sb);
 		if (!name.startsWith("information_schema.")) {
 			tableMap.put("pg_catalog." + name, sb);
@@ -222,9 +226,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	}
 
 	private static void addColumns(String name, String columns) {
-		addTable(name, "SELECT *, " + columns.replace("${owner}",
-				"(SELECT oid FROM pg_user WHERE usename = current_user())") +
-				" FROM " + name);
+		addTable(name, "SELECT *, " + columns + " FROM " + name);
 	}
 
 	private static void addEmptyTable(String name, String columns) {
@@ -285,9 +287,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_proc", "NULL proallargtypes, NULL proargmodes, NULL proargnames, " +
 				"NULL prolang, NULL proretset, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
-		addColumns("pg_type", "FALSE typbyval, NULL typcategory, NULL typcollation, " +
-				"NULL typdefault, 0 typndims, 0 typarray, ${owner} typowner, " +
-				"NULL typalign, NULL typstorage");
 		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.columns", "NULL udt_schema, NULL udt_name");
 		addColumns("information_schema.routines", "NULL type_udt_name");
@@ -338,8 +337,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"UNION ALL SELECT 'max_index_keys', '32', ''");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
+		addTable("pg_type", "SELECT oid, (CASE oid " +
+				"WHEN 16 THEN 'bool' WHEN 17 THEN 'bytea' WHEN 20 THEN 'int8' " +
+				"WHEN 21 THEN 'int2' WHEN 23 THEN 'int4' WHEN 25 THEN 'text' " +
+				"WHEN 700 THEN 'float4' WHEN 701 THEN 'float8' WHEN 1042 THEN 'bpchar' " +
+				"WHEN 1043 THEN 'varchar' WHEN 1184 THEN 'timestampz' WHEN 1266 THEN 'timetz' " +
+				"ELSE LOWER(typname) END) \"typname\", " +
+				"typnamespace, typlen, typtype, typdelim, typrelid, " +
+				"typelem, typbasetype, typtypmod, typnotnull, typinput, " +
+				"FALSE typbyval, NULL typcategory, NULL typcollation, NULL typdefault, " +
+				"0 typndims, 0 typarray, ${owner} typowner, NULL typalign, NULL typstorage " +
+				"FROM pg_type");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'");
+		addTable("INFORMATION_SCHEMA.character_sets", "SELECT 'UTF8' character_set_name");
 
 		NullValue nul = new NullValue();
 		addFunction("information_schema._pg_char_max_length", nul);
@@ -387,7 +398,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 
 	private boolean replaced = false;
 	private boolean anyArray = false;
-	private boolean paginal = false;
 
 	private Function arrayContains(Expression array, Expression value) {
 		ExpressionList el = new ExpressionList(array, value);
@@ -950,14 +960,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		PlainSelect ps = (PlainSelect) sb;
 		FromItem fi = ps.getFromItem();
-		// for dbForge
-		if (fi instanceof SubSelect) {
-			Alias alias = ((SubSelect) fi).getAlias();
-			if (alias != null && alias.getName().equals("PAGE_READ_T") &&
-					new Throwable().getStackTrace()[1].getMethodName().equals("getSQL")) {
-				paginal = true;
-			}
-		}
 		// for TestPgClients.testNavicat(), test case #3
 		if (fi instanceof SubJoin && fi.toString().equals("((pg_rewrite r " +
 					"JOIN pg_class c ON ((c.oid = r.ev_class))) " +
@@ -985,8 +987,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		List<Join> joins = ps.getJoins();
 		if (joins != null) {
 			for (Join join : ps.getJoins()) {
-				replace(join.getRightItem(), join::setRightItem, null);
-				replace(join.getOnExpression(), join::setOnExpression);
+				if (join.toString().equals("JOIN pg_proc ON pg_proc.oid = a.typreceive")) {
+					// for TestPgClients.testNpgsql(), test case #1
+					join.setLeft(true);
+					join.setOnExpression(FALSE);
+					replaced = true;
+				} else {
+					replace(join.getRightItem(), join::setRightItem, null);
+					replace(join.getOnExpression(), join::setOnExpression);
+				}
 			}
 		}
 		// GROUP BY <number> -> GROUP BY <select-items>
@@ -1255,6 +1264,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 	}
 
+	// See PgServerThread.writeDataColumn(), binary part
+	private static final Set<Integer> BINARY_TYPES = IntStream.of(new int[] {
+		PgServer.PG_TYPE_INT2, PgServer.PG_TYPE_INT4, PgServer.PG_TYPE_INT8,
+		PgServer.PG_TYPE_FLOAT4, PgServer.PG_TYPE_FLOAT8, PgServer.PG_TYPE_BYTEA,
+		PgServer.PG_TYPE_DATE, PgServer.PG_TYPE_TIME, PgServer.PG_TYPE_TIMETZ,
+		PgServer.PG_TYPE_TIMESTAMP, PgServer.PG_TYPE_TIMESTAMPTZ,
+	}).boxed().collect(Collectors.toSet());
+
 	private void read() throws IOException, ReflectiveOperationException {
 		int x = 0;
 		int initLen = 0;
@@ -1280,14 +1297,24 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		Charset charset = (Charset) getEncoding.invoke(this);
 		switch (x) {
 		case 'E':
-			if (!paginal) {
-				break;
-			}
-			paginal = false;
 			int z1 = findZero(data, 5, data.length);
 			String name = new String(data, 5, z1 - 5, charset);
 			Object portal = portals.get(name);
 			if (portal == null) {
+				break;
+			}
+			int[] resultColumnFormat = (int[]) formatField.get(portal);
+			if (resultColumnFormat == null) {
+				break;
+			}
+			boolean binary = false;
+			for (int i = 0; i < resultColumnFormat.length; i ++) {
+				if (resultColumnFormat[i] > 0) {
+					binary = true;
+					break;
+				}
+			}
+			if (!binary) {
 				break;
 			}
 			ResultSetMetaData rsmd;
@@ -1295,31 +1322,24 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			try {
 				rsmd = ((PreparedStatement) preparedPrep.
 						get(portalPrep.get(portal))).getMetaData();
+				if (rsmd == null) {
+					break;
+				}
 				columnCount = rsmd.getColumnCount();
 			} catch (SQLException e) {
 				server.traceError(e);
 				break;
 			}
-			int[] resultColumnFormat = new int[columnCount];
-			formatField.set(portal, resultColumnFormat);
+			if (resultColumnFormat.length != columnCount) {
+				resultColumnFormat = new int[columnCount];
+				Arrays.fill(resultColumnFormat, 1);
+				formatField.set(portal, resultColumnFormat);
+			}
 			ResultInterface result = (ResultInterface) resultField.get(rsmd);
 			for (int i = 0; i < columnCount; i ++) {
-				// See PgServerThread.writeDataColumn(), binary part
-				switch (PgServer.convertType(result.getColumnType(i))) {
-				case PgServer.PG_TYPE_INT2:
-				case PgServer.PG_TYPE_INT4:
-				case PgServer.PG_TYPE_INT8:
-				case PgServer.PG_TYPE_FLOAT4:
-				case PgServer.PG_TYPE_FLOAT8:
-				case PgServer.PG_TYPE_BYTEA:
-				case PgServer.PG_TYPE_DATE:
-				case PgServer.PG_TYPE_TIME:
-				case PgServer.PG_TYPE_TIMETZ:
-				case PgServer.PG_TYPE_TIMESTAMP:
-				case PgServer.PG_TYPE_TIMESTAMPTZ:
-					resultColumnFormat[i] = 1;
-					break;
-				default:
+				if (resultColumnFormat[i] != 0 &&
+						!BINARY_TYPES.contains(Integer.valueOf(PgServer.
+						convertType(result.getColumnType(i))))) {
 					resultColumnFormat[i] = 0;
 				}
 			}
@@ -1332,7 +1352,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				break;
 			}
 			replaced = false;
-			paginal = false;
 			String sql = getSQL(new String(data, z1, z2 - z1, charset).trim());
 			if (!replaced) {
 				break;

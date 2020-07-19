@@ -121,8 +121,7 @@ dbForge Studio 2.2.207 tested.
 Unsupported operations:
 
 - Data editing
-- Select `TEXT` columns in non-paginal mode
-- Select `REAL` or `ARRAY` columns in paginal or non-paginal mode
+- Select `NUMERIC` (`SUM(BIGINT)` will convert to `NUMERIC`) or `ARRAY` columns
 
 ### Tableau
 
@@ -136,6 +135,14 @@ Supported connection types:
 Unsupported connection type:
 
 - PostgreSQL
+
+### Power BI
+
+Power BI 2.83.5894.721 tested.
+
+Unsupported operations:
+
+- Select `NUMERIC` (`SUM(BIGINT)` will convert to `NUMERIC`) columns
 
 ### ~Toad Edge~
 

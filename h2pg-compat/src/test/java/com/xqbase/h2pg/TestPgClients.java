@@ -30,17 +30,31 @@ import org.junit.Test;
 import org.postgresql.jdbc.PgConnection;
 
 public class TestPgClients {
-	private Server server;
-	private Connection conn;
-	private Statement stat;
+	private static Set<?> supportedBinaryOids;
 
 	static {
 		try {
-			Class.forName("org.postgresql.Driver");
-		} catch (ClassNotFoundException e) {
+			Field supportedBinaryOidsField = PgConnection.class.
+					getDeclaredField("SUPPORTED_BINARY_OIDS");
+			supportedBinaryOidsField.setAccessible(true);
+			supportedBinaryOids = (Set<?>) supportedBinaryOidsField.get(null);
+		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
 	}
+
+	@SuppressWarnings("unchecked")
+	private static void addBinaryOid(int oid, boolean remove) {
+		if (remove) {
+			supportedBinaryOids.remove(Integer.valueOf(oid));
+		} else {
+			((Set<Integer>) supportedBinaryOids).add(Integer.valueOf(oid));
+		}
+	}
+
+	private Server server;
+	private Connection conn;
+	private Statement stat;
 
 	@Before
 	public void before() throws SQLException {
@@ -123,6 +137,53 @@ public class TestPgClients {
 			assertEquals("tid", rs.getString("TYPE_NAME"));
 			assertFalse(rs.next());
 		}
+	}
+
+	@Test
+	public void TestNpgsql() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("/*** Load all supported types ***/ " +
+				"SELECT ns.nspname, a.typname, a.oid, a.typrelid, a.typbasetype, " +
+				"CASE WHEN pg_proc.proname='array_recv' THEN 'a' ELSE a.typtype END AS type, " +
+				"CASE WHEN pg_proc.proname='array_recv' THEN a.typelem ELSE 0 END AS elemoid, " +
+				"CASE " +
+				"WHEN pg_proc.proname IN ('array_recv','oidvectorrecv') THEN 3 /* Arrays last */ " +
+				"WHEN a.typtype='r' THEN 2 /* Ranges before */ " +
+				"WHEN a.typtype='d' THEN 1 /* Domains before */ " +
+				"ELSE 0 /* Base types first */ END AS ord FROM pg_type AS a " +
+				"JOIN pg_namespace AS ns ON (ns.oid = a.typnamespace) " +
+				"JOIN pg_proc ON pg_proc.oid = a.typreceive " +
+				"LEFT OUTER JOIN pg_class AS cls ON (cls.oid = a.typrelid) " +
+				"LEFT OUTER JOIN pg_type AS b ON (b.oid = a.typelem) " +
+				"LEFT OUTER JOIN pg_class AS elemcls ON (elemcls.oid = b.typrelid) " +
+				"WHERE a.typtype IN ('b', 'r', 'e', 'd') OR /* Base, range, enum, domain */ " +
+				"(a.typtype = 'c' AND cls.relkind='c') OR " +
+				"/* User-defined free-standing composites (not table composites) by default */ " +
+				"(pg_proc.proname='array_recv' AND ( b.typtype IN ('b', 'r', 'e', 'd') OR " +
+				"/* Array of base, range, enum, domain */ " +
+				"(b.typtype = 'p' AND b.typname IN ('record', 'void')) OR " +
+				"/* Arrays of special supported pseudo-types */ " +
+				"(b.typtype = 'c' AND elemcls.relkind='c') " +
+				"/* Array of user-defined free-standing composites (not table composites) */ " +
+				")) OR (a.typtype = 'p' AND a.typname IN ('record', 'void')) " +
+				"/* Some special supported pseudo-types */ ORDER BY ord")) {
+			assertTrue(rs.next());
+		}
+		stat.execute("CREATE TABLE test2 (id INT PRIMARY KEY, x1 VARCHAR)");
+		stat.execute("INSERT INTO test2 (id, x1) VALUES (1, 'test')");
+		addBinaryOid(PgServer.PG_TYPE_VARCHAR, false);
+		try (
+			Connection conn1 = DriverManager.getConnection("jdbc:postgresql://" +
+					"localhost:5535/pgserver?prepareThreshold=-1", "sa", "sa");
+			Statement stat1 = conn1.createStatement();
+		) {
+			try (ResultSet rs = stat1.executeQuery("SELECT * FROM test2")) {
+				assertTrue(rs.next());
+				assertEquals(1, rs.getInt("id"));
+				assertEquals("test", rs.getString("x1"));
+				assertFalse(rs.next());
+			}
+		}
+		addBinaryOid(PgServer.PG_TYPE_VARCHAR, true);
 	}
 
 	@Test
@@ -1411,28 +1472,6 @@ public class TestPgClients {
 		}
 	}
 
-	private static Set<?> supportedBinaryOids;
-
-	static {
-		try {
-			Field supportedBinaryOidsField = PgConnection.class.
-					getDeclaredField("SUPPORTED_BINARY_OIDS");
-			supportedBinaryOidsField.setAccessible(true);
-			supportedBinaryOids = (Set<?>) supportedBinaryOidsField.get(null);
-		} catch (ReflectiveOperationException e) {
-			throw new RuntimeException(e);
-		}
-	}
-
-	@SuppressWarnings("unchecked")
-	private static void addBinaryOid(int oid, boolean remove) {
-		if (remove) {
-			supportedBinaryOids.remove(Integer.valueOf(oid));
-		} else {
-			((Set<Integer>) supportedBinaryOids).add(Integer.valueOf(oid));
-		}
-	}
-
 	@Test
 	public void testDbForge() throws SQLException {
 		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
@@ -1466,30 +1505,6 @@ public class TestPgClients {
 			assertEquals("p", rs.getString("contypes"));
 			assertFalse(rs.next());
 		}
-
-		stat.execute("CREATE TABLE test3 (id INT PRIMARY KEY, x1 VARCHAR)");
-		stat.execute("INSERT INTO test3 (id, x1) VALUES (1, 'test')");
-
-		addBinaryOid(PgServer.PG_TYPE_VARCHAR, false);
-		try (
-			Connection conn1 = DriverManager.getConnection("jdbc:postgresql://" +
-					"localhost:5535/pgserver?prepareThreshold=-1", "sa", "sa");
-			Statement stat1 = conn1.createStatement();
-		) {
-			try (ResultSet rs = stat1.executeQuery("SELECT * FROM test3")) {
-				assertFalse(true);
-			} catch (SQLException e) {
-				assertEquals("HY000", e.getSQLState());
-			}
-			try (ResultSet rs = stat1.executeQuery("SELECT * FROM " +
-					"(SELECT * FROM test3) AS PAGE_READ_T LIMIT 1000")) {
-				assertTrue(rs.next());
-				assertEquals(1, rs.getInt("id"));
-				assertEquals("test", rs.getString("x1"));
-				assertFalse(rs.next());
-			}
-		}
-		addBinaryOid(PgServer.PG_TYPE_VARCHAR, true);
 	}
 
 	@Test
