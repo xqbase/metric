@@ -1344,6 +1344,7 @@ public class TestPgClients {
 
 	@Test
 	public void testPostico() throws SQLException {
+		// #1
 		try (ResultSet rs = stat.executeQuery("SELECT oid, nspname, " +
 				"nspname = ANY (current_schemas(true)) AS is_on_search_path, " +
 				"oid = pg_my_temp_schema() AS is_my_temp_schema, " +
@@ -1359,6 +1360,7 @@ public class TestPgClients {
 			assertFalse(rs.getBoolean("is_on_search_path"));
 			assertFalse(rs.next());
 		}
+		// #2
 		try (ResultSet rs = stat.executeQuery("SELECT pg_class.oid, pg_class.relname, " +
 				"indisunique, indisprimary, false AS indisexclusion, indkey, " +
 				"pg_get_indexdef(indexrelid, 0, true) AS definition, " +

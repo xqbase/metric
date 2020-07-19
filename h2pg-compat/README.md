@@ -6,21 +6,16 @@ New supported APIs:
 
 - `DatabaseMetaData.getIndexInfo()`
 - `DatabaseMetaData.getPrimaryKeys()`
+- `DatabaseMetaData.getImportedKeys()`
+- `DatabaseMetaData.getVersionColumns()`
 
 ### PgAdmin
 
 PgAdmin 4.16 tested.
 
-Supported operations:
+Known issue:
 
-- List Databases, Schemas, Tables, Columns
-- Query
-- View/Edit Data
-- Update/Delete on Data Output
-
-Unsupported operations:
-
-- Insert on Data Output, due to uncommitted `INSERT INTO ... RETURNING ...`
+- Unable to insert in DataGrid, due to uncommitted `INSERT INTO ... RETURNING ...`
 
 ### pgcli
 
@@ -42,19 +37,17 @@ Adminer 4.7.7 tested.
 
 Valentina Studio 10.0 tested.
 
-- Insert on Data Editor: success but no response, perhaps due to committed `INSERT INTO ... RETURNING ...`
+Known issue:
+
+- Insertion in DataGrid succeeds but has no response, due to committed `INSERT INTO ... RETURNING ...`
 
 ### phpPgAdmin
 
-phpPgAdmin 7.0-dev (docker.io/dockage/phppgadmin) and 7.12.1 tested.
+phpPgAdmin 7.x-dev (docker.io/dockage/phppgadmin) and 7.12.1 tested.
 
-Unsupported operations:
+Known issue:
 
-- Rules, Admin, Info
-
-Unsupported operations with 7.12.1:
-
-- Columns, Browse: for tables with composite primary key
+- Unable to open DataGrid (Columns and Browse) for tables with composite primary key
 
 ### SQuirreL SQL
 
@@ -72,35 +65,21 @@ Postico 1.5.13 tested.
 
 DbVisualizer Free 11.0.3 tested.
 
-### LibreOffice Base
+### LibreOffice / OpenOffice Base
 
-LibreOffice Base 6.3.6.2 tested.
+LibreOffice Base 6.3.6.2 and OpenOffice Base 4.1.7 tested.
 
-Supported operations:
+Known issue:
 
-- Edit in Table Data View if connection type is JDBC
-
-Unsupported operations:
-
-- Edit in Table Data View if connection type is PostgreSQL or ODBC
-
-### OpenOffice Base
-
-OpenOffice Base 4.1.7 tested.
-
-Supported operations:
-
-- Edit in Table Data View if connection type is JDBC
-
-Unsupported operations:
-
-- Edit in Table Data View if connection type is ODBC
+- Unable to edit in DataGrid if connection type is PostgreSQL or ODBC (JDBC works)
 
 ### Navicat
 
 Navicat 15.0.17 tested.
 
-Should check `View / Show Hidden Items` to show all tables.
+Known issue:
+
+- Should check `View / Show Hidden Items` to show all tables
 
 ### DataGrip
 
@@ -118,31 +97,26 @@ TablePlus 3.6.3 tested.
 
 dbForge Studio 2.2.207 tested.
 
-Unsupported operations:
+Known issues:
 
-- Data editing
-- Select `NUMERIC` (`SUM(BIGINT)` will convert to `NUMERIC`) or `ARRAY` columns
+- Unable to edit in DataGrid
+- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) or `ARRAY` columns
 
 ### Tableau
 
-Tableau 2020.2.2 tested via JDBC and ODBC.
+Tableau 2020.2.2 tested.
 
-Supported connection types:
+Known Issue:
 
-- JDBC
-- ODBC
-
-Unsupported connection type:
-
-- PostgreSQL
+- Connection type PostgreSQL doesn't work (JDBC and ODBC work)
 
 ### Power BI
 
 Power BI 2.83.5894.721 tested.
 
-Unsupported operations:
+Known Issue:
 
-- Select `NUMERIC` (`SUM(BIGINT)` will convert to `NUMERIC`) columns
+- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) columns
 
 ### ~Toad Edge~
 

@@ -1063,12 +1063,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			replaced = true;
 			return NOOP;
 		}
-		// The result for `select oid,typname from pg_type` is different from PostgreSQL,
-		// which may lead `pg_fieldtype` crash. Just make it fail.
-		if (sql.equals("select oid,typname from pg_type")) {
-			replaced = true;
-			return NOOP;
-		}
+		// for TestPgClients.testPostico(), test case #1
 		if (sql.equals("SELECT oid, nspname, nspname = ANY (current_schemas(true)) " +
 				"AS is_on_search_path, oid = pg_my_temp_schema() AS is_my_temp_schema, " +
 				"pg_is_other_temp_schema(oid) AS is_other_temp_schema FROM pg_namespace")) {
