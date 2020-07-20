@@ -1,5 +1,7 @@
 package com.xqbase.metric;
 
+import java.sql.Blob;
+import java.sql.Clob;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -40,6 +42,8 @@ public class Migrate {
 				System.err.println("" + e);
 			}
 		}
+		boolean pgSrc = args[0].startsWith("jdbc:postgresql://");
+		boolean sqliteDst = args[1].startsWith("jdbc:sqlite:");
 		try (
 			Connection src = DriverManager.getConnection(args[0]);
 			Statement stSrc = src.createStatement();
@@ -49,17 +53,17 @@ public class Migrate {
 			src.setReadOnly(true);
 			List<String> tables = new ArrayList<>();
 			try (ResultSet rs = src.getMetaData().
-					getTables(src.getCatalog(), src.getSchema(), null, null)) {
+					getTables(src.getCatalog(), src.getSchema(), null,
+							pgSrc ? new String[] {"TABLE"} : null)) {
 				while (rs.next()) {
 					tables.add(rs.getString("TABLE_NAME").toLowerCase());
 				}
 			}
 			for (String table : tables) {
 				log("Begin migrating table " + table + " ...");
-				if (args[1].startsWith("jdbc:sqlite:")) {
-					stDst.execute("DELETE FROM " + table);
-				} else {
-					stDst.execute("TRUNCATE TABLE " + table);
+				stDst.execute((sqliteDst ? "DELETE FROM " : "TRUNCATE TABLE ") + table);
+				if (pgSrc) {
+					src.setAutoCommit(false);
 				}
 				try (ResultSet rs = stSrc.executeQuery("SELECT * FROM " + table)) {
 					int columns = rs.getMetaData().getColumnCount();
@@ -69,7 +73,13 @@ public class Migrate {
 						int batch = 0;
 						while (rs.next()) {
 							for (int i = 1; i <= columns; i ++) {
-								ps.setObject(i, rs.getObject(i));
+								Object x = rs.getObject(i);
+								if (x instanceof Blob) {
+									x = ((Blob) x).getBytes(1, (int) ((Blob) x).length());
+								} else if (x instanceof Clob) {
+									x = ((Clob) x).getSubString(1, (int) ((Clob) x).length());
+								}
+								ps.setObject(i, x);
 							}
 							ps.addBatch();
 							batch ++;
@@ -86,6 +96,9 @@ public class Migrate {
 							log(rows + " rows inserted into table " + table);
 						}
 					}
+				}
+				if (pgSrc) {
+					src.setAutoCommit(true);
 				}
 				log("End migrating table " + table);
 			}
