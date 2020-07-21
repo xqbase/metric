@@ -7,6 +7,9 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -39,6 +42,7 @@ import com.xqbase.util.Strings;
 import com.xqbase.util.Time;
 import com.xqbase.util.db.ConnectionPool;
 import com.xqbase.util.db.Row;
+import com.xqbase.util.function.ConsumerEx;
 
 class Resource {
 	String mime;
@@ -105,6 +109,7 @@ public class Dashboard {
 		return Double.isFinite(d) ? d : 0;
 	}
 
+	private static Class<?> pgConnection = null;
 	private static Map<String, ToDoubleFunction<MetricValue>>
 			methodMap = new HashMap<>();
 	private static final ToDoubleFunction<MetricValue> NAMES_METHOD = value -> 0;
@@ -119,6 +124,11 @@ public class Dashboard {
 	private static int maxTagValues;
 
 	static {
+		try {
+			pgConnection = Class.forName("org.postgresql.jdbc.PgConnection");
+		} catch (ClassNotFoundException e) {
+			// Ignored
+		}
 		methodMap.put("count", MetricValue::getCount);
 		methodMap.put("sum", MetricValue::getSum);
 		methodMap.put("max", MetricValue::getMax);
@@ -362,56 +372,78 @@ public class Dashboard {
 		};
 		// Query Time Range by SQL, Query and Group Tags by Java
 		Map<GroupKey, MetricValue> result = new HashMap<>();
-		try {
-			db.query(row -> {
-				int index = (row.getInt("time") - begin) / interval;
-				if (index < 0 || index >= length) {
-					Log.w("Key " + row.getInt("time") + " out of range, end = " + end +
-							", interval = " + interval + ", length = " + length);
-					return;
-				}
-				String s = row.getString("metrics");
-				for (String line : s.split("\n")) {
-					String[] paths;
-					Map<String, String> tags = new HashMap<>();
-					int i = line.indexOf('?');
-					if (i < 0) {
-						paths = line.split("/");
-					} else {
-						paths = line.substring(0, i).split("/");
-						String q = line.substring(i + 1);
-						for (String tag : q.split("&")) {
-							i = tag.indexOf('=');
-							if (i > 0) {
-								tags.put(Strings.decodeUrl(tag.substring(0, i)),
-										Strings.decodeUrl(tag.substring(i + 1)));
-							}
+		ConsumerEx<ResultSet, SQLException> consumer = rs -> {
+			int index = (rs.getInt("time") - begin) / interval;
+			if (index < 0 || index >= length) {
+				Log.w("Key " + rs.getInt("time") + " out of range, end = " + end +
+						", interval = " + interval + ", length = " + length);
+				return;
+			}
+			String s = rs.getString("metrics");
+			for (String line : s.split("\n")) {
+				String[] paths;
+				Map<String, String> tags = new HashMap<>();
+				int i = line.indexOf('?');
+				if (i < 0) {
+					paths = line.split("/");
+				} else {
+					paths = line.substring(0, i).split("/");
+					String q = line.substring(i + 1);
+					for (String tag : q.split("&")) {
+						i = tag.indexOf('=');
+						if (i > 0) {
+							tags.put(Strings.decodeUrl(tag.substring(0, i)),
+									Strings.decodeUrl(tag.substring(i + 1)));
 						}
 					}
-					// Query Tags
-					boolean skip = false;
-					for (Map.Entry<String, String> entry : query.entrySet()) {
-						String value = tags.get(entry.getKey());
-						if (!entry.getValue().equals(value)) {
-							skip = true;
-							break;
-						}
-					}
-					if (skip || paths.length <= 4) {
-						continue;
-					}
-					// Group Tags
-					GroupKey key = new GroupKey(groupBy.apply(tags), index);
-					MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
-							__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
-					MetricValue value = result.get(key);
-					if (value == null) {
-						result.put(key, newValue);
-					} else {
-						value.add(newValue);
+				}
+				// Query Tags
+				boolean skip = false;
+				for (Map.Entry<String, String> entry : query.entrySet()) {
+					String value = tags.get(entry.getKey());
+					if (!entry.getValue().equals(value)) {
+						skip = true;
+						break;
 					}
 				}
-			}, quarter ? AGGREGATE_QUARTER : AGGREGATE_MINUTE, id, begin, end);
+				if (skip || paths.length <= 4) {
+					continue;
+				}
+				// Group Tags
+				GroupKey key = new GroupKey(groupBy.apply(tags), index);
+				MetricValue newValue = new MetricValue(Numbers.parseLong(paths[0]),
+						__(paths[1]), __(paths[2]), __(paths[3]), __(paths[4]));
+				MetricValue value = result.get(key);
+				if (value == null) {
+					result.put(key, newValue);
+				} else {
+					value.add(newValue);
+				}
+			}
+		};
+		try (ConnectionPool.Entry entry = db.borrow()) {
+			Connection conn = entry.getObject();
+			boolean pg = pgConnection != null &&
+					pgConnection.isAssignableFrom(conn.getClass());
+			// db.query() does not support setAutoCommit
+			if (pg) {
+				conn.setAutoCommit(false);
+			}
+			try (PreparedStatement ps = conn.prepareStatement(quarter ?
+					AGGREGATE_QUARTER : AGGREGATE_MINUTE)) {
+				ps.setInt(1, id);
+				ps.setInt(2, begin);
+				ps.setInt(3, end);
+				try (ResultSet rs = ps.executeQuery()) {
+					while (rs.next()) {
+						consumer.accept(rs);
+					}
+				}
+			}
+			if (pg) {
+				conn.setAutoCommit(true);
+			}
+			entry.setValid(true);
 		} catch (SQLException e) {
 			Log.e(e);
 			response(exchange, 500);
