@@ -913,9 +913,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 			});
 			Alias alias = sei.getAlias();
-			if (alias != null && alias.getName().equals("table")) {
-				alias.setName("\"table\"");
+			if (alias == null) {
+				continue;
+			}
+			String name = alias.getName();
+			switch (name) {
+			case "default":
+			case "table":
+				alias.setName('"' + name + '"');
 				replaced = true;
+				break;
+			default:
 			}
 		}
 	}
