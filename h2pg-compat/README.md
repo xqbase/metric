@@ -118,6 +118,10 @@ Known Issue:
 
 - Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) columns via native PostgreSQL (ODBC works with `NUMERIC`)
 
+### Pentaho
+
+Pentaho 9.0.0.0 tested.
+
 ### ~Toad Edge~
 
 Toad Edge not supported.
