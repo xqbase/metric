@@ -135,6 +135,14 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private static final Column FALSE = new Column("FALSE");
 	private static final String IN_PARENTHESES_PLACEHOLDER = "SELECT '{IN_PARENTHESES}'";
 	private static final String NOOP = "SET NETWORK_TIMEOUT 0";
+	private static final String JOIN_INDEX =
+			"JOIN pg_namespace ni ON ni.nspname = i.index_schema " +
+			"JOIN pg_class ci ON ci.relnamespace = ni.id " +
+			"AND ci.relname = i.index_name AND ci.relkind = 'i' ";
+	private static final String JOIN_TABLE =
+			"JOIN pg_namespace nt ON nt.nspname = t.table_schema " +
+			"JOIN pg_class ct ON ct.relnamespace = nt.id " +
+			"AND ct.relname = t.table_name AND ct.relkind = 'r' ";
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
 		// "deferrable" and "tablespace" are keywords in JSqlParser
@@ -311,7 +319,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addEmptyTable("information_schema.role_table_grants", "'' grantor, '' grantee, " +
 				"'' table_schema, '' table_name, '' privilege_type, " +
 				"FALSE is_grantable, FALSE with_hierarchy");
-		addTable("pg_index", "SELECT i.id indexrelid, t.id indrelid, COUNT(*) indnatts, " +
+		addTable("pg_index", "SELECT ci.oid indexrelid, ct.oid indrelid, COUNT(*) indnatts, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE ELSE FALSE END) indisclustered, " +
 				"(CASE index_type_name WHEN 'PRIMARY KEY' THEN TRUE " +
 				"WHEN 'UNIQUE INDEX' THEN TRUE ELSE FALSE END) indisunique, " +
@@ -320,23 +328,19 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				// but not supported by JSqlParser
 				"NULL indexprs, ARRAY_AGG(c.ordinal_position) indkey, NULL indclass, " +
 				"NULL indpred, NULL indoption FROM information_schema.index_columns ic " +
-				"JOIN information_schema.indexes i USING (index_schema, index_name) " +
-				"JOIN information_schema.tables t USING (table_schema, table_name) " +
+				"JOIN information_schema.indexes i USING (index_schema, index_name) " + JOIN_INDEX +
+				"JOIN information_schema.tables t USING (table_schema, table_name) " + JOIN_TABLE +
 				"JOIN information_schema.columns c USING (table_schema, table_name, column_name) " +
-				"GROUP BY i.id");
-		addTable("pg_indexes", "SELECT n.nspname AS schemaname, c.relname AS tablename, " +
-				"i.relname AS indexname, t.spcname AS \"tablespace\", " +
-				"pg_get_indexdef(i.oid) AS indexdef FROM information_schema.indexes x " +
-				"JOIN information_schema.tables it USING (table_schema, table_name) " +
-				"JOIN pg_class c ON c.oid = it.id " +
-				"JOIN pg_class i ON i.oid = x.id " +
-				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace " +
-				"LEFT JOIN pg_tablespace t ON t.oid = i.reltablespace " +
-				"WHERE c.relkind IN ('r', 'm', 'p') AND i.relkind IN ('i', 'I')");
+				"GROUP BY ci.oid");
+		addTable("pg_indexes", "SELECT nt.nspname AS schemaname, ct.relname AS tablename, " +
+				"ci.relname AS indexname, ts.spcname AS \"tablespace\", " +
+				"pg_get_indexdef(ci.oid) AS indexdef FROM information_schema.indexes i " + JOIN_INDEX +
+				"JOIN information_schema.tables t USING (table_schema, table_name) " + JOIN_TABLE +
+				"LEFT JOIN pg_tablespace ts ON ts.oid = ci.reltablespace");
 		addTable("pg_settings", "SELECT name, setting, '' source FROM pg_settings " +
 				"UNION ALL SELECT 'max_index_keys', '32', ''");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
-				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p')");
+				"LEFT JOIN pg_namespace n ON n.id = c.relnamespace WHERE c.relkind IN ('r', 'p')");
 		addTable("pg_type", "SELECT oid, (CASE oid " +
 				"WHEN 16 THEN 'bool' WHEN 17 THEN 'bytea' WHEN 20 THEN 'int8' " +
 				"WHEN 21 THEN 'int2' WHEN 23 THEN 'int4' WHEN 25 THEN 'text' " +
@@ -349,7 +353,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"0 typndims, 0 typarray, ${owner} typowner, NULL typalign, NULL typstorage " +
 				"FROM pg_type");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
-				"LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'v'");
+				"LEFT JOIN pg_namespace n ON n.id = c.relnamespace WHERE c.relkind = 'v'");
 		addTable("INFORMATION_SCHEMA.character_sets", "SELECT 'UTF8' character_set_name");
 
 		NullValue nul = new NullValue();
@@ -830,13 +834,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			switch (sei.toString()) {
 			case "information_schema._pg_expandarray(i.indkey) AS keys":
 				// for DatabaseMetaData.getPrimaryKeys() in PgJDBC 42.2.9
-				parentSet.accept(select("SELECT i.id indexrelid, t.id indrelid, " +
+				parentSet.accept(select("SELECT ci.oid indexrelid, ct.oid indrelid, " +
 						"(CASE index_type_name WHEN 'PRIMARY KEY' " +
 						"THEN TRUE ELSE FALSE END) indisprimary, " +
 						"c.ordinal_position keys_x, ic.ordinal_position keys_n " +
 						"FROM information_schema.index_columns ic " +
 						"JOIN information_schema.indexes i USING (index_schema, index_name) " +
+						JOIN_INDEX +
 						"JOIN information_schema.tables t USING (table_schema, table_name) " +
+						JOIN_TABLE +
 						"JOIN information_schema.columns c " +
 						"USING (table_schema, table_name, column_name)"));
 				replaced = true;
@@ -858,13 +864,15 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 					sei.setAlias(new Alias("keys_x"));
 					SubSelect ss = new SubSelect();
 					ss.setAlias(join.getRightItem().getAlias());
-					ss.setSelectBody(select("SELECT i.id indexrelid, t.id indrelid, " +
+					ss.setSelectBody(select("SELECT ci.oid indexrelid, ct.oid indrelid, " +
 							"(CASE index_type_name WHEN 'PRIMARY KEY' " +
 							"THEN TRUE ELSE FALSE END) indisprimary, " +
 							"c.ordinal_position keys_x, ic.ordinal_position keys_n " +
 							"FROM information_schema.index_columns ic " +
 							"JOIN information_schema.indexes i USING (index_schema, index_name) " +
+							JOIN_INDEX +
 							"JOIN information_schema.tables t USING (table_schema, table_name) " +
+							JOIN_TABLE +
 							"JOIN information_schema.columns c " +
 							"USING (table_schema, table_name, column_name)"));
 					join.setRightItem(ss);
