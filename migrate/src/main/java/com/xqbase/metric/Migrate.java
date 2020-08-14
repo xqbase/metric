@@ -32,7 +32,8 @@ public class Migrate {
 
 	public static void main(String[] args) throws SQLException {
 		if (args == null || args.length < 2) {
-			System.out.println("Migrate Usage: java -jar metric-migrate.jar <src.jdbc.url> <dst.jdbc.url>");
+			System.out.println("Migrate Usage: java [-cp <jdbc-driver>[:<jdbc-driver>]] " +
+					"-jar migrate.jar <src.jdbc.url> <dst.jdbc.url>");
 			return;
 		}
 		for (String driver : DRIVERS) {
