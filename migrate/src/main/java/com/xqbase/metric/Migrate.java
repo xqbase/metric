@@ -1,5 +1,6 @@
 package com.xqbase.metric;
 
+import java.io.File;
 import java.sql.Blob;
 import java.sql.Clob;
 import java.sql.Connection;
@@ -32,8 +33,12 @@ public class Migrate {
 
 	public static void main(String[] args) throws SQLException {
 		if (args == null || args.length < 2) {
-			System.out.println("Migrate Usage: java [-cp <jdbc-driver>[:<jdbc-driver>]] " +
-					"-jar migrate.jar <src.jdbc.url> <dst.jdbc.url>");
+			System.out.println("Migrate Usage:");
+			System.out.println("\tjava -jar migrate.jar \"<src.jdbc.url>\" \"<dst.jdbc.url>\"");
+			System.out.println("or");
+			System.out.println(("\tjava -cp migrate.jar:<src.jdbc.driver.jar>:" +
+					"<dst.jdbc.driver.jar> com.xqbase.metric.Migrate " +
+					"\"<src.jdbc.url>\" \"<dst.jdbc.url>\"").replace(':', File.pathSeparatorChar));
 			return;
 		}
 		for (String driver : DRIVERS) {
