@@ -633,6 +633,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			return;
 		}
 		if (exp.toString().equals("p.prorettype::regtype != 'trigger'::regtype")) {
+			// for TestPgClients.testPgCli(), test case #4
 			parentSet.accept(new Column("TRUE"));
 			replaced = true;
 			return;
@@ -640,15 +641,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		BinaryExpression be = (BinaryExpression) exp;
 		Expression left = be.getLeftExpression();
 		Expression right = be.getRightExpression();
-		// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
-		// ARRAY_CONTAINS(SELECT con.conkey ..., attnum)
-		if (anyArray && be instanceof EqualsTo &&
-				right instanceof AnyComparisonExpression) {
-			SubSelect ss = ((AnyComparisonExpression) right).getSubSelect();
-			parentSet.accept(arrayContains(ss, left));
-			replaced = true;
-			return;
-		}
 		// array @> ARRAY[value] -> ARRAY_CONTAINS(array, value)
 		if (be instanceof JsonOperator && right instanceof ArrayExpression &&
 				((JsonOperator) be).getStringExpression().equals("@>")) {
@@ -659,7 +651,20 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				return;
 			}
 		}
-		if (be instanceof EqualsTo && right instanceof Function &&
+		if (!(be instanceof EqualsTo)) {
+			replace(left, be::setLeftExpression);
+			replace(right, be::setRightExpression);
+			return;
+		}
+		// attnum = ANY ((SELECT con.conkey ...)::oid[]) ->
+		// ARRAY_CONTAINS(SELECT con.conkey ..., attnum)
+		if (anyArray && right instanceof AnyComparisonExpression) {
+			SubSelect ss = ((AnyComparisonExpression) right).getSubSelect();
+			parentSet.accept(arrayContains(ss, left));
+			replaced = true;
+			return;
+		}
+		if (right instanceof Function &&
 				((Function) right).getName().toUpperCase().equals("ANY")) {
 			Function func = (Function) right;
 			List<Expression> exps = func.getParameters().getExpressions();
@@ -689,6 +694,18 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				}
 				replaced = true;
 				return;
+			}
+		}
+		if (left instanceof Column && right instanceof StringValue &&
+				((StringValue) right).getValue().equals("t")) {
+			switch (((Column) left).getColumnName()) {
+			case "indisclustered":
+			case "indisunique":
+			case "indisprimary":
+				parentSet.accept(left);
+				replaced = true;
+				return;
+			default:
 			}
 		}
 		replace(left, be::setLeftExpression);
@@ -884,23 +901,33 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			}
 			Expression exp = sei.getExpression();
 			if (exp instanceof Function && ps != null) {
-				switch (((Function) exp).getName()) {
+				String name = ((Function) exp).getName();
+				switch (name) {
 				case "generate_series":
-					sei.setExpression(new Column("\"X\""));
-					TableFunction tf = new TableFunction();
-					tf.setFunction((Function) exp);
-					replace(exp, null);
-					if (ps.getFromItem() == null) {
-						ps.setFromItem(tf);
-					} else {
-						Join join = new Join();
-						join.setRightItem(tf);
-						join.setSimple(true);
-						List<Join> joins = ps.getJoins();
-						if (joins == null) {
-							ps.setJoins(Arrays.asList(join));
+				case "unnest":
+					switch (exp.toString()) {
+					case "unnest(conkey)":
+					case "unnest(confkey)":
+						// for TestPgClients.testLibreOffice(), test case #1
+						sei.setExpression(new NullValue());
+						break;
+					default:
+						sei.setExpression(new Column(name.equals("unnest") ? "\"C1\"" : "\"X\""));
+						TableFunction tf = new TableFunction();
+						tf.setFunction((Function) exp);
+						replace(exp, null);
+						if (ps.getFromItem() == null) {
+							ps.setFromItem(tf);
 						} else {
-							joins.add(join);
+							Join join = new Join();
+							join.setRightItem(tf);
+							join.setSimple(true);
+							List<Join> joins = ps.getJoins();
+							if (joins == null) {
+								ps.setJoins(Arrays.asList(join));
+							} else {
+								joins.add(join);
+							}
 						}
 					}
 					replaced = true;

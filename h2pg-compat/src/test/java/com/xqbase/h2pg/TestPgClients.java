@@ -1673,11 +1673,28 @@ public class TestPgClients {
 			}
 			assertFalse(rs.next());
 		}
-		/*
-		try (ResultSet rs = stat.executeQuery("SELECT array_upper(ARRAY[5, 6, 7, 8, 9, 10], 1)")) {
-			assertEquals(6, rs.getLong(1));
+		stat.execute("CREATE TABLE test3 (id INT PRIMARY KEY, x1 INT ARRAY)");
+		stat.execute("INSERT INTO test3 (id, x1) VALUES (1, ARRAY[5, 6, 7, 8, 9, 10])");
+		try (ResultSet rs = stat.executeQuery("SELECT * FROM unnest(SELECT x1 FROM test3)")) {
+			for (int i = 5; i <= 10; i ++) {
+				assertTrue(rs.next());
+				assertEquals(i, rs.getLong(1));
+			}
+			assertFalse(rs.next());
 		}
-		*/
+		try (ResultSet rs = stat.executeQuery("SELECT id, unnest(SELECT x1 FROM test3) c1 FROM test3")) {
+			for (int i = 5; i <= 10; i ++) {
+				assertTrue(rs.next());
+				assertEquals(1, rs.getInt("id"));
+				assertEquals(i, rs.getLong("c1"));
+			}
+			assertFalse(rs.next());
+		}
+		try (ResultSet rs = stat.executeQuery("SELECT array_upper((SELECT x1 FROM test3), 1)")) {
+			assertTrue(rs.next());
+			assertEquals(6, rs.getLong(1));
+			assertFalse(rs.next());
+		}
 		try (ResultSet rs = stat.executeQuery("SELECT array_upper()")) {
 			assertFalse(true);
 		} catch (SQLException e) {
