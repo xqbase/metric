@@ -91,7 +91,7 @@ Database Navigator plugin 3.2.0627 tested.
 
 ### TablePlus
 
-TablePlus 3.6.3 tested.
+TablePlus 3.6.3 and TablePlus iOS 3.8.0 tested.
 
 ### dbForge Studio
 

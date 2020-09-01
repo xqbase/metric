@@ -145,7 +145,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			"AND ct.relname = t.table_name AND ct.relkind = 'r' ";
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
-		// "deferrable" and "tablespace" are keywords in JSqlParser
+		// "check", "deferrable" and "tablespace" are keywords in JSqlParser
+		" as check,",
 		", condeferrable::int AS deferrable, ",
 		"tablespace) AS tablespace",
 		"')) as tablespace, ",
@@ -189,6 +190,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	};
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
+		" as \"check\",",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
 		"')) as \"tablespace\", ",
@@ -296,7 +298,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 				"NULL prolang, NULL proretset, 0 pronargs, FALSE proisagg");
 		addColumns("pg_roles", "TRUE rolcanlogin, -1 rolconnlimit, NULL rolvaliduntil");
 		addColumns("pg_user", "oid usesysid");
-		addColumns("information_schema.columns", "NULL udt_schema, NULL udt_name");
+		addColumns("information_schema.columns", "NULL udt_schema, data_type udt_name");
 		addColumns("information_schema.routines", "NULL type_udt_name");
 		addColumns("information_schema.triggers",
 				"NULL event_object_table, NULL event_object_schema");
@@ -380,6 +382,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		LongValue zero = new LongValue(0);
 		addFunction("pg_backend_pid", zero);
 		addFunction("pg_database_size", zero);
+		// https://github.com/h2database/h2database/issues/2509
+		addFunction("pg_relation_size", zero);
 		addFunction("pg_total_relation_size", zero);
 		addFunction("pg_size_pretty", new StringValue("0"));
 		addFunction("array_lower", new LongValue(1));

@@ -1475,6 +1475,24 @@ public class TestPgClients {
 	}
 
 	@Test
+	public void testTablePlus() throws SQLException {
+		try (ResultSet rs = stat.executeQuery("SELECT ordinal_position,column_name," +
+				"udt_name AS data_type,numeric_precision,datetime_precision,numeric_scale," +
+				"character_maximum_length AS data_length,is_nullable,column_name as check," +
+				"column_name as check_constraint,column_default,column_name AS foreign_key," +
+				"pg_catalog.col_description(3,ordinal_position) as comment " +
+				"FROM information_schema.columns WHERE table_name='test'AND table_schema='public'")) {
+			assertTrue(rs.next());
+			assertEquals("id", rs.getString("check"));
+			assertEquals("integer", rs.getString("data_type"));
+			assertTrue(rs.next());
+			assertEquals("x1", rs.getString("check"));
+			assertEquals("integer", rs.getString("data_type"));
+			assertFalse(rs.next());
+		}
+	}
+
+	@Test
 	public void testDbForge() throws SQLException {
 		stat.execute("CREATE TABLE test2 (x1 INT, x2 INT, PRIMARY KEY (x1, x2))");
 		int oid;
