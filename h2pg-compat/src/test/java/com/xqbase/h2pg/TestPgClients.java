@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.lang.reflect.Field;
 import java.sql.Connection;
@@ -1231,6 +1232,8 @@ public class TestPgClients {
 				"rolcanlogin AS login_role, rolconnlimit, rolvaliduntil " +
 				"FROM pg_roles ORDER BY rolname ASC")) {
 			assertTrue(rs.next());
+			assertEquals("public", rs.getString("rolname"));
+			assertTrue(rs.next());
 			assertEquals("sa", rs.getString("rolname"));
 			assertFalse(rs.next());
 		}
@@ -1714,7 +1717,7 @@ public class TestPgClients {
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT array_upper()")) {
-			assertFalse(true);
+			fail();
 		} catch (SQLException e) {
 			assertEquals("42001", e.getSQLState());
 		}

@@ -300,8 +300,6 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		addColumns("pg_user", "oid usesysid");
 		addColumns("information_schema.columns", "NULL udt_schema, data_type udt_name");
 		addColumns("information_schema.routines", "NULL type_udt_name");
-		addColumns("information_schema.triggers",
-				"NULL event_object_table, NULL event_object_schema");
 		addEmptyTable("pg_collation", "0 oid, '' collnamespace, '' collname");
 		addEmptyTable("pg_depend", "'' deptype, 0 classid, 0 refclassid, " +
 				"0 objid, 0 objsubid, 0 refobjid, 0 refobjsubid");
