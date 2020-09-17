@@ -7,13 +7,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.nio.charset.Charset;
-import java.sql.PreparedStatement;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -24,12 +22,11 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.h2.command.CommandInterface;
 import org.h2.command.Parser;
-import org.h2.jdbc.JdbcResultSetMetaData;
 import org.h2.result.ResultInterface;
 import org.h2.server.pg.PgServer;
 import org.h2.server.pg.PgServerThread;
-import org.h2.server.pg.PgServerThreadEx;
 import org.h2.util.Bits;
 import org.h2.util.ScriptReader;
 import org.h2.util.Utils;
@@ -87,10 +84,11 @@ import net.sf.jsqlparser.statement.select.ValuesList;
 import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 
-public class PgServerThreadCompat extends PgServerThreadEx {
+public class PgServerThreadCompat implements Runnable {
 	private static Field initDone, out, dataInRaw, stop, portalsField;
-	private static Field formatField, portalPrep, preparedPrep, resultField;
-	private static Method process, getEncoding;
+	private static Field formatField, portalPrep, preparedPrep;
+	private static Method process, getEncoding, close, setProcessId, setThread;
+	private static Constructor<PgServerThread> newThread;
 
 	private static Field getField(Class<?> clazz,
 			String name) throws ReflectiveOperationException {
@@ -263,9 +261,13 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			portalPrep = getField(portalClass, "prep");
 			preparedPrep = getField(Class.
 					forName("org.h2.server.pg.PgServerThread$Prepared"), "prep");
-			resultField = getField(JdbcResultSetMetaData.class, "result");
 			process = getMethod("process");
 			getEncoding = getMethod("getEncoding");
+			close = getMethod("close");
+			setProcessId = getMethod("setProcessId", int.class);
+			setThread = getMethod("setThread", Thread.class);
+			newThread = PgServerThread.class.getDeclaredConstructor(Socket.class, PgServer.class);
+			newThread.setAccessible(true);
 			Field tokensField = Parser.class.getDeclaredField("TOKENS");
 			tokensField.setAccessible(true);
 			tokens = (String[]) tokensField.get(null);
@@ -1274,6 +1276,8 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		throw new EOFException();
 	}
 
+	PgServerThread thread;
+
 	private Socket socket;
 	private PgServerCompat server;
 	private InputStream ins;
@@ -1281,11 +1285,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private Map<?, ?> portals;
 
 	public PgServerThreadCompat(Socket socket, PgServerCompat server) {
-		super(socket, server);
-		this.socket = socket;
-		this.server = server;
 		try {
-			portals = (Map<?, ?>) portalsField.get(this);
+			this.thread = newThread.newInstance(socket, server.server);
+			this.socket = socket;
+			this.server = server;
+			portals = (Map<?, ?>) portalsField.get(thread);
 		} catch (ReflectiveOperationException e) {
 			throw new RuntimeException(e);
 		}
@@ -1315,7 +1319,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 	private void read() throws IOException, ReflectiveOperationException {
 		int x = 0;
 		int initLen = 0;
-		if (initDone.getBoolean(this)) {
+		if (initDone.getBoolean(thread)) {
 			x = ins.read();
 			if (x < 0) {
 				throw new EOFException();
@@ -1334,7 +1338,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 		}
 		System.arraycopy(head, 0, data, initLen, 4);
 		read(data, initLen + 4, dataLen - 4);
-		Charset charset = (Charset) getEncoding.invoke(this);
+		Charset charset = (Charset) getEncoding.invoke(thread);
 		switch (x) {
 		case 'E':
 			int z1 = findZero(data, 5, data.length);
@@ -1357,25 +1361,17 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			if (!binary) {
 				break;
 			}
-			ResultSetMetaData rsmd;
-			int columnCount;
-			try {
-				rsmd = ((PreparedStatement) preparedPrep.
-						get(portalPrep.get(portal))).getMetaData();
-				if (rsmd == null) {
-					break;
-				}
-				columnCount = rsmd.getColumnCount();
-			} catch (SQLException e) {
-				server.traceError(e);
+			ResultInterface result = ((CommandInterface) preparedPrep.
+					get(portalPrep.get(portal))).getMetaData();
+			if (result == null) {
 				break;
 			}
+			int columnCount = result.getVisibleColumnCount();
 			if (resultColumnFormat.length != columnCount) {
 				resultColumnFormat = new int[columnCount];
 				Arrays.fill(resultColumnFormat, 1);
 				formatField.set(portal, resultColumnFormat);
 			}
-			ResultInterface result = (ResultInterface) resultField.get(rsmd);
 			for (int i = 0; i < columnCount; i ++) {
 				if (resultColumnFormat[i] != 0 &&
 						!BINARY_TYPES.contains(Integer.valueOf(PgServer.
@@ -1434,7 +1430,7 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			break;
 		default:
 		}
-		dataInRaw.set(this, new DataInputStream(new ByteArrayInputStream(data)));
+		dataInRaw.set(thread, new DataInputStream(new ByteArrayInputStream(data)));
 	}
 
 	@Override
@@ -1443,11 +1439,11 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			server.trace("Connect");
 			ins = socket.getInputStream();
 			outs = socket.getOutputStream();
-			out.set(this, outs);
-			// dataInRaw.set(this, new DataInputStream(ins));
-			while (!stop.getBoolean(this)) {
+			out.set(thread, outs);
+			// dataInRaw.set(thread, new DataInputStream(ins));
+			while (!stop.getBoolean(thread)) {
 				read();
-				process.invoke(this);
+				process.invoke(thread);
 				// not necessary to flush SocketOutputStream
 				// outs.flush();
 			}
@@ -1457,7 +1453,27 @@ public class PgServerThreadCompat extends PgServerThreadEx {
 			server.traceError(e);
 		} finally {
 			server.trace("Disconnect");
-			close();
+			try {
+				close.invoke(thread);
+			} catch (ReflectiveOperationException e) {
+				throw new RuntimeException(e);
+			}
+		}
+	}
+
+	void setProcessId(int id) {
+		try {
+			setProcessId.invoke(thread, Integer.valueOf(id));
+		} catch (ReflectiveOperationException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	void setThread(Thread thread) {
+		try {
+			setThread.invoke(this.thread, thread);
+		} catch (ReflectiveOperationException e) {
+			throw new RuntimeException(e);
 		}
 	}
 }
