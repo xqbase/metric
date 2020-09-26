@@ -78,6 +78,11 @@ public class TestPgClients {
 		}
 	}
 
+	private static Connection getConnection() throws SQLException {
+		return DriverManager.getConnection("jdbc:postgresql://localhost:5535/pgserver", "sa", "sa");
+		// return DriverManager.getConnection("jdbc:postgresql://localhost/postgres", "postgres", "****");
+	}
+
 	private Server server;
 	private Connection conn;
 	private Statement stat;
@@ -87,7 +92,7 @@ public class TestPgClients {
 		server = new Server(new PgServerCompat(), "-ifNotExists",
 				"-pgPort", "5535", "-key", "pgserver", "mem:pgserver");
 		server.start();
-		conn = DriverManager.getConnection("jdbc:postgresql://localhost:5535/pgserver", "sa", "sa");
+		conn = getConnection();
 		stat = conn.createStatement();
 		stat.execute("CREATE TABLE test (id SERIAL PRIMARY KEY, x1 INTEGER)");
 	}
@@ -184,6 +189,76 @@ public class TestPgClients {
 	public void testLazy() throws SQLException {
 		testLazy(false);
 		testLazy(true);
+	}
+
+	/** @see https://stackoverflow.com/questions/59441183 */
+	@Test
+	public void testMvcc() throws SQLException {
+		int level = Connection.TRANSACTION_REPEATABLE_READ;
+		try (
+			Connection setup = getConnection();
+			Connection c1 = getConnection();
+			Connection c2 = getConnection();
+			Statement ss = setup.createStatement();
+			Statement s1 = c1.createStatement();
+			Statement s2 = c2.createStatement();
+		) {
+			ss.execute("INSERT INTO test (id, x1) VALUES (1, 10)");
+
+			c1.setTransactionIsolation(level);
+			c1.setAutoCommit(false);
+			c2.setTransactionIsolation(level);
+			c2.setAutoCommit(false);
+
+			// Session A
+			try (ResultSet rs = s1.executeQuery("SELECT x1 FROM test WHERE id = 1")) {
+				rs.next();
+				assertEquals(10, rs.getInt("x1"));
+			}
+
+			// Session B
+			try (ResultSet rs = s2.executeQuery("SELECT x1 FROM test WHERE id = 1")) {
+				rs.next();
+				assertEquals(10, rs.getInt("x1"));
+			}
+
+			// Session A
+			s1.execute("UPDATE test SET x1 = x1 + 2 WHERE id = 1");
+			try (ResultSet rs = s1.executeQuery("SELECT x1 FROM test WHERE id = 1")) {
+				rs.next();
+				assertEquals(12, rs.getInt("x1"));
+			}
+			c1.commit();
+
+			// Session B
+			try (ResultSet rs = s2.executeQuery("SELECT x1 FROM test WHERE id = 1")) {
+				rs.next();
+				// Here we get the expected result because Session B have an isolated 
+				// copy of row id = 1, i.e. the commit from Session A is NOT visible here
+				assertEquals(10, rs.getInt("x1"));
+			}
+
+			// Session B
+			// According to this video https://www.youtube.com/watch?v=sxabCqWsFHg
+			// about MVCC (at 15'00"), this update should be rejected.
+			try {
+				s2.execute("UPDATE test SET x1 = x1 + 3 WHERE id = 1");
+				fail("Should be rejected");
+			} catch (SQLException e) {
+				assertEquals("40001", e.getSQLState());
+			}
+
+			// Session B
+			try (ResultSet rs = s2.executeQuery("SELECT x1 FROM test WHERE id = 1")) {
+				rs.next();
+				// 10 if not rolled-back
+				assertEquals(12, rs.getInt("x1"));
+			} catch (SQLException e) {
+				// if real PostgreSQL, current transaction is aborted
+				assertEquals("25P02", e.getSQLState());
+			}
+			c2.rollback();
+		}
 	}
 
 	@Test
