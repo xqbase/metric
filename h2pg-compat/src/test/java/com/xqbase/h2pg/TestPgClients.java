@@ -31,6 +31,31 @@ import org.junit.Test;
 import org.postgresql.jdbc.PgConnection;
 
 public class TestPgClients {
+	@FunctionalInterface
+	private interface ConsumerEx<T, E extends Exception> {
+		public void accept(T t) throws E;
+	}
+
+	private static class NoAutoCommit implements AutoCloseable {
+		private Connection conn;
+		private boolean lazy;
+
+		NoAutoCommit(Connection conn, boolean lazy) throws SQLException {
+			this.conn = conn;
+			this.lazy = lazy;
+			if (lazy) {
+				conn.setAutoCommit(false);
+			}
+		}
+
+		@Override
+		public void close() throws SQLException {
+			if (lazy) {
+				conn.setAutoCommit(true);
+			}
+		}
+	}
+
 	private static Set<?> supportedBinaryOids;
 
 	static {
@@ -65,6 +90,100 @@ public class TestPgClients {
 		conn = DriverManager.getConnection("jdbc:postgresql://localhost:5535/pgserver", "sa", "sa");
 		stat = conn.createStatement();
 		stat.execute("CREATE TABLE test (id SERIAL PRIMARY KEY, x1 INTEGER)");
+	}
+
+	private void testLazy(boolean lazy) throws SQLException {
+		for (int fetchSize = 2; fetchSize <= 7; fetchSize ++) {
+			stat.setFetchSize(fetchSize);
+			stat.execute("SET LAZY_QUERY_EXECUTION " + lazy);
+			stat.execute("DROP TABLE IF EXISTS test");
+			stat.execute("CREATE TABLE test (id INT PRIMARY KEY, x1 VARCHAR)");
+			stat.execute("INSERT INTO test (id, x1) VALUES (1, '2'), (2, '3'), (3, '4')");
+			// fetchSize = 2: Suspend(2) + Close(1)
+			// fetchSize = 3, Close(3), H2PG
+			// fetchSize = 3, Suspend(3) + Close(0), PG
+			// fetchSize > 3, Close(3)
+			int rowCount = 0;
+			int idSum = 0;
+			StringBuilder x1Concat = new StringBuilder();
+			try (
+				NoAutoCommit __ = new NoAutoCommit(conn, lazy);
+				ResultSet rs = stat.executeQuery("SELECT id, x1 FROM test");
+			) {
+				while (rs.next()) {
+					rowCount ++;
+					idSum += rs.getInt("id");
+					x1Concat.append(rs.getString("x1"));
+				}
+			}
+			assertEquals(3, rowCount);
+			assertEquals(6, idSum);
+			assertEquals("234", x1Concat.toString());
+			stat.execute("INSERT INTO test (id, x1) VALUES (4, '5'), (5, '6'), (6, '7'), (7, 'x')");
+			// fetchSize = 2: Suspend(2 + 2) + Error(2) => rowCount = 4, H2PG
+			// fetchSize = 2: Suspend(2 + 2 + 2) + Error(0) => rowCount = 6, PG
+			// fetchSize = 3: Suspend(3) + Error(3) => rowCount = 3, H2PG
+			// fetchSize = 3: Suspend(3 + 3) + Error(0) => rowCount = 6, PG
+			// fetchSize = 4: Suspend(4) + Error(2) => rowCount = 4
+			// fetchSize = 5: Suspend(5) + Error(1) => rowCount = 5
+			// fetchSize = 6: Error(6) => rowCount = 0, H2PG
+			// fetchSize = 6: Suspend(6) + Error(0) => rowCount = 6, PG
+			// fetchSize > 6: Error(6) => rowCount = 0
+			rowCount = 0;
+			idSum = 0;
+			x1Concat.setLength(0);
+			try (
+				NoAutoCommit __ = new NoAutoCommit(conn, lazy);
+				ResultSet rs = stat.executeQuery("SELECT id, CAST(x1 AS INT) x1 FROM test");
+			) {
+				while (rs.next()) {
+					rowCount ++;
+					idSum += rs.getInt("id");
+					x1Concat.append(rs.getString("x1"));
+				}
+				fail();
+			} catch (SQLException e) {
+				boolean realPg = false;
+				switch (e.getSQLState()) {
+				case "22018":
+					break;
+				case "22P02":
+					realPg = true;
+					break;
+				default:
+					fail();
+				}
+				if (!lazy || (fetchSize > 6 || (!realPg && fetchSize == 6))) {
+					assertEquals(0, rowCount);
+					assertEquals(0, idSum);
+					assertEquals("", x1Concat.toString());
+				} else if (!realPg && fetchSize == 3) {
+					assertEquals(3, rowCount);
+					assertEquals(6, idSum);
+					assertEquals("234", x1Concat.toString());
+				} else if (fetchSize == 4 || (!realPg && fetchSize == 2)) {
+					assertEquals(4, rowCount);
+					assertEquals(10, idSum);
+					assertEquals("2345", x1Concat.toString());
+				} else if (fetchSize == 5) {
+					assertEquals(5, rowCount);
+					assertEquals(15, idSum);
+					assertEquals("23456", x1Concat.toString());
+				} else if (realPg && (fetchSize == 2 || fetchSize == 3 || fetchSize == 6)) {
+					assertEquals(6, rowCount);
+					assertEquals(21, idSum);
+					assertEquals("234567", x1Concat.toString());
+				} else {
+					fail();
+				}
+			}
+		}
+	}
+
+	@Test
+	public void testLazy() throws SQLException {
+		testLazy(false);
+		testLazy(true);
 	}
 
 	@Test
@@ -141,7 +260,7 @@ public class TestPgClients {
 	}
 
 	@Test
-	public void TestNpgsql() throws SQLException {
+	public void testNpgsql() throws SQLException {
 		try (ResultSet rs = stat.executeQuery("/*** Load all supported types ***/ " +
 				"SELECT ns.nspname, a.typname, a.oid, a.typrelid, a.typbasetype, " +
 				"CASE WHEN pg_proc.proname='array_recv' THEN 'a' ELSE a.typtype END AS type, " +
