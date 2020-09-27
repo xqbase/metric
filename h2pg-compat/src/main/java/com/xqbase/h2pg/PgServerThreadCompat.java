@@ -24,6 +24,7 @@ import java.util.stream.IntStream;
 
 import org.h2.command.CommandInterface;
 import org.h2.command.Parser;
+import org.h2.engine.SessionLocal;
 import org.h2.result.ResultInterface;
 import org.h2.server.pg.PgServer;
 import org.h2.server.pg.PgServerThread;
@@ -85,7 +86,7 @@ import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 
 public class PgServerThreadCompat implements Runnable {
-	private static Field initDone, out, dataInRaw, stop, portalsField;
+	private static Field initDone, out, dataInRaw, stop, portalsField, sessionField;
 	private static Field formatField, portalPrep, preparedPrep;
 	private static Method process, getEncoding, close, setProcessId, setThread;
 	private static Constructor<PgServerThread> newThread;
@@ -256,6 +257,7 @@ public class PgServerThreadCompat implements Runnable {
 			dataInRaw = getField("dataInRaw");
 			stop = getField("stop");
 			portalsField = getField("portals");
+			sessionField = getField("session");
 			Class<?> portalClass = Class.forName("org.h2.server.pg.PgServerThread$Portal");
 			formatField = getField(portalClass, "resultColumnFormat");
 			portalPrep = getField(portalClass, "prep");
@@ -1283,6 +1285,7 @@ public class PgServerThreadCompat implements Runnable {
 	private InputStream ins;
 	private OutputStream outs;
 	private Map<?, ?> portals;
+	private SessionLocal session = null;
 
 	public PgServerThreadCompat(Socket socket, PgServerCompat server) {
 		try {
@@ -1342,6 +1345,14 @@ public class PgServerThreadCompat implements Runnable {
 		switch (x) {
 		case 'E':
 			int z1 = findZero(data, 5, data.length);
+			if (Bits.readInt(data, z1 + 1) > 0) {
+				session = (SessionLocal) sessionField.get(thread);
+				if (session.isLazyQueryExecution()) {
+					session = null;
+				} else {
+					session.setLazyQueryExecution(true);
+				}
+			}
 			String name = new String(data, 5, z1 - 5, charset);
 			Object portal = portals.get(name);
 			if (portal == null) {
@@ -1444,6 +1455,10 @@ public class PgServerThreadCompat implements Runnable {
 			while (!stop.getBoolean(thread)) {
 				read();
 				process.invoke(thread);
+				if (session != null) {
+					session.setLazyQueryExecution(false);
+					session = null;
+				}
 				// not necessary to flush SocketOutputStream
 				// outs.flush();
 			}

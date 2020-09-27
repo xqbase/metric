@@ -100,7 +100,7 @@ public class TestPgClients {
 	private void testLazy(boolean lazy) throws SQLException {
 		for (int fetchSize = 2; fetchSize <= 7; fetchSize ++) {
 			stat.setFetchSize(fetchSize);
-			stat.execute("SET LAZY_QUERY_EXECUTION " + lazy);
+			// stat.execute("SET LAZY_QUERY_EXECUTION " + lazy);
 			stat.execute("DROP TABLE IF EXISTS test");
 			stat.execute("CREATE TABLE test (id INT PRIMARY KEY, x1 VARCHAR)");
 			stat.execute("INSERT INTO test (id, x1) VALUES (1, '2'), (2, '3'), (3, '4')");
