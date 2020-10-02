@@ -349,10 +349,10 @@ public class PgServerThreadCompat implements Runnable {
 				"WHEN 16 THEN 'bool' WHEN 17 THEN 'bytea' WHEN 20 THEN 'int8' " +
 				"WHEN 21 THEN 'int2' WHEN 23 THEN 'int4' WHEN 25 THEN 'text' " +
 				"WHEN 700 THEN 'float4' WHEN 701 THEN 'float8' WHEN 1042 THEN 'bpchar' " +
-				"WHEN 1043 THEN 'varchar' WHEN 1184 THEN 'timestampz' WHEN 1266 THEN 'timetz' " +
+				"WHEN 1043 THEN 'varchar' WHEN 1184 THEN 'timestamptz' WHEN 1266 THEN 'timetz' " +
 				"ELSE LOWER(typname) END) \"typname\", " +
 				"typnamespace, typlen, typtype, typdelim, typrelid, " +
-				"typelem, typbasetype, typtypmod, typnotnull, typinput, " +
+				"typelem, typbasetype, typtypmod, typnotnull, typinput, 0 typreceive, " +
 				"FALSE typbyval, NULL typcategory, NULL typcollation, NULL typdefault, " +
 				"0 typndims, 0 typarray, ${owner} typowner, NULL typalign, NULL typstorage " +
 				"FROM pg_type");

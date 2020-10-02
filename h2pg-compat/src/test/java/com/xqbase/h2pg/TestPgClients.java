@@ -336,6 +336,7 @@ public class TestPgClients {
 
 	@Test
 	public void testNpgsql() throws SQLException {
+		// for Npgsql 4.1.2
 		try (ResultSet rs = stat.executeQuery("/*** Load all supported types ***/ " +
 				"SELECT ns.nspname, a.typname, a.oid, a.typrelid, a.typbasetype, " +
 				"CASE WHEN pg_proc.proname='array_recv' THEN 'a' ELSE a.typtype END AS type, " +
@@ -363,6 +364,58 @@ public class TestPgClients {
 				"/* Some special supported pseudo-types */ ORDER BY ord")) {
 			assertTrue(rs.next());
 		}
+		// for Npgsql 4.1.3
+		try (ResultSet rs = stat.executeQuery("SELECT ns.nspname, typ_and_elem_type.*, CASE " +
+				// First base types, enums, pseudo-types
+				"  WHEN typtype IN ('b', 'e', 'p') THEN 0 " +
+				// Ranges after
+				"  WHEN typtype = 'r' THEN 1 " +
+				// Composites after
+				"  WHEN typtype = 'c' THEN 2 " +
+				// Domains over non-arrays after
+				"  WHEN typtype = 'd' AND elemtyptype <> 'a' THEN 3 " +
+				// Arrays before
+				"  WHEN typtype = 'a' THEN 4 " +
+				// Domains over arrays last
+				"  WHEN typtype = 'd' AND elemtyptype = 'a' THEN 5 " +
+				"END AS ord FROM (" +
+				// Arrays have typtype=b - this subquery identifies them by their typreceive and converts their typtype to a
+				// We first do this for the type (innerest-most subquery), and then for its element type
+				// This also returns the array element, range subtype and domain base type as elemtypoid
+				"  SELECT typ.oid, typ.typnamespace, typ.typname, typ.typtype, typ.typrelid, typ.typnotnull, typ.relkind, " +
+				"  elemtyp.oid AS elemtypoid, elemtyp.typname AS elemtypname, elemcls.relkind AS elemrelkind, " +
+				"  CASE WHEN elemproc.proname='array_recv' THEN 'a' ELSE elemtyp.typtype END AS elemtyptype FROM (" +
+				"    SELECT typ.oid, typnamespace, typname, typrelid, typnotnull, relkind, typelem AS elemoid, " +
+				"    CASE WHEN proc.proname='array_recv' THEN 'a' ELSE typ.typtype END AS typtype, " +
+				"    CASE WHEN proc.proname='array_recv' THEN typ.typelem WHEN typ.typtype='d' THEN typ.typbasetype END " +
+				"    AS elemtypoid FROM pg_type AS typ " +
+				"    LEFT JOIN pg_class AS cls ON (cls.oid = typ.typrelid) " +
+				"    LEFT JOIN pg_proc AS proc ON proc.oid = typ.typreceive" +
+				"  ) AS typ " +
+				"  LEFT JOIN pg_type AS elemtyp ON elemtyp.oid = elemtypoid " +
+				"  LEFT JOIN pg_class AS elemcls ON (elemcls.oid = elemtyp.typrelid) " +
+				"  LEFT JOIN pg_proc AS elemproc ON elemproc.oid = elemtyp.typreceive" +
+				") AS typ_and_elem_type " +
+				"JOIN pg_namespace AS ns ON (ns.oid = typnamespace) " +
+				// Base, range, enum, domain
+				"WHERE typtype IN ('b', 'r', 'e', 'd') OR " +
+				// User-defined free-standing composites (not table composites) by default
+				"(typtype = 'c' AND relkind='c') OR " +
+				// Some special supported pseudo-types
+				"(typtype = 'p' AND typname IN ('record', 'void')) OR (" +
+				// Array of...
+				"  typtype = 'a' AND (" +
+				// Array of base, range, enum, domain
+				"    elemtyptype IN ('b', 'r', 'e', 'd') OR (" +
+				// Arrays of special supported pseudo-types
+				"      elemtyptype = 'p' AND elemtypname IN ('record', 'void')" +
+				// Array of user-defined free-standing composites (not table composites) by default
+				"    ) OR (elemtyptype = 'c' AND elemrelkind='c')" +
+				"  )" +
+				") ORDER BY ord")) {
+			assertTrue(rs.next());
+		}
+
 		stat.execute("CREATE TABLE test2 (id INT PRIMARY KEY, x1 VARCHAR)");
 		stat.execute("INSERT INTO test2 (id, x1) VALUES (1, 'test')");
 		addBinaryOid(PgServer.PG_TYPE_VARCHAR, false);
@@ -594,7 +647,7 @@ public class TestPgClients {
 				"ty.typname FROM pg_attribute at LEFT JOIN pg_type ty ON (ty.oid = at.atttypid) " +
 				"WHERE attrelid=?::oid AND attnum = ANY ((SELECT con.conkey FROM pg_class rel " +
 				"LEFT OUTER JOIN pg_constraint con ON con.conrelid=rel.oid AND con.contype='p' " +
-				"WHERE rel.relkind IN ('r','s','t') AND rel.oid = ?::oid)::oid[])\r\n")) {
+				"WHERE rel.relkind IN ('r','s','t') AND rel.oid = ?::oid)::oid[])")) {
 			ps.setInt(1, oid);
 			ps.setInt(2, oid);
 			try (ResultSet rs = ps.executeQuery()) {
@@ -967,8 +1020,7 @@ public class TestPgClients {
 				"JOIN pg_namespace nsp ON nsp.oid = T.typnamespace " +
 				"LEFT JOIN pg_class ct ON ct.oid = T.typrelid AND ct.relkind <> 'c' " +
 				"WHERE ( T.typtype != 'd' AND T.typtype != 'p' AND T.typcategory != 'A' ) " +
-				"AND (ct.oid IS NULL OR ct.oid = 0) -- filter for tables\r\n" +
-				"AND nsp.nspname =  'public'")) {
+				"AND (ct.oid IS NULL OR ct.oid = 0) AND nsp.nspname =  'public'")) {
 			// just no exception
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT att.attname AS column_name, " +
@@ -1202,11 +1254,11 @@ public class TestPgClients {
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.relname, " +
 				"pg_catalog.pg_get_userbyid(c.relowner)  AS relowner, " +
-				"pg_catalog.obj_description(c.oid, 'pg_class') AS relcomment\r\n" +
+				"pg_catalog.obj_description(c.oid, 'pg_class') AS relcomment " +
 				"FROM pg_catalog.pg_class c " +
 				"LEFT JOIN pg_catalog.pg_namespace n ON (n.oid = c.relnamespace) " +
 				"WHERE (n.nspname='public') AND (c.relkind = 'v'::\"char\") " +
-				"ORDER BY relname\r\n")) {
+				"ORDER BY relname")) {
 			assertFalse(rs.next());
 		}
 		try (ResultSet rs = stat.executeQuery("SELECT c.oid AS conid, c.contype, " +

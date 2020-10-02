@@ -17,6 +17,15 @@ Known issue:
 
 - Unable to insert in DataGrid, due to uncommitted `INSERT INTO ... RETURNING ...`
 
+### Npgsql
+
+Npgsql 4.0.11 tested.
+
+Known issues:
+
+- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) or `ARRAY` columns
+- Npgsql 4.1.x not supported, due to deprecated floating-point date/time format
+
 ### pgcli
 
 pgcli 3.0.0 tested.
