@@ -355,7 +355,7 @@ public class PgServerThreadCompat implements Runnable {
 				"typelem, typbasetype, typtypmod, typnotnull, typinput, 0 typreceive, " +
 				"FALSE typbyval, NULL typcategory, NULL typcollation, NULL typdefault, " +
 				"0 typndims, 0 typarray, ${owner} typowner, NULL typalign, NULL typstorage " +
-				"FROM pg_type");
+				"FROM pg_type"); // WHERE oid NOT IN (1083, 1266, 1114, 1184)");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.id = c.relnamespace WHERE c.relkind = 'v'");
 		addTable("INFORMATION_SCHEMA.character_sets", "SELECT 'UTF8' character_set_name");
@@ -1313,8 +1313,9 @@ public class PgServerThreadCompat implements Runnable {
 
 	// See PgServerThread.writeDataColumn(), binary part
 	private static final Set<Integer> BINARY_TYPES = IntStream.of(new int[] {
-		PgServer.PG_TYPE_INT2, PgServer.PG_TYPE_INT4, PgServer.PG_TYPE_INT8,
-		PgServer.PG_TYPE_FLOAT4, PgServer.PG_TYPE_FLOAT8, PgServer.PG_TYPE_BYTEA,
+		PgServer.PG_TYPE_BOOL, PgServer.PG_TYPE_INT2, PgServer.PG_TYPE_INT4,
+		PgServer.PG_TYPE_INT8, PgServer.PG_TYPE_FLOAT4, PgServer.PG_TYPE_FLOAT8,
+		PgServer.PG_TYPE_NUMERIC, PgServer.PG_TYPE_BYTEA,
 		PgServer.PG_TYPE_DATE, PgServer.PG_TYPE_TIME, PgServer.PG_TYPE_TIMETZ,
 		PgServer.PG_TYPE_TIMESTAMP, PgServer.PG_TYPE_TIMESTAMPTZ,
 	}).boxed().collect(Collectors.toSet());
