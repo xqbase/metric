@@ -45,6 +45,7 @@ public class PgServerCompat implements Service {
 	}
 
 	PgServer server = new PgServer();
+	boolean npgsql41 = false;
 
 	@Override
 	public void init(String... args) throws Exception {
@@ -127,6 +128,10 @@ public class PgServerCompat implements Service {
 	@Override
 	public boolean isDaemon() {
 		return server.isDaemon();
+	}
+
+	public void setNpgsql41(boolean npgsql41) {
+		this.npgsql41 = npgsql41;
 	}
 
 	void trace(String s) {

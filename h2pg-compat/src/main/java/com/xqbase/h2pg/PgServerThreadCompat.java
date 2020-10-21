@@ -345,7 +345,7 @@ public class PgServerThreadCompat implements Runnable {
 				"UNION ALL SELECT 'max_index_keys', '32', ''");
 		addTable("pg_tables", "SELECT n.nspname schemaname, c.relname tablename FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.id = c.relnamespace WHERE c.relkind IN ('r', 'p')");
-		addTable("pg_type", "SELECT oid, (CASE oid " +
+		String pgType = "SELECT oid, (CASE oid " +
 				"WHEN 16 THEN 'bool' WHEN 17 THEN 'bytea' WHEN 20 THEN 'int8' " +
 				"WHEN 21 THEN 'int2' WHEN 23 THEN 'int4' WHEN 25 THEN 'text' " +
 				"WHEN 700 THEN 'float4' WHEN 701 THEN 'float8' WHEN 1042 THEN 'bpchar' " +
@@ -355,7 +355,9 @@ public class PgServerThreadCompat implements Runnable {
 				"typelem, typbasetype, typtypmod, typnotnull, typinput, 0 typreceive, " +
 				"FALSE typbyval, NULL typcategory, NULL typcollation, NULL typdefault, " +
 				"0 typndims, 0 typarray, ${owner} typowner, NULL typalign, NULL typstorage " +
-				"FROM pg_type"); // WHERE oid NOT IN (1083, 1266, 1114, 1184)");
+				"FROM pg_type";
+		addTable("pg_type", pgType);
+		addTable("pg_type_npgsql41", pgType + " WHERE oid NOT IN (1083, 1266, 1114, 1184)");
 		addTable("pg_views", "SELECT n.nspname schemaname, c.relname viewname FROM pg_class c " +
 				"LEFT JOIN pg_namespace n ON n.id = c.relnamespace WHERE c.relkind = 'v'");
 		addTable("INFORMATION_SCHEMA.character_sets", "SELECT 'UTF8' character_set_name");
@@ -722,6 +724,9 @@ public class PgServerThreadCompat implements Runnable {
 		if (fi instanceof Table) {
 			Table table = (Table) fi;
 			String name = table.getFullyQualifiedName();
+			if (server.npgsql41 && name.equals("pg_type")) {
+				name += "_npgsql41";
+			}
 			SelectBody sb = tableMap.get(name);
 			if (sb == null) {
 				switch (name) {
