@@ -1396,7 +1396,6 @@ public class PgServerThreadCompat implements Runnable {
 					resultColumnFormat[i] = 0;
 				}
 			}
-			replaced = true;
 			break;
 		case 'P':
 			z1 = findZero(data, 5, data.length) + 1;

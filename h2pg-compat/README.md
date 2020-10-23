@@ -19,12 +19,12 @@ Known issue:
 
 ### Npgsql
 
-Npgsql 4.0.11 tested.
+Npgsql 4.0.11 and 4.1.5 tested.
 
 Known issues:
 
-- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) or `ARRAY` columns
-- Npgsql 4.1.x not supported, due to deprecated floating-point date/time format
+- Unable to select `ARRAY` columns (should convert with `::TEXT`)
+- Should use `PgServerCompat.setNpgsql41(true)` to support Npgsql 4.1.x (date/time format not supported, should convert with `::TEXT`)
 
 ### pgcli
 
@@ -104,12 +104,12 @@ TablePlus 3.6.3 and TablePlus iOS 3.8.0 tested.
 
 ### dbForge Studio
 
-dbForge Studio 2.2.207 tested.
+dbForge Studio 2.3.237 tested.
 
 Known issues:
 
 - Unable to edit in DataGrid
-- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) or `ARRAY` columns
+- Unable to select `ARRAY` columns (should convert with `::TEXT`)
 
 ### Tableau
 
@@ -122,10 +122,6 @@ Known Issue:
 ### Power BI
 
 Power BI 2.83.5894.721 tested.
-
-Known Issue:
-
-- Unable to select `NUMERIC` (converted from `SUM(BIGINT)`) columns via native PostgreSQL (ODBC works with `NUMERIC`)
 
 ### Pentaho
 
