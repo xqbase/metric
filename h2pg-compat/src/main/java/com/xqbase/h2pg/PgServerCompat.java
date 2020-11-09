@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.h2.server.Service;
 import org.h2.server.pg.PgServer;
 import org.h2.server.pg.PgServerThread;
-import org.h2.util.NetUtils2;
+import org.h2.util.Utils10;
 
 public class PgServerCompat implements Service {
 	private static Field stop, serverSocket, running, pid;
@@ -73,7 +73,7 @@ public class PgServerCompat implements Service {
 					trace("Connection not allowed");
 					s.close();
 				} else {
-					NetUtils2.setTcpQuickack(s, true);
+					Utils10.setTcpQuickack(s, true);
 					PgServerThreadCompat c = new PgServerThreadCompat(s, this);
 					((Set<PgServerThread>) running.get(server)).add(c.thread);
 					int id = ((AtomicInteger) pid.get(server)).incrementAndGet();
