@@ -1430,6 +1430,7 @@ public class TestPgClients {
 				"LEFT JOIN pg_proc p ON t.tgfoid = p.oid " +
 				"LEFT JOIN pg_namespace np ON p.pronamespace = np.oid " +
 				"LEFT JOIN (((SELECT 4, 'INSERT' UNION ALL SELECT 8, 'DELETE') " +
+				// JSqlParse 4.0 doesn't work. see https://github.com/JSQLParser/JSqlParser/issues/1094
 				"UNION ALL SELECT 16, 'UPDATE') UNION ALL SELECT 32, 'TRUNCATE') " +
 				"em(num, text) ON ((t.tgtype)::integer & em.num) <> 0 " +
 				"LEFT OUTER JOIN (SELECT oid, relnamespace, relname FROM pg_class) cs " +

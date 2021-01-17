@@ -144,8 +144,9 @@ public class PgServerThreadCompat implements Runnable {
 			"AND ct.relname = t.table_name AND ct.relkind = 'r' ";
 	private static final String[] REPLACE_FROM = {
 		"(indpred IS NOT NULL)",
-		// "check", "deferrable" and "tablespace" are keywords in JSqlParser
+		// "check", "default" (4.0), "deferrable" and "tablespace" are keywords in JSqlParser
 		" as check,",
+		" AS default,",
 		", condeferrable::int AS deferrable, ",
 		"tablespace) AS tablespace",
 		"')) as tablespace, ",
@@ -190,6 +191,7 @@ public class PgServerThreadCompat implements Runnable {
 	private static final String[] REPLACE_TO = {
 		"(NVL2(indpred, TRUE, FALSE))",
 		" as \"check\",",
+		" AS \"default\",",
 		", 0 \"deferrable\", ",
 		"tablespace) \"tablespace\"",
 		"')) as \"tablespace\", ",
@@ -1141,6 +1143,7 @@ public class PgServerThreadCompat implements Runnable {
 			// JSqlParser cannot parse SELECT a = b, ... Just replace:
 			// SELECT n.nspname = ANY(current_schemas(true)) -> SELECT n.nspname = 'public'
 			// and ignore JSqlParser's failure
+			// TODO Should remove when using JSqlParser 4.0
 			sql = "SELECT n.nspname = 'public', " + sql.substring(47);
 			replaced = true;
 		} else if (sql.startsWith("SELECT (nc.nspname)::information_schema.sql_identifier")) {
