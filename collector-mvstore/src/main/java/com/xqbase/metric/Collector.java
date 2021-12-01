@@ -82,6 +82,7 @@ public class Collector {
 	}
 
 	private static Service service = new Service();
+	private static File mvFile;
 	private static MVStore mv;
 	private static Map<String, Long> sizeTable;
 	private static Map<String, Integer> aggregatedTable;
@@ -244,9 +245,11 @@ public class Collector {
 		// Put metric size
 		sizeTable.forEach((name, size) ->
 				Metric.put("metric.size", size.longValue(), "name", name));
-		// MVStore fill rate
+		// Put MVStore metrics
+		Metric.put("metric.mvstore.size", mvFile.length());
 		Metric.put("metric.mvstore.fill_rate", mv.getFillRate(), "type", "store");
 		Metric.put("metric.mvstore.fill_rate", mv.getChunksFillRate(), "type", "chunks");
+		Metric.put("metric.mvstore.fill_rate", mv.getRewritableChunksFillRate(), "type", "rewritable_chunks");
 		Metric.put("metric.mvstore.cache_size_used", mv.getCacheSizeUsed());
 		Metric.put("metric.mvstore.cache_hit_ratio", mv.getCacheHitRatio());
 	}
@@ -458,7 +461,9 @@ public class Collector {
 		) {
 			String dataDir = Conf.getAbsolutePath("data");
 			new File(dataDir).mkdirs();
-			mv = new MVStore.Builder().fileName(dataDir + "/metric.mv").
+			String fileName = dataDir + "/metric.mv";
+			mvFile = new File(fileName);
+			mv = new MVStore.Builder().fileName(fileName).
 					compress().autoCompactFillRate(80).open();
 			mv.setAutoCommitDelay(10_000);
 			sizeTable = mv.openMap("_meta.size");

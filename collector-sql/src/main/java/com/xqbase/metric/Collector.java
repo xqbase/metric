@@ -272,7 +272,7 @@ public class Collector {
 		return tags;
 	}
 
-	private static Method getFillRate, getChunksFillRate;
+	private static Method getFillRate, getChunksFillRate, getRewritableChunksFillRate;
 	private static Method getCacheSizeUsed, getCacheHitRatio;
 
 	private static void minutely(int minute) throws SQLException {
@@ -333,6 +333,8 @@ public class Collector {
 					invoke(mvStore)).doubleValue(), "type", "store");
 			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
 					invoke(mvStore)).doubleValue(), "type", "chunks");
+			Metric.put("metric.mvstore.fill_rate", ((Number) getRewritableChunksFillRate.
+					invoke(mvStore)).doubleValue(), "type", "rewritable_chunks");
 			Metric.put("metric.mvstore.cache_size_used",
 					((Number) getCacheSizeUsed.invoke(mvStore)).doubleValue());
 			Metric.put("metric.mvstore.cache_hit_ratio",
@@ -553,6 +555,7 @@ public class Collector {
 			Class<?> mvStoreClass = Class.forName("org.h2.mvstore.MVStore");
 			getFillRate = mvStoreClass.getMethod("getFillRate");
 			getChunksFillRate = mvStoreClass.getMethod("getChunksFillRate");
+			getRewritableChunksFillRate = mvStoreClass.getMethod("getRewritableChunksFillRate");
 			getCacheSizeUsed = mvStoreClass.getMethod("getCacheSizeUsed");
 			getCacheHitRatio = mvStoreClass.getMethod("getCacheHitRatio");
 		} catch (ReflectiveOperationException e) {
@@ -607,7 +610,7 @@ public class Collector {
 						"/metric;mode=mysql;compress=true;" +
 						"cache_size=32768;lazy_query_execution=1;" +
 						"db_close_on_exit=false;write_delay=10000;" +
-						"max_compact_time=0;max_compact_count=80";
+						"max_compact_time=0;auto_compact_fill_rate=80";
 			} else if (url.endsWith(":derby:metric")) {
 				String dataDir = Conf.getAbsolutePath("data");
 				new File(dataDir).mkdir();
@@ -638,11 +641,11 @@ public class Collector {
 					Class<?> connClz = Class.forName("org.h2.jdbc.JdbcConnection");
 					Object conn = h2PoolEntry.getObject().unwrap(connClz);
 					Object session = connClz.getMethod("getSession").invoke(conn);
-					Object database = Class.forName("org.h2.engine.Session").
+					Object database = Class.forName("org.h2.engine.SessionLocal").
 							getMethod("getDatabase").invoke(session);
 					Object store = Class.forName("org.h2.engine.Database").
 							getMethod("getStore").invoke(database);
-					mvStore = Class.forName("org.h2.mvstore.db.MVTableEngine$Store").
+					mvStore = Class.forName("org.h2.mvstore.db.Store").
 							getMethod("getMvStore").invoke(store);
 					if (h2Port > 0) {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);

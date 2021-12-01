@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.xqbase</groupId>
 	<artifactId>xqbase-metric-collector-mvstore</artifactId>
-	<version>0.2.13</version>
+	<version>0.2.14</version>
 	<packaging>jar</packaging>
 	<name>XQBase Metric Collector</name>
 	<description>a lightweight metric framework for aggregating, collecting and showing metric data - collector part</description>
@@ -85,7 +85,7 @@
 		<dependency>
 			<groupId>com.h2database</groupId>
 			<artifactId>h2-mvstore</artifactId>
-			<version>1.4.200</version>
+			<version>2.0.202</version>
 		</dependency>
 	</dependencies>
 </project>
