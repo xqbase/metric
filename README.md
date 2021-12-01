@@ -8,7 +8,7 @@ For basic concepts of metric, see [Metric and Dashboard](http://www.slideshare.n
 
 Metric server did 2 big changes since 2015:
 
-1. It supports SQL Databases, [VMStore](http://www.h2database.com/html/mvstore.html) or File as metric storage, except for MongoDB;
+1. It supports SQL Databases, [MVStore](http://www.h2database.com/html/mvstore.html) or File as metric storage, except for MongoDB;
 2. Dashboard service is embedded in Metric Collector.
 
 So Metric Collector now has 4 projects:
