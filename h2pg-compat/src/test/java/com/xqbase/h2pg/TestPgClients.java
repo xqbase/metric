@@ -1870,13 +1870,15 @@ public class TestPgClients {
 			assertEquals(2, rs.getInt("sum_id_ok"));
 			assertFalse(rs.next());
 		}
-		// #8
+		// #8 Where did it come from?
+		/*
 		stat.execute("SELECT TOP 1 * INTO \"temp\" FROM (SELECT 1 AS COL) AS CHECKTEMP");
 		try (ResultSet rs = stat.executeQuery("SELECT \"COL\" FROM temp")) {
 			assertTrue(rs.next());
 			assertEquals(1, rs.getInt("col"));
 			assertFalse(rs.next());
 		}
+		*/
 	}
 
 	@Test
