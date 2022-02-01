@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.h2.command.CommandInterface;
-import org.h2.command.Parser;
+import org.h2.command.Token;
 import org.h2.engine.SessionLocal;
 import org.h2.result.ResultInterface;
 import org.h2.server.pg.PgServer;
@@ -272,7 +272,7 @@ public class PgServerThreadCompat implements Runnable {
 			setThread = getMethod("setThread", Thread.class);
 			newThread = PgServerThread.class.getDeclaredConstructor(Socket.class, PgServer.class);
 			newThread.setAccessible(true);
-			Field tokensField = Parser.class.getDeclaredField("TOKENS");
+			Field tokensField = Token.class.getDeclaredField("TOKENS");
 			tokensField.setAccessible(true);
 			tokens = (String[]) tokensField.get(null);
 		} catch (ReflectiveOperationException e) {
