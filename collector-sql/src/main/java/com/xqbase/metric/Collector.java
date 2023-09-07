@@ -136,7 +136,7 @@ public class Collector {
 	private static boolean verbose;
 	private static File mvStoreFile;
 	private static ConnectionPool.Entry h2PoolEntry;
-	private static Object mvStore;
+	private static Object mvStore, fileStore;
 
 	private static boolean insert(String sql, Object... in) throws SQLException {
 		return insert(null, sql, in);
@@ -272,8 +272,10 @@ public class Collector {
 		return tags;
 	}
 
-	private static Method getFillRate, getChunksFillRate, getRewritableChunksFillRate;
-	private static Method getCacheSizeUsed, getCacheHitRatio;
+	private static Method getFillRate, getCacheSizeUsed;
+	// removed since H2 2.2.x
+	// private static Method getCacheHitRatio;
+	private static Method getChunksFillRate, getRewritableChunksFillRate;
 
 	private static void minutely(int minute) throws SQLException {
 		// Insert aggregation-during-collection metrics
@@ -331,14 +333,14 @@ public class Collector {
 		try {
 			Metric.put("metric.mvstore.fill_rate", ((Number) getFillRate.
 					invoke(mvStore)).doubleValue(), "type", "store");
-			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
-					invoke(mvStore)).doubleValue(), "type", "chunks");
-			Metric.put("metric.mvstore.fill_rate", ((Number) getRewritableChunksFillRate.
-					invoke(mvStore)).doubleValue(), "type", "rewritable_chunks");
 			Metric.put("metric.mvstore.cache_size_used",
 					((Number) getCacheSizeUsed.invoke(mvStore)).doubleValue());
-			Metric.put("metric.mvstore.cache_hit_ratio",
-					((Number) getCacheHitRatio.invoke(mvStore)).doubleValue());
+			// Metric.put("metric.mvstore.cache_hit_ratio",
+			//		((Number) getCacheHitRatio.invoke(mvStore)).doubleValue());
+			Metric.put("metric.mvstore.fill_rate", ((Number) getChunksFillRate.
+					invoke(fileStore)).doubleValue(), "type", "chunks");
+			Metric.put("metric.mvstore.fill_rate", ((Number) getRewritableChunksFillRate.
+					invoke(fileStore)).doubleValue(), "type", "rewritable_chunks");
 		} catch (ReflectiveOperationException e) {
 			Log.w("" + e);
 		}
@@ -554,10 +556,13 @@ public class Collector {
 		try {
 			Class<?> mvStoreClass = Class.forName("org.h2.mvstore.MVStore");
 			getFillRate = mvStoreClass.getMethod("getFillRate");
-			getChunksFillRate = mvStoreClass.getMethod("getChunksFillRate");
-			getRewritableChunksFillRate = mvStoreClass.getMethod("getRewritableChunksFillRate");
 			getCacheSizeUsed = mvStoreClass.getMethod("getCacheSizeUsed");
-			getCacheHitRatio = mvStoreClass.getMethod("getCacheHitRatio");
+			// getCacheHitRatio = mvStoreClass.getMethod("getCacheHitRatio");
+			Class<?> fileStoreClass = Class.forName("org.h2.mvstore.FileStore");
+			getChunksFillRate = fileStoreClass.getMethod("getChunksFillRate");
+			getRewritableChunksFillRate = fileStoreClass.
+					getDeclaredMethod("getRewritableChunksFillRate");
+			getRewritableChunksFillRate.setAccessible(true);
 		} catch (ReflectiveOperationException e) {
 			Log.w("" + e);
 		}
@@ -649,6 +654,8 @@ public class Collector {
 							getMethod("getStore").invoke(database);
 					mvStore = Class.forName("org.h2.mvstore.db.Store").
 							getMethod("getMvStore").invoke(store);
+					fileStore = Class.forName("org.h2.mvstore.MVStore").
+							getMethod("getFileStore").invoke(mvStore);
 					if (h2Port > 0) {
 						h2Server = startServer(h2Port, "Tcp", h2DataDir);
 					}

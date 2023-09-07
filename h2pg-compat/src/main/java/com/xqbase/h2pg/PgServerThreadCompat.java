@@ -693,17 +693,16 @@ public class PgServerThreadCompat implements Runnable {
 						value = ((StringValue) ceLeft).getValue();
 					}
 				}
-				if (value == null) {
-					// value = ANY(array) -> ARRAY_CONTAINS(array, value)
-					// ANY(SubSelect) is parsed as AnyComparisonExpression
-					parentSet.accept(arrayContains(exp0, left));
-				} else {
+				// value = ANY(array) is fully supported since H2 2.2.220:
+				// https://h2database.com/html/grammar.html#quantified_comparison_right_hand_side
+				// parentSet.accept(arrayContains(exp0, left));
+				if (value != null) {
 					InExpression in = new InExpression(left, getExpressionList(value));
 					replace(left, in::setLeftExpression);
 					parentSet.accept(in);
+					replaced = true;
+					return;
 				}
-				replaced = true;
-				return;
 			}
 		}
 		if (left instanceof Column && right instanceof StringValue &&
