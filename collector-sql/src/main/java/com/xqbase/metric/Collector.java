@@ -131,7 +131,7 @@ public class Collector {
 
 	private static Service service = new Service();
 	private static ConnectionPool DB = null;
-	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+	private static int serverId, expire, expireQuarter, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 	private static File mvStoreFile;
@@ -382,7 +382,7 @@ public class Collector {
 			}
 			long deletedQuarter = sizeRow.getLong("s");
 			// Aggregate minute to quarter
-			int start = name.aggregatedTime == 0 ? quarter - expire : name.aggregatedTime;
+			int start = name.aggregatedTime == 0 ? quarter - expireQuarter : name.aggregatedTime;
 			for (int i = start + 1; i <= quarter; i ++) {
 				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
 				DB.query(row -> {
@@ -574,6 +574,7 @@ public class Collector {
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
+		expireQuarter = (expire + 14) / 15;
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));

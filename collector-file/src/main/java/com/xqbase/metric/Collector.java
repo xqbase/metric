@@ -81,7 +81,7 @@ public class Collector {
 	private static Service service = new Service();
 	private static LockMap<NameTime> lockMap = new LockMap<>();
 	private static String dataDir;
-	private static int expire, tagsExpire, maxTags, maxTagValues,
+	private static int expire, expireQuarter, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 	private static volatile Map<String, long[]> namesCache = Collections.emptyMap();
@@ -283,12 +283,12 @@ public class Collector {
 			delete(name, quarter * 15 - expire);
 			delete("_quarter." + name, quarter - expire);
 			// 3. Aggregate minute to quarter
-			int start = aggregated == 0 ? quarter - expire : aggregated;
+			int start = aggregated == 0 ? quarter - expireQuarter : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
 				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
 				int i15 = i * 15;
 				long t = System.currentTimeMillis();
-				for (int j = i * 15 - 14; j <= i15; j ++) {
+				for (int j = i15 - 14; j <= i15; j ++) {
 					String filename = dataDir + name + "/" + j;
 					File file = new File(filename);
 					if (!file.exists()) {
@@ -468,6 +468,7 @@ public class Collector {
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
+		expireQuarter = (expire + 14) / 15;
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));

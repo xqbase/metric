@@ -88,7 +88,7 @@ public class Collector {
 	private static Map<String, Integer> aggregatedTable;
 	private static Map<String, String> tagsTable;
 	private static MVMap<Integer, Integer> sequenceTable;
-	private static int expire, tagsExpire, maxTags, maxTagValues,
+	private static int expire, expireQuarter, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
@@ -300,7 +300,7 @@ public class Collector {
 			// 3. Aggregate minute to quarter
 			long t = System.currentTimeMillis();
 			int keycount = 0;
-			int start = aggregated == 0 ? quarter - expire : aggregated;
+			int start = aggregated == 0 ? quarter - expireQuarter : aggregated;
 			for (int i = start + 1; i <= quarter; i ++) {
 				Map<Map<String, String>, MetricValue> accMetricMap = new HashMap<>();
 				Iterator<Long> it = minuteTable.keyIterator(fromLong(i * 15 - 14));
@@ -436,6 +436,7 @@ public class Collector {
 		String host = p.getProperty("host");
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
+		expireQuarter = (expire + 14) / 15;
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));

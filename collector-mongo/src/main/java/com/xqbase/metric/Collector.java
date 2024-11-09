@@ -116,7 +116,7 @@ public class Collector {
 	private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
 
 	private static Service service = new Service();
-	private static int serverId, expire, tagsExpire, maxTags, maxTagValues,
+	private static int serverId, expire, expireQuarter, tagsExpire, maxTags, maxTagValues,
 			maxTagCombinations, maxTagNameLen, maxTagValueLen;
 	private static boolean verbose;
 
@@ -269,7 +269,7 @@ public class Collector {
 			// Aggregate to quarter
 			Document query = __("name", name);
 			Document aggregatedRow = aggregated.find(query).projection(PROJ_TIME).first();
-			int start = aggregatedRow == null ? quarter - expire :
+			int start = aggregatedRow == null ? quarter - expireQuarter :
 					getInt(aggregatedRow, "time");
 			for (int i = start + 1; i <= quarter; i ++) {
 				List<Document> rows = new ArrayList<>();
@@ -385,6 +385,7 @@ public class Collector {
 		host = host == null || host.isEmpty() ? "0.0.0.0" : host;
 		serverId = Numbers.parseInt(p.getProperty("server_id"), 0);
 		expire = Numbers.parseInt(p.getProperty("expire"), 2880);
+		expireQuarter = (expire + 14) / 15;
 		tagsExpire = Numbers.parseInt(p.getProperty("tags_expire"), 96);
 		maxTags = Numbers.parseInt(p.getProperty("max_tags"));
 		maxTagValues = Numbers.parseInt(p.getProperty("max_tag_values"));
