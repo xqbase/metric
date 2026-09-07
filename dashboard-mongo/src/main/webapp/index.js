@@ -1,5 +1,6 @@
-var html = "<li><a href=\"#\" src=\"all.html\">All Metrics</a></li>";
+var html = "";
 var navLen = INDEX_NAV.length;
+var hasActive = false;
 for (var i = 0; i < INDEX_NAV.length; i ++) {
 	var entry = INDEX_NAV[i];
 	if (entry.length <= 1) {
@@ -15,11 +16,16 @@ for (var i = 0; i < INDEX_NAV.length; i ++) {
 		src += "&_until=" + (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 60000 + 1440);
 	}
 	var active = entry.length > 7 && entry[7];
-	html += "<li" + (active ? " class=\"active\" " : "") + "><a href=\"#\" src=\"" + src + "\">" + entry[0] + "</a></li>";
+	html += "<li" + (active ? " class=\"active\"" : "") + "><a href=\"#\" src=\"" + src + "\">" + entry[0] + "</a></li>";
 	if (active) {
 		$("#dashboard iframe").attr("src", src);
+		hasActive = true;
 	}
 }
+if (!hasActive) {
+	$("#dashboard iframe").attr("src", "all.html");
+}
+html = "<li" + (hasActive ? "" : " class=\"active\"") + "><a href=\"#\" src=\"all.html\">All Metrics</a></li>" + html;
 $("#nav .nav").html(html);
 $("#nav a").click(function() {
 	$(this).tab("show");

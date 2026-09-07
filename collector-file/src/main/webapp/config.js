@@ -13,4 +13,6 @@ var INDEX_NAV = [
 	["Throughput", "metric.throughput", "sum", "remote_addr", "", 1],
 	["Tag Values", "metric.tags.values", "sum", "name", "", 15],
 	["Tag Combinations", "metric.tags.combinations", "sum", "name", "", 15],
+	["Metric CPU", "metric.server.cpu", "avg", "type", "", 15],
+	["Metric File Op", "metric.file.elapsed", "sum", "command", "", 15],
 ];
